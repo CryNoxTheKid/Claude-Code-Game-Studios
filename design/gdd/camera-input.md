@@ -186,6 +186,8 @@ unnecessary device-ID logic here later.
 | Scene/World Management | This system depends on | Listens for the transition-begin/-complete signal to enter/exit Suspended state |
 | Voxel World | (indirect only, via Building System) | See Interactions — no direct call |
 | Building System | Depended on by | Consumes InputMap action signals and the mouse-world-ray query |
+| Building UI | Depended on by | Registers its bindings (`tool_select_1..5`, `time_pause`, `time_speed_up/down`) under this system's action ownership (its Rule 12); follows Suspended (added 2026-07-10, cross-review bidirectional fix) |
+| Villager Info UI | Depended on by | Consumes the mouse-world-ray + click action in Idle for villager selection; follows Suspended (added 2026-07-10, cross-review bidirectional fix) |
 
 ## Tuning Knobs
 

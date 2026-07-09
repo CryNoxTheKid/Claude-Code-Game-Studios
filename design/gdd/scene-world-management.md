@@ -152,6 +152,8 @@ once it is designed.)*
 | Villager AI & Behavior | Depended on by (structural) | Same hosting relationship |
 | Building System | Depended on by (structural) | Same hosting relationship |
 | Dungeon System | Depended on by (Vertical Slice+) | Defines dungeon scene content; this system only handles load/unload lifecycle |
+| Building UI | Depended on by (structural) | Hosting; hides/suspends via the Suspended propagation (added 2026-07-10, cross-review bidirectional fix) |
+| Villager Info UI | Depended on by (structural) | Hosting; same Suspended propagation (added 2026-07-10, cross-review bidirectional fix) |
 
 ## Tuning Knobs
 

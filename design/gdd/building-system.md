@@ -450,7 +450,8 @@ furniture (`bed`).
 
 | System | Tier | GDD Status | What it consumes |
 |--------|------|-----------|------------------|
-| Build Validation & Navigability | MVP | Undesigned | Completed structures + construction-completed signals *(provisional)* |
+| Villager AI & Behavior | MVP | ✅ Designed | The mutual seam's other direction: consumes this system's construction-job queue as its work supply (its Rules 4–7) — listed upstream above for what this system consumes FROM it, listed here because it cannot do its Work activity without this queue (added 2026-07-10, cross-review fix) |
+| Build Validation & Navigability | MVP | ✅ Designed | Completed structures + construction-completed signals (contract confirmed by build-validation-navigability.md) |
 | Building UI | MVP | Undesigned | Tool state, palette selection, wall-height, roof formation, undo/redo state, validity feedback *(provisional)* |
 | Onboarding / Tutorial | Vertical Slice | Undesigned | The MVP toolset as teachable verbs *(provisional)* |
 | Township Progression | Alpha | Undesigned | Built structures as prosperity inputs *(provisional — prosperity variable itself still open)* |
@@ -461,7 +462,7 @@ furniture (`bed`).
 
 | Knob | Default | Safe Range | Affects |
 |------|---------|-----------|---------|
-| `wall_height` (player-adjustable stepper) | 3 | 1–8 | How tall a one-action wall extrudes (F1). Prototype-validated default. Raising the max above 8 risks accidental towers dominating the silhouette |
+| `wall_height` (player-adjustable stepper) | 3 | 1–8 | How tall a one-action wall extrudes (F1). Prototype-validated default. Raising the max above 8 risks accidental towers dominating the silhouette. **Lockstep invariant**: Build Validation's `max_room_height` (8) must stay ≥ this knob's maximum, and `villager_clearance` (3) equals this knob's default (= minimum walkable interior) — retune together (added 2026-07-10, cross-review fix) |
 | `drag_threshold_px` | 6 | 4–12 | Click-vs-drag feel (F4). Too low: clicks become accidental drags; too high: short drags feel unresponsive. Prototype-validated |
 | `base_build_ticks[block]` | 4 (= 2.0s at 1x) | 1–20 | Construction pacing per block (F3). The core "watching it take shape" pacing — tune against the MVP hypothesis (finishing a small house should feel earned, not tedious) |
 | `base_build_ticks[furniture]` | 8 (= 4.0s at 1x) | 1–40 | Furniture construction pacing (F3) |

@@ -283,6 +283,15 @@ not a guarantee; faster future needs rely on this rule.)
     stable states. If playtests still show band flapping, add a ±1
     display hysteresis as a UI-side tuning — noted in Tuning Knobs, not
     pre-built.
+11. **Recovery source UPGRADED mid-recovery** (the roof completes while
+    the villager is already asleep in the until-now unsheltered bed —
+    Build Validation emits `shelter_status_changed` during Recovering).
+    The source→rate table is re-evaluated per tick: the new (higher) rate
+    applies from the next tick onward; no restart, no signal, no lost
+    progress. The mirror case (downgrade — roof removed mid-sleep)
+    behaves identically with the lower rate. *(Added 2026-07-10 — the
+    cross-review scenario walkthrough found this transition only
+    implicitly defined.)*
 
 ## Dependencies
 
@@ -310,6 +319,7 @@ not a guarantee; faster future needs rely on this rule.)
 | `decay_per_tick[sleep]` | 0.07 | 0.03–0.2 | The session rhythm: ~9 min to urgent at default; 0.2 ≈ tamagotchi territory (avoid) |
 | `base_recovery_per_tick[sleep]` | 0.5 | 0.2–2.0 | Sleep duration (~70s in bed at default) |
 | `ground_penalty` | 0.4 | 0.1–0.8 | How much worse bed-less sleep is — the strength of the "build a bed" signal. Too close to 1.0 kills the furniture hook |
+| `unsheltered_bed_multiplier` | 0.7 | 0.5–0.9 | The middle rung of the recovery ladder (bed outside a valid room). **Invariant: `ground_penalty` < this < 1.0** — outside that order the ladder collapses. Owned HERE (this table is the source of truth); Build Validation supplies only the sheltered flag (added 2026-07-10, cross-review ownership fix) |
 | `urgency_threshold` | 25 | 10–40 | When villagers drop work to satisfy a need |
 | `satisfied_threshold` | 95 | 80–100 | When recovery ends (wake) |
 | `mood_smoothing_ticks` | 40 | 10–120 | Mood inertia — how long a bad night lingers |

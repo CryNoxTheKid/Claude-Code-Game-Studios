@@ -242,6 +242,7 @@ not as formulas.
 
 | System | Tier | GDD Status | What it consumes |
 |--------|------|-----------|------------------|
+| Villager Info UI | MVP | ✅ Designed | The click-ownership rule (armed tool ⇒ Building pipeline; Idle ⇒ villager selection may claim hits — its Rule 1) (added 2026-07-10, cross-review bidirectional fix) |
 | Onboarding / Tutorial | Vertical Slice | Undesigned | The toolbar as the teachable surface *(provisional)* |
 
 ## Tuning Knobs

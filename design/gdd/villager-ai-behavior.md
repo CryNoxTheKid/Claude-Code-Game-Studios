@@ -360,7 +360,8 @@ exists, the vacate request fails and the builder's cell stays deferred
 
 | System | Tier | GDD Status | What it consumes |
 |--------|------|-----------|------------------|
-| Build Validation & Navigability | MVP | Undesigned | The walkability definition (Rules 8–10) as ground truth for reachability *(provisional)* |
+| Building System | MVP | ✅ Designed | The mutual seam's other direction: its construction pipeline cannot complete without this system's labor (job claiming, on-site work — its Core Rule 12); listed upstream above for the queue this system consumes (added 2026-07-10, cross-review fix) |
+| Build Validation & Navigability | MVP | ✅ Designed | The walkability definition (Rules 8–10) as ground truth for reachability (contract confirmed by build-validation-navigability.md) |
 | Needs & Mood System | MVP | Undesigned | Activity state (what the villager is doing) to apply recovery; mutual seam with the upstream row *(provisional)* |
 | Villager Info UI | MVP | Undesigned | Villager name, current activity/state, distress cues *(provisional)* |
 | Professions & Ranks | Alpha | Undesigned | The activity-selection layer professions plug into *(provisional)* |
@@ -510,8 +511,10 @@ testing standards — those ACs do NOT wait for that GDD.)*
 1. **Needs & Mood interface confirmation** — **RESOLVED 2026-07-10**:
    `needs-mood-system.md` confirms the interface — edge-triggered "need
    urgent"/"need satisfied" signals (urgency_threshold=25,
-   satisfied_threshold=95), source-scored recovery (bed 1.0 / ground 0.4
-   via ground_penalty), all three now registered constants.
+   satisfied_threshold=95), source-scored recovery via the 3-tier ladder
+   (sheltered bed 1.0 / unsheltered bed 0.7 / ground 0.4 — shelter flag
+   from Build Validation; this system still reports only bed-vs-ground),
+   all thresholds/multipliers registered constants.
 2. **AI architecture** — behavior tree vs. utility layer vs. plain FSM per
    agent. The 20–30 ceiling explicitly permits deep per-agent AI; the
    choice is architectural, not design. → *AI ADR via `/create-architecture`*

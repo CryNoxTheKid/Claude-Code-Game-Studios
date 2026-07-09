@@ -221,6 +221,7 @@ against memory/draw-call budget. See Tuning Knobs.
 | Villager AI & Behavior | Depended on by | Queries the read API for pathfinding-relevant occupancy |
 | Squad & Combat System | Depended on by (Vertical Slice) | Queries occupancy for line-of-sight/collision |
 | Wave Defense | Depended on by (Vertical Slice) | Queries occupancy; may need to mutate the grid if waves can destroy blocks (see Open Questions) |
+| Build Validation & Navigability | Depended on by | Reads physical occupancy for room/region analysis — read-only, event-driven (added 2026-07-10, cross-review bidirectional fix) |
 
 ## Tuning Knobs
 

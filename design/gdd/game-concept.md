@@ -296,6 +296,18 @@ furnishing a space; folk-tale "the seals that hold back the dark."
 **Core hypothesis**: *"Drawing a room, furnishing it, and watching a villager
 move in and live there is satisfying enough to be the heart of the game."*
 
+> **Test-scope note (2026-07-10 cross-review, user decision)**: the MVP as
+> scoped (1 villager, 1 need, 1 furniture item, free tier-0 materials, no
+> threats) tests the **first ~10 minutes** of the build→furnish→live loop —
+> the moment-to-moment satisfaction of the core verb — NOT sustained
+> engagement. Sustained pull (goals, scarcity, threats, more needs) arrives
+> with Vertical Slice content (doors, food, first wave). Interpret MVP
+> playtest results accordingly: "I built the room, watched the move-in, and
+> then wanted more" is a PASS for this hypothesis, not a failure. Two known
+> MVP gaps are accepted and documented: walls are mechanically inert (see
+> build-validation-navigability.md Edge Case 6) and no scarcity exists —
+> both are Vertical Slice priorities, not MVP defects.
+
 **Required for MVP**:
 1. Draw a room (wall/roof/floor) on a grid, choose material.
 2. Place functional furniture (bed = shelter) inside; build happens over time.

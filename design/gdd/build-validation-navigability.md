@@ -239,9 +239,15 @@ registering as rooms.
    natural enclosure in MVP.
 6. **Roof-on-pillars (no walls).** Valid room by Rule 2 — the definition
    requires roof, floor, size, and reachability, not wall coverage.
-   **Accepted for MVP**: shelter's essence is the roof; a wall-coverage
-   requirement is a Vertical Slice refinement (Open Questions). Players
-   discovering the "cozy carport" are playing correctly.
+   **Accepted for MVP as a KNOWN design gap** (2026-07-10 cross-review,
+   user decision): with zero material cost, the minimal carport reaches
+   full shelter (1.0) — walls contribute no mechanical value at MVP,
+   which the cross-review flagged as failing Pillar 1's own design test
+   for walls specifically. This is a deliberate MVP scope-narrowing, NOT
+   an oversight: the wall-coverage requirement (Open Question 1) is
+   **priority #1 for this GDD's Vertical Slice revision**, and MVP
+   playtest feedback about "why bother with walls" should be read as
+   confirming this known gap, not as a new finding.
 7. **A hole appears in the roof** (block removed). Cells under the hole
    lose candidate status; the region shrinks or splits; if what remains
    meets Rule 2 it stays a room. A bed now under open sky flips to
@@ -386,7 +392,9 @@ Knob invariants).*
 
 1. **Wall coverage at Vertical Slice** — should a valid room eventually
    require some wall enclosure (retiring the "cozy carport", Edge Case
-   6)? Decide together with doors. → *this GDD's VS revision*
+   6)? Decide together with doors. **Elevated to VS priority #1 by the
+   2026-07-10 cross-review** (walls are mechanically inert at MVP — a
+   known, accepted gap that VS must close). → *this GDD's VS revision*
 2. **Doors** — when VS adds them, an opening becomes a formal object
    (walkable when open). The room definition (Rule 2) should survive
    unchanged; verify. → *VS revision + Building System OQ 6*

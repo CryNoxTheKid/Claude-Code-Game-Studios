@@ -108,7 +108,10 @@ manually before production.)*
 - **Building System** (MVP, downstream): construction progress advances
   per tick event (its Formula F3, incl. a burst rule capping completions
   per frame); pause halts construction, time-warp accelerates it.
-- **Main Menu & Settings** (Alpha, downstream): will likely host the
+- **Building UI** (MVP, downstream): owns the MVP time controls (pause on
+  Space, 1x/2x/3x buttons top-right — building-ui.md Rules 1/10).
+- **Main Menu & Settings** (Alpha, downstream): settings-level options
+  only; formerly expected to host the
   pause/speed control UI (Cross-Reference, GDD not yet authored).
 
 ## Formulas
@@ -192,7 +195,8 @@ project's dependency-injection-over-singleton preference.)*
 | Building System | Depended on by | Consumes tick events for build-over-time construction progress (its Formula F3) |
 | Squad & Combat System | Depended on by | Consumes game delta and/or tick signal |
 | Audio System | Depended on by | Likely uses tick/game delta for ambient timing (TBD when authored) |
-| Main Menu & Settings | Depended on by | Hosts the pause/speed control UI |
+| Building UI | Depended on by | Owns the MVP time controls — calls the pause/warp API, displays the returned state (Core Rule 2 resolution; added 2026-07-10, cross-review fix) |
+| Main Menu & Settings | Depended on by (Alpha) | Settings-level time options only — the in-game pause/speed controls belong to Building UI (corrected 2026-07-10) |
 | Camera & Input | (explicitly NOT a dependent) | Uses raw engine delta directly — documented for clarity, not a real edge |
 
 ## Tuning Knobs
@@ -318,6 +322,6 @@ missing criteria and 2 precision fixes.)*
 | Question | Owner | Deadline | Resolution |
 |----------|-------|----------|-----------|
 | Should more/different time-warp steps be added later than 1x/2x/3x (based on playtest feedback)? | game-designer | After initial playtests | — |
-| Exact UI trigger for cycling time-warp (keyboard shortcut vs. clickable buttons)? | ux-designer | At `/ux-design` | — |
+| Exact UI trigger for cycling time-warp (keyboard shortcut vs. clickable buttons)? | ux-designer | At `/ux-design` | **RESOLVED 2026-07-10**: Building UI owns the MVP time controls — Space = pause, +/− or direct 1x/2x/3x buttons, top-right HUD (building-ui.md Rules 1/10) |
 | Is "dampened" ambient audio during pause correct, or should it fully mute? | audio-director | At the Audio System GDD | — |
 | Does `ticks_per_second = 2.0` actually fit the granularity Villager AI/Needs decay need? | systems-designer / ai-programmer | At those GDDs | — |
