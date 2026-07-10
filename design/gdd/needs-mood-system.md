@@ -1,6 +1,8 @@
 # Needs & Mood System
 
-> **Status**: Draft
+> **Status**: In Review (full review 2026-07-10 NEEDS REVISION — all 11
+> must-fixes revised in-session incl. reciprocal villager-ai/building
+> patches, re-review pending)
 > **Author**: user + Claude Code Game Studios agents
 > **Last Updated**: 2026-07-10
 > **Last Verified**: 2026-07-10
@@ -17,7 +19,7 @@ because a bed's mechanical meaning ("this room is shelter") is defined
 here as need-recovery data. Villager AI consumes its urgency signals and
 performs the recovery activities; this system never moves a villager.
 
-> **Quick reference** — Layer: `Gameplay` · Priority: `MVP` · Key deps: `Villager AI & Behavior, Time & Tick System`
+> **Quick reference** — Layer: `Gameplay` · Priority: `MVP` · Key deps: `Villager AI & Behavior, Time & Tick System, Build Validation & Navigability`
 
 ## Overview
 
@@ -90,11 +92,21 @@ unhappiness is a puzzle to decode.
    set): the schema knows three needs from day one — `sleep` (MVP),
    `food` (Vertical Slice), `company` (Alpha). MVP fills only `sleep`
    with values. Adding a need type is a design change, not a data edit.
-3. **Thresholds** (per need, edge-triggered signals):
-   - `urgency_threshold` (default 25): crossing downward emits "need is
-     urgent" — the signal Villager AI's priority list consumes (its Rule 2).
-   - `satisfied_threshold` (default 95): crossing upward during recovery
-     emits "need satisfied" — Villager AI's wake/stop trigger (its Rule 13).
+3. **Thresholds** (per need) — **state + events-as-hints consumption model**
+   *(user decision, 2026-07-10 review — the prior edge-only wording clashed
+   with Villager AI's level-polling Rules 2/13; this reconciles both)*:
+   - This system maintains a QUERYABLE per-need state (Satisfied/Urgent/
+     Recovering + current value) that consumers read at their own decision
+     points. Villager AI reads state at its `decision_interval` — a missed
+     event is therefore harmless, and Save/Load re-derives state from
+     values with no signal replay.
+   - The edge-triggered events remain as NOTIFICATIONS layered on top:
+     `urgency_threshold` (default 25) crossing downward emits "need is
+     urgent" once (an immediate-preemption hint for Villager AI Rule 2 and
+     a display trigger); `satisfied_threshold` (default 95) crossing upward
+     during recovery emits "need satisfied" once (wake hint, its Rule 13).
+     Events never carry information the state doesn't — consumers MUST
+     treat state as the source of truth and events as latency optimization.
 4. **Recovery happens only through activities** (Villager AI performs
    them; this system scores them). Recovery rate depends on the
    **recovery source** — THE Building→Needs seam:
@@ -105,12 +117,22 @@ unhappiness is a puzzle to decode.
    | Owned bed, **unsheltered** (no valid room) | full rate × `unsheltered_bed_multiplier` (default 0.7) | The bed works, the missing room visibly costs — makes building the room mechanically worthwhile (Pillar 1) |
    | Ground (no bed) | full rate × `ground_penalty` (default 0.4) | Survivable but visibly worse — the buildable-fix signal |
 
-   The source→rate table is owned HERE, keyed by item id + shelter flag;
-   the sheltered/unsheltered classification is supplied by Build
-   Validation & Navigability (its Rule 5 — extended 2026-07-10 from the
-   original two-tier table when that GDD introduced room detection).
-   Future furniture (VS+) extends the table, and quality tiers can
-   multiply it later.
+   The source→rate table is owned HERE, keyed by the **recovery-source
+   enum** Villager AI reports *(widened at the 2026-07-10 review from the
+   prior binary bed/ground)*: `bed_sheltered` / `bed_unsheltered` /
+   `ground_no_bed_owned` / `ground_bed_unreachable` / `ground_trapped`.
+   The three `ground_*` values share ONE rate row (ground, ×0.4) — the
+   distinction exists for the why-string (Core Rule 11), not the math.
+   The sheltered/unsheltered classification within the enum is supplied by
+   Build Validation & Navigability (its Rule 5); reachability/trapped by
+   Villager AI (its Rule 12, Edge Case 2). Future furniture (VS+) extends
+   the table, and quality tiers can multiply it later.
+   **Config validation** *(added 2026-07-10 review)*: the ladder ordering
+   invariant `ground_penalty < unsheltered_bed_multiplier < 1.0` is
+   checked at config load by THIS system (it owns the table); violation
+   fails loudly at boot. The advisory smoke-check footnote in
+   build-validation-navigability.md is a courtesy duplicate, not the
+   enforcement.
 5. **No death spiral** (Pillar 3): a need at 0 harms nothing in MVP — a
    villager with sleep at 0 simply ground-sleeps wherever it stands
    (Villager AI's urgent priority already guarantees this). Needs create
@@ -129,6 +151,37 @@ unhappiness is a puzzle to decode.
    breaks) until Alpha — that seam is Open Question 2.
 9. All values are data-driven config (coding standard); nothing here is
    hardcoded.
+10. **Recovery-report API** *(added 2026-07-10 review — the report was
+    previously shapeless)*: Villager AI reports recovery via DISCRETE
+    calls — `start_recovery(need, source_enum)` and
+    `stop_recovery(need, reason)` — not per-tick pushes. Between start and
+    stop, this system re-reads the CURRENT source enum each tick (which is
+    how Edge Case 11's mid-recovery upgrade/downgrade re-rating works
+    without a restart). **Intra-tick ordering**: start/stop reports and
+    source changes land BEFORE that tick's F1–F3 pass — an interruption
+    tick therefore credits ZERO recovery ("recovery stops that tick" is
+    literal). In MVP, Villager AI only ever starts recovery while the need
+    is Urgent (its Rule 12) — this system does not itself precondition on
+    value (see the OQ4 caveat for the anticipatory-sleep landmine).
+11. **Why-string ownership** *(user decision, 2026-07-10 review — the
+    Pillar-4 deliverable was one example line with no rule)*: THIS system
+    owns why-string selection and templates. Selection: the strongest
+    current drain = the active need with the LOWEST value, tie-broken by
+    schema order (sleep > food > company); empty when no need is below
+    `satisfied_threshold` band relevance (mood Happy and nothing urgent).
+    Templates, keyed by the reported source enum:
+    - `ground_no_bed_owned` → "tired — no bed"
+    - `ground_bed_unreachable` → "tired — bed unreachable" (the fix is a
+      path, NOT another bed)
+    - `ground_trapped` → "tired — trapped!" (defers to the distress cue)
+    - `bed_unsheltered` → "sleeping rough — no shelter" (the build-a-room
+      signal, the ladder's middle rung made legible)
+    - `bed_sheltered` / not sleeping → no source suffix.
+    **UI-slot precedence** (one slot, three feeders): Villager AI
+    distress/trapped cue > this system's need-why > Build Validation's
+    structural detail string ("the bed can't be reached — the room has no
+    opening") — the BVN string appears in the building/bed context, never
+    competing in the villager panel's why-slot.
 
 ### States and Transitions
 
@@ -136,9 +189,9 @@ unhappiness is a puzzle to decode.
 
 | State | Entry | Exit | Behavior |
 |-------|-------|------|----------|
-| Satisfied | Value > `urgency_threshold` | Value crosses ≤ threshold | Decays per tick; no signals |
-| Urgent | Downward cross of `urgency_threshold` | Recovery raises value above it | "Need urgent" signal emitted ONCE on entry; keeps decaying until recovery starts |
-| Recovering | Villager AI reports a recovery activity for this need | Upward cross of `satisfied_threshold`, or activity interrupted | Value rises by the source's rate per tick; no decay; on satisfied-cross, "need satisfied" emitted ONCE |
+| Satisfied | Value > `urgency_threshold` (and not Recovering) | Value crosses ≤ threshold → Urgent; OR a `start_recovery` report → Recovering (possible in principle — MVP's AI only starts recovery while Urgent, its Rule 12) | Decays per tick; no signals |
+| Urgent | Downward cross of `urgency_threshold` | A `start_recovery` report → Recovering *(aligned at the 2026-07-10 review: the prior "recovery raises value above it" described the VALUE's journey, not this state machine's edge — Urgent exits into Recovering on the report, and the value-above-threshold moment happens inside Recovering)* | "Need urgent" event emitted ONCE on entry; queryable state = Urgent; keeps decaying until recovery starts |
+| Recovering | `start_recovery(need, source_enum)` report (Core Rule 10) | Upward cross of `satisfied_threshold` (→ Satisfied, "need satisfied" emitted ONCE), or `stop_recovery` report (interruption/revocation → Satisfied or Urgent purely by current value; NO new urgent event if the value never rose above the threshold — the original edge already fired and the queryable state still reads Urgent) | Value rises by the CURRENT source's rate per tick (re-read each tick — Edge Case 11); no decay |
 
 **Mood bands**: Happy ↔ Content ↔ Low — transitions purely derived from
 the smoothed value crossing 70/40; band changes emit a display event for
@@ -147,11 +200,17 @@ the Villager Info UI (and nothing else in MVP).
 ### Interactions with Other Systems
 
 - **Villager AI & Behavior** (MVP, mutual — the primary seam): this
-  system emits "need urgent"/"need satisfied" signals (consumed by its
-  Rules 2 and 13); Villager AI reports the active recovery activity and
-  its source (owned bed vs. ground — its Rules 11–12), which this system
-  scores per Rule 4. Confirms that GDD's provisional Needs interface —
-  its Open Question 1 is resolved by this GDD.
+  system maintains queryable per-need STATE that Villager AI reads at its
+  decision points, with the urgent/satisfied events as latency hints
+  (Core Rule 3 — the consumption model pinned at the 2026-07-10 review);
+  Villager AI reports recovery via `start_recovery`/`stop_recovery` with
+  the source ENUM (Core Rule 10), which this system scores per Rule 4.
+  The **Breather** (its Rules 7b/7c) is deliberately EXCLUDED: it reports
+  nothing, recovers nothing, and does not pause decay — cosmetic pacing
+  only *(exclusion made explicit here at the 2026-07-10 review)*.
+  Confirms that GDD's provisional Needs interface — its Open Question 1
+  is resolved by this GDD (and its PROVISIONAL markers are patched as of
+  the 2026-07-10 review — verified in the file this time).
 - **Time & Tick System** (upstream, MVP): all decay/recovery on tick
   events; pause halts everything; warp accelerates (a 3x day drains
   needs 3x faster in wall-clock — by design).
@@ -193,7 +252,10 @@ downward cross, per the qa-lead's boundary check).
 
 ### F2 — Need recovery (per tick, while Recovering)
 
-`value ← value + base_recovery_per_tick[need] × source_multiplier`
+`value ← min(100, value + base_recovery_per_tick[need] × source_multiplier)`
+*(clamp added at the 2026-07-10 review — at legal knob extremes,
+satisfied_threshold=100 + increment 2.0 breached the declared 0–100
+domain and fed the violation into F3)*
 
 | Variable | Type | Range | Description |
 |----------|------|-------|-------------|
@@ -201,12 +263,15 @@ downward cross, per the qa-lead's boundary check).
 | `source_multiplier` | float | 0–1 | Bed = 1.0; ground = `ground_penalty` = 0.4 |
 
 **Stopping point**: the `satisfied_threshold` (95) cross is the true and
-only exit (state table) — the final tick may overshoot 95 by up to one
-increment; that slack is intentional and the value is simply left where
-it lands. There is no separate clamp at 100 during recovery.
+only value-based exit (state table) — the final tick may overshoot 95 by
+up to one increment, capped by the domain clamp at 100; that slack is
+intentional and the value is simply left where it lands.
 
-Worked: urgent (25) → satisfied (95) = 70 points: **bed 140 ticks =
-70s**; **ground 350 ticks ≈ 2.9 min** game time at 1x.
+Worked: urgent (25) → satisfied (95) = 70 points: **bed sheltered
+140 ticks = 70s**; **bed unsheltered (×0.7) 200 ticks = 100s ≈ 1.7 min**
+*(middle-rung example added at the 2026-07-10 review — the ladder's
+signature value previously had no worked example)*; **ground 350 ticks
+≈ 2.9 min** game time at 1x.
 
 ### F3 — Mood smoothing (per tick)
 
@@ -243,20 +308,31 @@ not a guarantee; faster future needs rely on this rule.)
 
 ## Edge Cases
 
-1. **Recovery interrupted mid-way** (bed removed, job preemption — value
-   lands between thresholds, e.g. 60). Not a limbo: any value above
-   `urgency_threshold` that isn't mid-recovery is simply Satisfied —
-   decay resumes silently and Urgent re-triggers only on the next
-   downward 25-cross. *(Made explicit per the systems-designer consult.)*
+1. **Recovery interrupted mid-way** (bed removed, job preemption). Two
+   branches *(the below-threshold branch added at the 2026-07-10 review —
+   previously only the above-threshold case was specified)*:
+   - Value lands ABOVE `urgency_threshold` (e.g. 60): not a limbo — the
+     need is simply Satisfied; decay resumes silently and Urgent
+     re-triggers only on the next downward 25-cross.
+   - Value still AT/BELOW `urgency_threshold` (slow recovery interrupted
+     early): the need re-enters Urgent by value — NO new urgent event
+     fires (the original edge already fired; the queryable state has read
+     Urgent throughout, and Villager AI's state-based consumption — Core
+     Rule 3 — needs no second event to act).
 2. **Need reaches 0.** Value clamps and stays at 0; the Urgent signal
    fired once at the 25-cross and does NOT re-fire at 0 (edge-triggered,
    cross-not-equality). No harm occurs (Core Rule 5) — the villager
    ground-sleeps per Villager AI's urgent priority.
 3. **Recovery source removed mid-recovery** (bed removed while sleeping —
-   Building Edge Case 11 / Villager AI Edge Case 5). Recovery stops that
-   tick; the need re-enters Satisfied or Urgent purely by its current
-   value. Villager AI owns the wake behavior; this system just stops
-   scoring.
+   Building Edge Case 11 / Villager AI Edge Case 5). The notification
+   chain *(pinned at the 2026-07-10 review — previously a three-way
+   circular punt)*: Building System emits its **bed-revocation event** to
+   the owning villager (its new furniture-revocation contract, symmetric
+   to job revocation); Villager AI wakes and calls `stop_recovery`; per
+   Core Rule 10's intra-tick ordering the stop lands BEFORE that tick's
+   F-pass, so the removal tick credits ZERO recovery. The need re-enters
+   Satisfied or Urgent purely by its current value (Edge Case 1). Villager
+   AI owns the wake behavior; this system just stops scoring.
 4. **Value sits exactly on a threshold across many ticks.** Signals fire
    only on *crossing* (`<=`/`>=` transitions between ticks), never on
    equality re-checks — a value parked at 25.0 emits nothing new.
@@ -299,15 +375,16 @@ not a guarantee; faster future needs rely on this rule.)
 
 | System | GDD Status | What this system consumes |
 |--------|-----------|---------------------------|
-| Time & Tick System | ✅ Designed | Tick events for all decay/recovery/mood math; pause/warp semantics |
-| Villager AI & Behavior | ✅ Designed (mutual) | Reports of the active recovery activity and its source (owned bed vs. ground, its Rules 11–12) |
+| Time & Tick System | ✅ Approved | Tick events for all decay/recovery/mood math; pause/warp semantics |
+| Villager AI & Behavior | ✅ Approved (mutual) | `start_recovery`/`stop_recovery` reports with the recovery-source ENUM (Core Rules 4, 10 — widened from binary bed/ground at the 2026-07-10 review; its Rules 11–12) |
+| Build Validation & Navigability | ✅ Designed | The sheltered/unsheltered classification within the source enum (its Rule 5) *(row added at the 2026-07-10 review — this upstream was named in prose but missing from the formal table, violating bidirectionality)* |
 
 ### Downstream (systems that depend on this one)
 
 | System | Tier | GDD Status | What it consumes |
 |--------|------|-----------|------------------|
 | Villager AI & Behavior | MVP | ✅ Designed (mutual) | "Need urgent"/"need satisfied" signals (its Rules 2, 13) — its provisional Needs interface is CONFIRMED by this GDD |
-| Villager Info UI | MVP | Undesigned | Need values, mood band, the "why" explanation *(provisional)* |
+| Villager Info UI | MVP | ✅ Designed — contract CONFIRMED (its Rule 5 consumes values/band/why-string verbatim; status refreshed 2026-07-10) | Need values, mood band, the why-string (Core Rule 11 — this system owns selection + templates; precedence rule there) |
 | Relationships & Bonds | Alpha | Undesigned | The `company` need slot + mood modifier seam *(provisional)* |
 | Professions & Ranks / work systems | Alpha | Undesigned | Mood consequences (work speed etc.) once Open Question 2 resolves *(provisional)* |
 | Save/Load & World Persistence | Vertical Slice | Undesigned | Need values + smoothed mood serialization (Edge Case 8) *(provisional)* |
@@ -316,7 +393,7 @@ not a guarantee; faster future needs rely on this rule.)
 
 | Knob | Default | Safe Range | Affects |
 |------|---------|-----------|---------|
-| `decay_per_tick[sleep]` | 0.07 | 0.03–0.2 | The session rhythm: ~9 min to urgent at default; 0.2 ≈ tamagotchi territory (avoid) |
+| `decay_per_tick[sleep]` | 0.07 | 0.03–0.2 | The session rhythm: ~9 min to urgent at default; 0.2 ≈ tamagotchi territory (avoid); 0.03 → ~20.8 min to urgent, well past the "~10-minute heartbeat" (dead air — the slow extreme is as risky as the fast one). **Pacing cross-reference** *(added 2026-07-10 review)*: a minimal room+bed builds in ~1–2 min (building-system F3) while urgency arrives at ~8.9 min — the ~6–7 min gap inside the concept's ~10-min MVP test window is a DELIBERATE HYPOTHESIS ("the wait is settlement-watching, not dead air"), tested by the MVP playtest probe in Game Feel, NOT tuned on paper. Retuning either side's knobs must revisit this note |
 | `base_recovery_per_tick[sleep]` | 0.5 | 0.2–2.0 | Sleep duration (~70s in bed at default) |
 | `ground_penalty` | 0.4 | 0.1–0.8 | How much worse bed-less sleep is — the strength of the "build a bed" signal. Too close to 1.0 kills the furniture hook |
 | `unsheltered_bed_multiplier` | 0.7 | 0.5–0.9 | The middle rung of the recovery ladder (bed outside a valid room). **Invariant: `ground_penalty` < this < 1.0** — outside that order the ladder collapses. Owned HERE (this table is the source of truth); Build Validation supplies only the sheltered flag (added 2026-07-10, cross-review ownership fix) |
@@ -344,18 +421,26 @@ without watching numbers. Mood drifts rather than snaps (smoothing =
 emotional inertia — villagers aren't light switches). Tone per Pillar 3:
 a Low villager looks tired-cozy, never suffering-grimdark.
 
-**Feel acceptance criteria** (subjective, playtest-verified): a
-first-time player, asked "why is the villager unhappy?", answers
-correctly within one need cycle without a tutorial; nobody describes the
-needs as "nagging."
+**Feel acceptance criteria** (subjective, playtest-verified; referenced
+by AC35): a first-time player, asked "why is the villager unhappy?",
+answers correctly within one need cycle without a tutorial; nobody
+describes the needs as "nagging"; **(added 2026-07-10 review)** the
+build→wait→payoff rhythm reads as intentional (players report the ~7-min
+pre-urgency stretch as settlement-watching, not dead air — the Tuning
+Knobs pacing hypothesis); and players notice and mention the mood lift
+after building a bed UNPROMPTED (Beat 3's "quiet satisfaction" — the
+display-only-mood bet made falsifiable).
 
 ## UI Requirements
 
 None owned — supplies to Villager Info UI: per-need values (0–100), mood
-band (3 states + display events on change), and the **why-string** — the
-strongest current drain plus its missing source (e.g. "tired — no bed").
-Pillar 4 contract: the UI must never show a mood without the reason being
-one interaction away.
+band (3 states + display events on change), and the **why-string** —
+selection rule, full template set (per source enum), and UI-slot
+precedence are Core Rule 11 *(promoted from a single example line at the
+2026-07-10 review)*. Pillar 4 contract: the UI must never show a mood
+without the reason being one interaction away — and the reason must
+never direct the player to the WRONG fix (a trapped villager's string
+says "trapped", not "no bed").
 
 ## Cross-References
 
@@ -393,7 +478,7 @@ are mocked at the boundary per testing standards.)*
 13. **GIVEN** a recovery interrupted between thresholds (e.g. 60), **WHEN** the interruption registers, **THEN** the need re-enters Satisfied, decays normally, and re-triggers Urgent only at the next 25-cross (Edge Case 1).
 
 **Mood**
-14. **GIVEN** a mocked `mean_active` differing from mood, **WHEN** 1 tick fires, **THEN** mood moves by exactly (mean − mood) / `mood_smoothing_ticks` in float math (F3).
+14. **GIVEN** a mocked `mean_active` differing from mood **by at least 0.05** (outside the F3 snap zone — precision fix, 2026-07-10 review), **WHEN** 1 tick fires, **THEN** mood moves by exactly (mean − mood) / `mood_smoothing_ticks` in float math (F3).
 15. **GIVEN** abs(mean − mood) < 0.05, **WHEN** a tick fires, **THEN** mood snaps exactly to mean (F3 snap).
 16. **GIVEN** `mean_active` stable at 70 for enough ticks that the snap condition is met, **WHEN** it fires, **THEN** mood == 70.0 exactly and Happy activates (F3 anti-asymptote, bounded claim).
 17. **GIVEN** a new villager spawns, **WHEN** initialized, **THEN** every active need is 100 and mood equals `mean_active` — never 0 (F4).
@@ -405,10 +490,20 @@ are mocked at the boundary per testing standards.)*
 21. **GIVEN** a tick burst of `max_ticks_per_frame`, **WHEN** processed, **THEN** F1–F3 apply per tick in order and threshold signals are emitted in order, never coalesced (burst rule).
 22. **GIVEN** identical tick counts dispatched at 1x vs 3x warp, **WHEN** F1/F2 apply, **THEN** the resulting values are identical — rates are functions of tick count, never wall-clock (Edge Case 9).
 23. **GIVEN** pause (zero ticks), **WHEN** real time passes, **THEN** values and mood are unchanged (Edge Case 7).
-24. **[PROVISIONAL — Save/Load]** **GIVEN** a save with need values and mood, **WHEN** loaded, **THEN** mood is restored as-saved, never re-initialized via F4 (Edge Case 8; mocked serializer now).
-25. **[PROVISIONAL — Save/Load]** **GIVEN** a saved need type no longer in the schema, **WHEN** loaded, **THEN** it is dropped with a log line, never a crash (Edge Case 8).
+24. **[Integration, VS+ — DEFERRED pending the Save/Load & World Persistence GDD]** **GIVEN** a save with need values and mood, **WHEN** loaded, **THEN** mood is restored as-saved, never re-initialized via F4 (Edge Case 8; mocked serializer now; tag convention aligned 2026-07-10).
+25. **[Integration, VS+ — DEFERRED pending the Save/Load & World Persistence GDD]** **GIVEN** a saved need type no longer in the schema, **WHEN** loaded, **THEN** it is dropped with a log line, never a crash (Edge Case 8).
 26. **GIVEN** a version adds a new active need (mocked schema change), **WHEN** an existing villager loads, **THEN** the new need initializes at 100 (Edge Case 5).
-27. **GIVEN** default values, **WHEN** a full sleep cycle runs (100 → urgent → bed recovery → satisfied), **THEN** total game time is ~9 min decay + ~70s recovery within ±5% (integration pacing test).
+27. **GIVEN** default values, **WHEN** a full sleep cycle runs (100 → urgent → bed recovery → satisfied), **THEN** the urgent event fires at tick 1072 and the satisfied event at tick 1212 — EXACT tick counts, never wall-clock *(rewritten 2026-07-10: the prior "±5%" invited a wall-clock reading, a determinism violation; the cycle is fully deterministic in ticks)*.
+
+**Added at the 2026-07-10 review:**
+28. **GIVEN** a mocked `bed_unsheltered` source, **WHEN** 1 tick fires, **THEN** the increase is exactly `base_recovery_per_tick` × `unsheltered_bed_multiplier` (the ladder's middle rung — previously the doc's signature value had no AC).
+29. **GIVEN** a config where `ground_penalty ≥ unsheltered_bed_multiplier` or `unsheltered_bed_multiplier ≥ 1.0`, **WHEN** config loads, **THEN** the load fails loudly naming the invariant (Core Rule 4 config validation — enforcement now lives in the OWNING doc).
+30. **GIVEN** a need Recovering at the `bed_unsheltered` rate, **WHEN** the reported source enum changes to `bed_sheltered` mid-recovery (shelter_status_changed), **THEN** from the next tick the full rate applies with no restart, no signal, no lost progress; **AND** the mirror downgrade applies the lower rate identically (Edge Case 11 — previously zero coverage).
+31. **GIVEN** a recovery interrupted while the value is still ≤ `urgency_threshold`, **WHEN** `stop_recovery` lands, **THEN** the need re-enters Urgent by value, NO second urgent event fires, and the queryable state reads Urgent throughout (Edge Case 1, below-threshold branch).
+32. **GIVEN** each reported source enum value with an urgent sleep need, **WHEN** the why-string is queried, **THEN** it matches Core Rule 11's template for that enum exactly ("tired — no bed" / "tired — bed unreachable" / "tired — trapped!" / "sleeping rough — no shelter"); **AND GIVEN** no need is urgent and mood is Happy, **THEN** the why-string is empty.
+33. **GIVEN** a value at 99.0 with `satisfied_threshold` = 100 and increment 2.0 (legal knob extremes), **WHEN** a recovery tick fires, **THEN** the value is exactly 100.0, never above (F2 domain clamp).
+34. **[Integration — live pair, per the villager-ai AC40/40b precedent]** **GIVEN** a REAL Needs instance and a REAL Villager AI villager with an owned sheltered bed (no mocks at the seam), **WHEN** the need decays from 100 through urgent → the AI claims/travels/sleeps → recovery → satisfied → wake, **THEN** the full round trip completes: state transitions, `start_recovery`/`stop_recovery` calls, and both events observed in order — closing the mutual-mock coverage gap.
+35. **[Visual/Feel, Advisory — playtest-gated]** The Game Feel acceptance criteria (legibility, no-nagging, pacing-hypothesis, unprompted-mood-notice) are evaluated at the MVP playtest and their outcomes recorded in `production/qa/evidence/` (previously orphaned from the AC list).
 
 *Advisory (not a Logic AC): Rule 8's "mood is display-only" is an absence
 claim — verified via an architectural contract check (no mood-consuming
@@ -427,9 +522,26 @@ blocking test gate.*
    → *Relationships & Bonds GDD, Alpha*
 4. **Day/night rhythm** — shared open question with Villager AI (its OQ
    4): a clock would let sleep anticipate night instead of pure decay.
+   **Caveat (2026-07-10 review — the dead-man landmine)**: Recovering's
+   exit-on-satisfied-cross assumes recovery always STARTS below
+   `satisfied_threshold`; any anticipatory-sleep design must define an
+   immediate-satisfied case for recovery starting already above it, or
+   the villager never receives the satisfied event and never wakes.
    → *Alpha, owner TBD (Time & Tick extension)*
 5. **Furniture quality multiplying recovery** — the concept's
    crafting-quality tiers (a masterwork bed heals faster?) extend the
    source→rate table. → *crafting/quality GDDs, Alpha*
 6. **Band hysteresis** — enable only if playtests show flapping (Edge
    Case 10, Tuning Knobs). → *MVP playtest*
+7. **VS synchronized-spawn decay spike** *(2026-07-10 review)* — all ~5
+   Vertical Slice villagers spawn together at need=100 (F4, villager-ai
+   Rule 14b), so their decay clocks are synchronized: everyone turns
+   tired at once around minute ~9. Pleasant day/night-adjacent beat or
+   jarring simultaneous crisis? Decide (stagger spawn values? embrace as
+   rhythm?) before VS tuning. → *this GDD's VS revision + villager-ai*
+8. **EMA ramp-lag disclosure** *(2026-07-10 review)* — during active
+   recovery, mood trails the true need value by ≈ recovery-rate ×
+   `mood_smoothing_ticks` (~20 points at defaults; at extreme legal knobs
+   the lag exceeds the scale). Acceptable inertia or does "mood visibly
+   lifts" need a faster-catching smoothing during recovery? → *MVP
+   playtest, alongside the band-hysteresis question*

@@ -215,6 +215,16 @@ finished stat-box (the building IS the stats, Pillar 1).
     implementation choice for the building ADR.)*
 16. Removal of built cells is instant in MVP (no deconstruction time, no
     villager involvement). Removing a blueprint cell simply cancels it.
+    **17b — Furniture-revocation contract** *(added 2026-07-10, from the
+    needs-mood review — Edge Case 11's interruption previously had no
+    notification mechanism: Villager AI's Rule 10b covers only MOVING
+    villagers and cannot inform a stationary sleeper)*: removing a piece
+    of OWNED furniture (MVP: a bed with an owner) emits a
+    furniture-revocation event to the owning villager, symmetric to the
+    job-revocation contract in the blueprint lifecycle. Villager AI
+    consumes it in its Edge Cases 5–6; Needs learns via the villager's
+    `stop_recovery` call. Removal itself remains instant and never
+    blocked (Edge Case 11).
 17. **Undo/redo** operates on player *commands* (one wall drag = one
     command = one undo step, exactly as prototyped). Undoing a command
     cancels its blueprint cells; if some cells were already constructed,
@@ -444,7 +454,8 @@ furniture (`bed`).
     commands.
 11. **Furniture removed while in use** (bed removed while the villager
     sleeps in it). Allowed — removal is never blocked by usage; the
-    villager is interrupted and re-plans *(interruption semantics —
+    furniture-revocation event (Core Rule 17b, added 2026-07-10) notifies
+    the owner; the villager is interrupted and re-plans *(interruption semantics —
     specified in Villager AI's Edge Case 5 and Needs' Edge Case 3,
     confirmed 2026-07-10)*.
 12. **Tool switched or Suspended entered mid-drag.** The drag aborts

@@ -277,10 +277,21 @@ Core Rule 4. Villagers pause only when game time pauses.)*
   walkability (Rules 8–9) and listens to write signals to re-path when
   the world changes mid-travel. Never mutates the grid (construction
   writes go through the Building System).
-- **Needs & Mood System** (MVP sibling, undesigned — PROVISIONAL): defines
-  which needs exist, decay rates, urgency/wake thresholds, and recovery
-  rates. This GDD only consumes "need X is urgent" signals and reports
-  recovery activity. Its GDD must confirm this interface.
+- **Needs & Mood System** (MVP sibling, ✅ Designed — CONFIRMED; stale
+  PROVISIONAL marker patched 2026-07-10, this time verified in the file):
+  defines which needs exist, decay rates, urgency/wake thresholds, and
+  recovery rates. **Consumption model** (its Core Rule 3, pinned
+  2026-07-10): this GDD reads the QUERYABLE per-need state at its
+  decision points (`decision_interval` — Rules 2/13's level checks are
+  the intended reading); the urgent/satisfied events are latency HINTS,
+  never the source of truth — a missed event is harmless. **Recovery
+  reporting** (its Core Rule 10): discrete `start_recovery(need,
+  source_enum)` / `stop_recovery(need, reason)` calls; the source enum is
+  `bed_sheltered` / `bed_unsheltered` / `ground_no_bed_owned` /
+  `ground_bed_unreachable` / `ground_trapped` (widened 2026-07-10 from
+  binary bed/ground — Rules 11–12 supply reachability/trapped, Build
+  Validation supplies the shelter split; the ground_* distinction feeds
+  the why-string, not the rates).
 - **Build Validation & Navigability** (MVP, downstream): consumes the
   walkability definition (Rules 8–10) as its ground truth for
   reachability/livability checks.
@@ -442,9 +453,16 @@ one tick", which broke at `move_speed` < 2.0)*.
    reaction (the world simply changed), and re-enters Deciding. Its claim
    bookkeeping is cleared by the revocation itself.
 5. **Bed removed while the villager sleeps in it** (Building Edge Case
-   11). The villager wakes immediately, its bed ownership dissolves, and
-   it re-enters Deciding — typically resuming sleep on the ground (reduced
-   recovery) or claiming another free bed if one is reachable.
+   11). **Trigger channel** *(pinned 2026-07-10 — "wakes immediately" was
+   previously mechanism-free: Rule 10b covers only MOVING villagers and
+   cannot notify a stationary sleeper)*: the Building System emits its
+   **furniture-revocation event** to the owning villager on removal (its
+   Core Rule 17b — symmetric to job revocation). On receiving it, the
+   villager wakes immediately, its bed ownership dissolves, it calls
+   `stop_recovery` toward Needs (which credits zero recovery for the
+   removal tick, Needs Core Rule 10), and it re-enters Deciding —
+   typically resuming sleep on the ground (reduced recovery) or claiming
+   another free bed if one is reachable.
 6. **Bed removed while owned but unoccupied.** Ownership dissolves
    silently; the villager claims a new bed the next time sleep becomes
    urgent (Rule 11).
@@ -492,8 +510,8 @@ one tick", which broke at `move_speed` < 2.0)*.
 |--------|------|-----------|------------------|
 | Building System | MVP | ✅ Designed | The mutual seam's other direction: its construction pipeline cannot complete without this system's labor (job claiming, on-site work — its Core Rule 12); listed upstream above for the queue this system consumes (added 2026-07-10, cross-review fix) |
 | Build Validation & Navigability | MVP | ✅ Designed | The walkability definition (Rules 8–10) as ground truth for reachability (contract confirmed by build-validation-navigability.md) |
-| Needs & Mood System | MVP | Undesigned | Activity state (what the villager is doing) to apply recovery; mutual seam with the upstream row *(provisional)* |
-| Villager Info UI | MVP | Undesigned | Villager name, current activity/state, distress cues *(provisional)* |
+| Needs & Mood System | MVP | ✅ Designed — CONFIRMED (2026-07-10) | `start_recovery`/`stop_recovery` reports with the source enum (its Core Rule 10); mutual seam with the upstream row |
+| Villager Info UI | MVP | ✅ Designed — CONFIRMED (2026-07-10) | Villager name, current activity/state, distress cues |
 | Professions & Ranks | Alpha | Undesigned | The activity-selection layer professions plug into *(provisional)* |
 | Relationships & Bonds | Alpha | Undesigned | Villager identity + proximity/interaction events *(provisional)* |
 | Township Progression | Alpha | Undesigned | Population (spawning/recruiting is ITS job, bounded by the 20–30 ceiling) *(provisional)* |
@@ -583,8 +601,8 @@ no-bed). The UI renders and never owns.
 | Tick events, game delta, pause/warp, max_ticks_per_frame | `design/gdd/time-tick-system.md` | Core Rules, Formulas | Time base for the whole agent loop |
 | Physical occupancy reads, write signals | `design/gdd/voxel-world.md` | Core Rules 5–6 | Walkability + re-path triggers |
 | Valley never pauses during transitions | `design/gdd/scene-world-management.md` | Core Rule 4 | Why there is no Suspended state here |
-| Need definitions, thresholds, recovery rates | `design/gdd/needs-mood-system.md` (not yet authored) | Needs interface | PROVISIONAL |
-| Walkability as validation ground truth | `design/gdd/build-validation-navigability.md` (not yet authored) | Rules 8–10 | PROVISIONAL |
+| Need definitions, thresholds, recovery rates, state+events consumption model, recovery-report API (source enum) | `design/gdd/needs-mood-system.md` | Its Core Rules 3, 4, 10, 11 | CONFIRMED (2026-07-10 — stale "not yet authored — PROVISIONAL" patched; the file exists and resolves this GDD's OQ1) |
+| Walkability as validation ground truth | `design/gdd/build-validation-navigability.md` | Rules 8–10 | CONFIRMED (2026-07-10 — stale "not yet authored" patched; the file exists and consumes these rules verbatim) |
 | Population ceiling resolution (20–30) | `design/gdd/game-concept.md` + `design/gdd/systems-index.md` | Open Question / high-risk flag | Resolved BY this GDD (patches in Phase 5) |
 | `bed` item, `ticks_per_second`, `max_ticks_per_frame`, `cell_size` | `design/registry/entities.yaml` | Registry facts | Data dependency |
 

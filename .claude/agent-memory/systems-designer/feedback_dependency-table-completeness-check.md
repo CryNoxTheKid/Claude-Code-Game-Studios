@@ -1,6 +1,6 @@
 ---
 name: feedback-dependency-table-completeness-check
-description: For a Foundation/leaf GDD, cross-check its Downstream/Dependents table against every OTHER already-authored GDD that actually references it by name or file path — not just the ones it remembers to list
+description: For any GDD (Foundation/leaf OR Feature-layer), cross-check its Upstream AND Downstream tables against every OTHER already-authored GDD that actually references it by name or file path — not just the ones it remembers to list
 metadata:
   type: feedback
 ---
@@ -54,3 +54,26 @@ greps), catches real bidirectionality violations of the project's own
 must be bidirectional"). Related: [[feedback-directional-asymmetry-check]]
 (same family, applied to state-machine wording instead of dependency
 tables).
+
+**Second occurrence — `design/gdd/needs-mood-system.md` (2026-07-10, first
+full review):** the same three defect shapes recurred, but this time on the
+**UPSTREAM** side of a mid-layer (Feature) GDD, not just a leaf GDD's
+Downstream table — the technique generalizes beyond "Foundation/leaf." The
+GDD's own Core Rule 4, its Interactions-with-Other-Systems prose, and Edge
+Case 11 all explicitly name Build Validation & Navigability as the upstream
+supplier of the sheltered/unsheltered classification (and that GDD's own
+Downstream table lists Needs & Mood System as a consumer — the registry
+entry for `unsheltered_bed_multiplier` even shows the bidirectional
+`referenced_by`) — yet the Upstream Dependencies table, the "Key deps" Quick
+Reference line at the top of the doc, AND `systems-index.md`'s Dependency
+Map all independently omit it. Three separate summary surfaces, one real
+omission, propagated. Also found the stale-status shape again in the same
+document: Villager Info UI listed as "Undesigned" in the Downstream table
+despite `villager-info-ui.md` existing in Draft with a full contract that
+quotes this GDD's why-string/band contract verbatim.
+**Lesson:** grep BOTH directions (does X's prose/rules name a system not in
+its Upstream table; does any sibling's Downstream/Interactions section name
+X that X's own Upstream table omits) — a mid-layer GDD's Upstream table is
+just as prone to silent drift as a leaf GDD's Downstream table, and a doc's
+own "Quick Reference" summary line is a THIRD place the same omission can
+independently hide, worth grepping separately from the formal table.
