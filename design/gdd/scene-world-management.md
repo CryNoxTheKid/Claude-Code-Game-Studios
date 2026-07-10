@@ -96,8 +96,11 @@ non-high-risk sections. Review manually before production.)*
   bidirectional consistency.
 - **Time & Tick System** (Foundation sibling): hosting relationship, PLUS a
   real data dependency in the OPPOSITE direction from Camera & Input — THIS
-  system calls Time & Tick's time-warp-reset function when a transition
-  begins (see Edge Cases: "Time-warp resets to 1x for the transition").
+  system has NO direct call into Time & Tick *(REVISED 2026-07-10: the
+  former time-warp-reset call was removed — warp persists across
+  transitions, see Edge Cases)*. All transition effects reach consumers
+  exclusively via the transition-begin/-complete signals — there are no
+  direct-call side effects, so no call-vs-signal ordering exists to race.
   Time & Tick's own clock is deliberately NOT suspended by transitions (see
   `design/gdd/time-tick-system.md` Core Rule 6). Added 2026-07-09 for
   bidirectional consistency.
@@ -132,9 +135,11 @@ question, not a design formula (see Open Questions).
 | A transition is triggered while one is already in progress (double-trigger) | The second trigger is ignored until the first completes | Prevents overlapping/broken transitions |
 | The target scene fails to load (missing file, error) | Transition aborts, an error is shown, player remains in the currently-loaded (source) scene | Never leave the player in a state with no active scene |
 | Player triggers a transition while actively in build-placement mode | The in-progress placement is cleanly cancelled (no incomplete/invalid blocks left behind), then the transition begins | Prevents an inconsistent build state across the scene swap |
-| Time-warp is active when a transition begins | Time-warp resets to 1x for the transition and the opening moment of the target scene; must be manually re-engaged in the new scene | Prevents disorientation on entry (e.g., a dungeon entrance rushing by at high warp speed) |
+| Time-warp is active when a transition begins | **Time-warp PERSISTS unchanged across the transition and the visit** — it is global game state this system never touches *(REVISED 2026-07-10 review: the earlier reset-to-1x created an irreversible warp trap — Building UI, the sole owner of the warp controls, does not exist in dungeon scenes, so "manually re-engage" was impossible until return; and the background Valley would have silently dropped to 1x against the player's set speed)* | Warp is a player setting, not scene state; the Valley keeps simulating at the chosen speed (Core Rule 4 coherence). Entry-moment disorientation at high warp is a presentation concern for the dungeon's opening beat, not a time-system override |
 | No valid dungeon scene currently exists for an entry trigger (e.g., content not yet available) | No transition begins; the player gets feedback that entry isn't currently possible | Prevents loading a non-existent scene |
 | Simulation during the loading transition itself (the brief loading-screen moment) | The Valley simulation does NOT pause — it runs continuously through the transition overlay; only camera/input hand off | Simplest rule: continuous simulation from boot through return, no special "paused while loading" case |
+| A transition is triggered while the game is PAUSED (Time & Tick pause active) | Allowed — the transition overlay animates on raw delta (UI-level, like the camera); the pause state persists unchanged through the transition, exactly like warp *(added 2026-07-10 review)* | Pause is a player setting, not scene state; transitions are presentation, not simulation |
+| Boot ordering (MVP) | The Booting state completes only after foundation data systems report ready — concretely, the Resource & Item Database must reach its Ready state before the Valley scene's dependent systems (Building, Villager AI) initialize *(added 2026-07-10 review; the DB's GDD defers the full boot-order mechanism to a boot-order ADR — this row records the design requirement that ADR must satisfy)* | A scene whose systems boot before their data layer is ready would read an empty palette |
 
 *(Save/Load does not exist until Vertical Slice — so there is no edge case here for
 "game closed while InDungeon"; that belongs in the Save/Load & World Persistence GDD
@@ -144,7 +149,8 @@ once it is designed.)*
 
 | System | Direction | Nature of Dependency |
 |--------|-----------|----------------------|
-| Time & Tick System | This system depends on | Calls the time-warp-reset function on transition begin (data/event dependency, added 2026-07-09 for bidirectional consistency with `design/gdd/time-tick-system.md`) |
+| Time & Tick System | (no direct dependency — REVISED 2026-07-10) | The former time-warp-reset call was removed; warp persists across transitions as global game state. Rows retained for history/bidirectional consistency with `design/gdd/time-tick-system.md` |
+| Building System | Depended on by | Clears its undo stack on the transition-begin signal (its Core Rule 17 — data/event dependency, added 2026-07-10 cross-review fix) |
 | Save/Load & World Persistence | Depended on by | Listens for transition-begin/-complete signals as save points (data/event dependency) |
 | Camera & Input | Depended on by | Hosting relationship PLUS listens for transition-begin/-complete signals to enter/exit its own Suspended state (data/event dependency, added 2026-07-09 for bidirectional consistency with `design/gdd/camera-input.md`) |
 | Voxel World / Grid Data System | Depended on by (structural) | Attaches as a child under the scene this system loads (hosting, not data — intentionally not a formal index edge) |
@@ -242,9 +248,10 @@ tightened, performance criterion split and given measurable thresholds.)*
    children of the Valley root and remain valid for the entire play session.
    *[Integration]*
 3. **GIVEN** the player is in the Valley scene, **WHEN** they trigger dungeon
-   entry (Vertical Slice+), **THEN** a loading transition plays for
-   `loading_transition_duration` ± 0.1s, the Dungeon scene becomes active, and
-   Valley input is suspended. *[Integration]*
+   entry, **THEN** a loading transition begins, the Dungeon scene becomes
+   active on completion, and Valley input is suspended for the duration —
+   timing tolerance is tested only in AC12a *(split per the 2026-07-10
+   review)*. *[Integration, VS+]*
 4. **GIVEN** the player is fully inside a Dungeon scene, **WHEN** input is
    checked, **THEN** the Valley scene receives zero player input while the
    Dungeon scene has full control. *[Integration]*
@@ -255,8 +262,11 @@ tightened, performance criterion split and given measurable thresholds.)*
    *[Integration]*
 6. **GIVEN** the player exits/dies/completes the dungeon, **WHEN** that
    happens, **THEN** a loading transition plays, the Dungeon scene is freed
-   from memory, and control returns to the Valley scene in the exact state
-   (position, simulation state) it was left in. *[Integration]*
+   from memory, and control returns to the Valley with player position and
+   camera state restored to pre-entry values, while simulation state
+   (needs, schedules, timers) reflects elapsed real time per AC5 — NOT a
+   snapshot restore *(reworded 2026-07-10: "exact state" contradicted Core
+   Rule 4's continuous simulation)*. *[Integration, VS+]*
 7. **GIVEN** a scene transition is in progress, **WHEN** a second is
    triggered, **THEN** the second trigger is ignored until the first
    completes. *[Integration]*
@@ -266,8 +276,8 @@ tightened, performance criterion split and given measurable thresholds.)*
 9. **GIVEN** the player is in active build-placement mode, **WHEN** a
    transition is triggered, **THEN** the in-progress placement is cleanly
    cancelled with no invalid blocks left behind. *[Integration]*
-10. **GIVEN** time-warp is active, **WHEN** a transition begins, **THEN**
-    time-warp resets to 1x for the transition and the opening moment of the
+10. **GIVEN** time-warp is active at any speed, **WHEN** a transition begins, completes, and the player later returns, **THEN**
+    the warp value is IDENTICAL at every step — this system never touches it (REVISED 2026-07-10; replaces the former reset-to-1x criterion targeting the opening moment of the
     target scene. *[Integration]*
 11. **GIVEN** no dungeon scene is available for the target, **WHEN** entry is
     triggered, **THEN** no transition begins and the player receives feedback
@@ -282,6 +292,15 @@ tightened, performance criterion split and given measurable thresholds.)*
     tunables are read from data/config, not literals in code.
     *[Config/Data, Advisory]*
 
+**Added by the 2026-07-10 design review** *(scope tags added throughout:
+AC1–2 are [MVP]; AC3–11 and the new ACs below are [VS+] — dungeon behavior
+must never gate MVP Done. AC7 is re-tiered [Logic] — the double-trigger
+debounce is a pure state-machine unit test. AC12a/b are [Performance,
+Advisory, milestone-gated].)*
+14. **GIVEN** the Transitioning state is active (overlay visible), **WHEN** Valley simulation is inspected mid-transition, **THEN** villager schedules/needs/build timers are advancing unpaused (Core Rule 4 during the overlay itself, distinct from AC5's before/after check). *[Integration, VS+]*
+15. **GIVEN** a return-to-Valley transition completes, **WHEN** input and the scene tree are checked, **THEN** the Dungeon scene no longer exists and the Valley receives full input — the symmetric counterpart to AC4. *[Integration, VS+]*
+16. **GIVEN** the game is paused (Time & Tick), **WHEN** a transition is triggered, **THEN** the overlay animates on raw delta, the transition completes normally, and the pause state is unchanged afterward (Edge Case: transition-while-paused). *[Integration, VS+]*
+
 ## Open Questions
 
 | Question | Owner | Deadline | Resolution |
@@ -289,3 +308,6 @@ tightened, performance criterion split and given measurable thresholds.)*
 | Is there a hard performance ceiling on running two full scenes (Valley + Dungeon) simultaneously that requires design mitigation (e.g., LOD/pausing off-screen systems)? | technical-director | Before Vertical Slice implementation begins | — |
 | What is the exact visual treatment of the loading transition (fade, iris, narrative text, etc.)? | art-director | During art bible / `/asset-spec` | — |
 | Once Save/Load exists, does boot always go to a fixed Valley scene, or to a saved game state? | systems-designer (Save/Load GDD) | When Save/Load & World Persistence GDD is authored | — |
+| Scene-teardown signal ordering: must the transition-complete signal fire strictly AFTER the old scene's `queue_free()` settles (teardown-emitted signals vs listeners)? *(2026-07-10 review)* | technical-director | Scene-management section of `/create-architecture` | — |
+| Does the non-visible background scene need PROCESS_MODE_ALWAYS / visibility-culling exemptions to keep ticking (two-live-scenes structure)? *(2026-07-10 review)* | technical-director | Same ADR + the pre-VS performance spike | — |
+| Boot-order mechanism (Resource & Item Database Ready before dependents — see the new Edge Case row) | technical-director | Boot-order ADR via `/create-architecture` | — |

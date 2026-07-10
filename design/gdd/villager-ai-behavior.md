@@ -326,7 +326,12 @@ travel.** A step shorter than one tick period (e.g., 1 cell at default
 `move_speed` 3.0 = 0.667 ticks) is absorbed between global ticks — the
 villager arrives before the next scheduled tick and that tick credits
 the new cell with zero waste, so a 9-cell adjacent chain costs exactly
-36 ticks at default tuning (matching Building F3's example). Only when
+36 ticks at default tuning (matching Building F3's example) — **barring
+a `max_ticks_per_frame` discard event** *(caveat added 2026-07-10: Time
+& Tick's stall cap discards excess simulated time permanently, so
+"exactly N ticks" invariants hold only in the no-discard case; consumers
+must count observed ticks, never derive durations from clock arithmetic
+— see the Consumer caveat in time-tick-system.md)*. Only when
 a step exceeds one tick period (slow `move_speed` tuning, longer travel)
 do skipped global ticks become real overhead. Integration test AC40
 measures the true total at any tuning. (Cross-reference: Building

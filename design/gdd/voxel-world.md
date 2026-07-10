@@ -59,7 +59,12 @@ non-high-risk sections. Review manually before production.)*
 
 1. The world is represented as a bounded 3D grid of cells, addressed by
    integer coordinates (`Vector3i`), with a minimum and maximum extent set at
-   world generation.
+   world generation. **The grid origin is fixed at (0,0,0) and no
+   negative cell coordinates ever exist** — bounds checks are simple
+   non-negative comparisons *(invariant promoted from AC4 by the
+   2026-07-10 review; the Formulas section's `floor()` requirement is
+   defensive hardening for near-zero world positions, not support for
+   negative cells)*.
 2. Every cell holds exactly one of: empty (no block), or a block record
    containing a block-type identifier and a material identifier. There is no
    "layering" — one cell = one occupant. The identifiers are ids defined by
@@ -146,8 +151,13 @@ high-risk section even in Lean mode.)*
 Inverse — **World → Cell**:
 `cell = Vector3i(floor(world_pos.x / cell_size), floor(world_pos.y / cell_size), floor(world_pos.z / cell_size))`
 
-Uses `floor()`, not truncation — required for correct behavior if the world
-ever has negative-coordinate cells. If the result falls outside the world's
+Uses `floor()`, not truncation — Core Rule 1 guarantees no negative cell
+coordinates exist, but truncation and `floor()` diverge for world positions
+fractionally below 0.0 (e.g. a ray grazing the world edge at x = −0.001),
+and `floor()` maps those cleanly to an out-of-bounds cell instead of
+aliasing them into cell 0 *(reworded 2026-07-10 review — the old text
+implied negative cells were possible, contradicting AC4)*. If the result
+falls outside the world's
 bounds, the API must return an explicit "outside grid" result, NOT silently
 clamp to the edge (see Edge Cases).
 
@@ -177,7 +187,7 @@ rendering ADR, not decided in this GDD.
 
 **Output range**: hard-clamped to `[min_y, max_y]`.
 **Example**: `base_height=4, amplitude=3, frequency=0.05, noise2D(...)=0.6` →
-`h = clamp(round(4 + 1.8), 0, 15) = 6`.
+`h = clamp(round(4 + 1.8), 0, 16) = 6` *(bounds corrected 2026-07-10 review — the example previously showed a stale `max_y` of 15)*.
 
 *(This defines only the height mechanism — the specific "hand-shaped valley"
 silhouette is a later level-design decision via `amplitude`/`frequency` or an
@@ -192,7 +202,19 @@ against memory/draw-call budget. See Tuning Knobs.
 
 - `Vector3i` hashes correctly as a `Dictionary` key (value-equality hashing)
   and computes with exact integer arithmetic — neighbor-lookup offsets and
-  bounds checks are exact comparisons, not epsilon-tolerant ones.
+  bounds checks are exact comparisons, not epsilon-tolerant ones. Godot 4.4+
+  typed Dictionaries (`Dictionary[Vector3i, ...]`) give static-type safety
+  at negligible cost — use them *(2026-07-10 review note)*.
+- Memory back-of-envelope *(2026-07-10 review note)*: a sparse Dictionary
+  storing only occupied cells keeps a ~100×32×100 world in the tens of MB
+  even at high occupancy — comfortably inside the 4 GB ceiling; the real
+  memory/perf risk lives in the RENDERING representation (rendering ADR),
+  not this data layer.
+- Collider strategy is a rendering-ADR concern *(2026-07-10 review note)*:
+  if raycast picking is implemented via physics (rather than manual DDA),
+  per-cell colliders for tens of thousands of terrain cells are a known
+  Jolt/scene-tree scalability trap — the ADR must decide picking mechanism
+  and collider granularity together, not separately.
 - A single read or write must be O(1) relative to grid size (see Acceptance
   Criteria).
 - Bulk-write operations (drag-to-area placement) should emit ONE batched
@@ -204,7 +226,8 @@ against memory/draw-call budget. See Tuning Knobs.
 | Scenario | Expected Behavior | Rationale |
 |----------|-------------------|-----------|
 | Query/write for a cell outside the world's bounds | The API returns an explicit "outside grid" result — it does NOT silently clamp to the edge | Prevents silent bugs at boundary cases (see Formulas) |
-| A bulk write operation (e.g., dragging a wall across many cells) | Exactly ONE batched change signal is emitted, not one per cell | Prevents thrashing the Building System's undo stack and rendering listeners |
+| A bulk write operation (e.g., dragging a wall across many cells) | Exactly ONE batched change signal is emitted, not one per cell — and the batched payload (and the bulk-write API's return value) carries the per-cell previous contents for EVERY affected cell *(added 2026-07-10 review: Building's undo stack must restore each cell individually; a batch without per-cell before-states is un-undoable)* | Prevents thrashing the Building System's undo stack and rendering listeners while keeping undo lossless |
+| Terrain generation populates the initial grid | The batched-signal mandate applies here too: generation emits at most ONE batched signal (or none, if listeners attach only after the Generated state) — never one signal per terrain cell *(added 2026-07-10 review)* | A valley floor is tens of thousands of cells; per-cell signals at boot would stall the Booting state |
 | Writing to an already-occupied cell (terrain or another block) | Always overwrites and returns the previous contents; whether overwriting SHOULD be allowed is the caller's (Building System's) decision | This layer stays a pure primitive, not a rules check |
 | `base_height` is misconfigured above `max_y` | The entire terrain clamps flat at `max_y` (no crash, but visibly wrong) | The formula clamps correctly; the designer must notice the tuning mistake — documented as a warning |
 | Read/raycast queries are called very frequently per frame (e.g., every mouse-move for hover picking) | Never mutate grid state; remain cheap (O(1)) regardless of call frequency | Hover-picking is the most frequent query pattern in the Building System |
@@ -324,10 +347,16 @@ misconfiguration, raycast correctness, Save/Load iteration contents.)*
 15. **GIVEN** the Save/Load iteration API is called, **WHEN** it runs,
     **THEN** it returns only non-empty (occupied) cells. *[Logic]*
 16. **Performance**: a single cell read/write completes in O(1) time
-    relative to grid size. *[DEFERRED — requires full build + profiling]*
+    relative to grid size. *[Performance, Advisory — milestone-gated:
+    verified at the pre-VS spike, not per-story; re-tiered 2026-07-10
+    review (an algorithmic-complexity claim isn't per-commit testable)]*
 17. No hardcoded values in implementation — world bounds, `base_height`,
     `amplitude`, `frequency` are read from config, not literals in code.
     *[Config/Data, Advisory]*
+
+**Added by the 2026-07-10 design review:**
+18. **GIVEN** a bulk write affecting N cells, **WHEN** the batched signal is emitted, **THEN** its payload contains the before/after contents for ALL N affected cells (per-cell granularity inside the single signal), and the bulk-write API's return value carries the same per-cell previous contents. *[Logic]*
+19. **GIVEN** terrain generation at boot, **WHEN** the grid is populated, **THEN** at most one batched change signal is observed by any listener — never per-cell signals. *[Integration]*
 
 ## Open Questions
 

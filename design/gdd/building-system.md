@@ -587,7 +587,7 @@ and triggers, never owns.
 | Prototype feel findings + tuning values | `prototypes/building-concept/REPORT.md` | Wall extrusion, surface-aware picking, drag threshold, roof formations, undo | Source of validated values for `wall_height` and `drag_threshold_px` ONLY — `base_build_ticks` is a design hypothesis, NOT prototype-measured (build-over-time was out of prototype scope) |
 | Flush blocks, material families, blue–orange state axis | `design/art/visual-direction-note.md` | §2b, material↔meaning language | Visual constraint |
 | Grid write/read/raycast ownership; natural-vs-built open question | `design/gdd/voxel-world.md` | Core Rules 2/5, Open Questions | Ownership boundary; this GDD resolves its open question (Core Rule 15) |
-| Action signals, mouse world-ray, Suspended state, pan margin question | `design/gdd/camera-input.md` | Core Rules 7–8, Open Questions | Input contract; this GDD answers the pan-margin question (see Open Questions) |
+| Action signals, mouse world-ray, Suspended state, pan margin question | `design/gdd/camera-input.md` | Core Rules 7–10, Open Questions | Input contract; this GDD answers the pan-margin question (see Open Questions) |
 | Tick events, pause/warp, max_ticks_per_frame | `design/gdd/time-tick-system.md` | Core Rules, Formulas | F3's time base + burst rule |
 | Palette, tier-0 set, `bed`, visual_asset | `design/gdd/resource-item-database.md` | Core Rules 5–8, Open Question 1 | Data contract; this GDD resolves its Open Question 1 (bed only) |
 | MVP definition, Pillar 1, anti-pillar (no terraforming) | `design/gdd/game-concept.md` | MVP Definition, Pillars | Scope authority |

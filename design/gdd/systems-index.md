@@ -30,11 +30,11 @@ and Full Vision per the concept doc's own scope tiers.
 
 | # | System Name | Category | Priority | Status | Design Doc | Depends On |
 |---|-------------|----------|----------|--------|------------|------------|
-| 1 | Voxel World / Grid Data System | Core | MVP | Designed | design/gdd/voxel-world.md | — |
-| 2 | Camera & Input | Core | MVP | Designed | design/gdd/camera-input.md | — |
-| 3 | Time & Tick System | Core | MVP | Designed | design/gdd/time-tick-system.md | — |
+| 1 | Voxel World / Grid Data System | Core | MVP | Approved | design/gdd/voxel-world.md | — |
+| 2 | Camera & Input | Core | MVP | Approved | design/gdd/camera-input.md | — |
+| 3 | Time & Tick System | Core | MVP | Approved | design/gdd/time-tick-system.md | — |
 | 4 | Save/Load & World Persistence | Core | Vertical Slice | Not Started | — | Voxel World, Resource & Item Database, Scene/World Management |
-| 5 | Scene/World Management | Core | MVP | Designed | design/gdd/scene-world-management.md | — |
+| 5 | Scene/World Management | Core | MVP | In Review (revised 2026-07-10, re-review pending) | design/gdd/scene-world-management.md | — |
 | 6 | Building System | Gameplay | MVP | Approved | design/gdd/building-system.md | Voxel World, Camera & Input, Resource & Item Database, Time & Tick System |
 | 7 | Build Validation & Navigability | Gameplay | MVP | Designed | design/gdd/build-validation-navigability.md | Building System, Villager AI & Behavior |
 | 8 | Villager AI & Behavior | Gameplay | MVP | Approved | design/gdd/villager-ai-behavior.md | Voxel World, Time & Tick System, Building System |

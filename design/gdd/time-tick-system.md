@@ -94,10 +94,13 @@ manually before production.)*
 
 - **Scene/World Management**: this system does NOT depend on Scene/World
   Management (unlike Camera & Input) — its clock keeps running unchanged
-  through scene transitions. Conversely, Scene/World Management DOES depend
-  on this system: it calls this system's time-warp-reset function when a
-  transition begins (already documented as an Edge Case in that GDD, but
-  not yet listed as a formal dependency there — correction applied below).
+  through scene transitions. **REVISED 2026-07-10**: the former
+  time-warp-reset call from Scene/World Management was REMOVED (its
+  re-review found the reset created an irreversible warp trap in dungeon
+  scenes, where the warp controls don't exist). Time-warp and pause are
+  global game state that persists unchanged across all scene transitions;
+  no system calls into this one on transition events. The time-warp-reset
+  function is retired from the contract.
 - **Camera & Input**: deliberately uses RAW engine delta, not this system's
   game delta — stays fully responsive during pause/warp. No dependency in
   this direction.
@@ -125,11 +128,17 @@ Godot's global `Engine.time_scale`/`SceneTree.paused`.)*
 
 ### Game Delta-Time
 
-`game_delta = raw_delta * time_warp * (paused ? 0 : 1)`
+`game_delta = clamp(raw_delta, 0, max_raw_delta) * time_warp * (paused ? 0 : 1)`
+
+*(Canonical form REVISED 2026-07-10 review: the `max_raw_delta` clamp was
+previously stated only in Edge Cases while the formula here read as if
+unclamped — the formula is the authoritative statement, so the clamp now
+lives in it.)*
 
 | Variable | Symbol | Type | Range | Description |
 |----------|--------|------|-------|-------------|
 | raw_delta | `raw_delta` | float | > 0.0 (~0.0167s @60fps) | Raw engine delta from `_physics_process`, unmodified |
+| max_raw_delta | `max_raw_delta` | float (constant) | **0.1s** (Tuning Knobs, safe 0.05–0.2) | Clamp ceiling applied to `raw_delta` before all use in this system (Edge Cases) |
 | time_warp | `time_warp` | int | {1, 2, 3} | Player-selected speed, stored independently of pause |
 | paused | `paused` | bool | {true, false} | Pause state |
 | game_delta | `game_delta` | float | 0.0–unbounded | Simulated time elapsed this frame |
@@ -149,7 +158,12 @@ where `tick_interval = 1 / ticks_per_second`
 | tick_interval | `tick_interval` | float | derived, `1/ticks_per_second` = 0.5s | Game-time between ticks |
 
 Runs in `_physics_process` (fixed step) for deterministic, frame-rate-
-independent simulation.
+independent simulation. **Assumption (2026-07-10 review)**: this relies on
+the project default `physics_ticks_per_second = 60`; if that project
+setting is ever changed, `raw_delta` and all worked examples here change
+with it. The accumulator MUST be float64 (GDScript `float` — not a
+32-bit shader/packed float) so long sessions don't lose sub-tick
+precision.
 
 **Example**: `time_warp=2`, accumulator already at 0.4700 → `+0.0334` →
 `0.5034` → **tick fires**, `-0.5` → `0.0034` carries forward (no drift).
@@ -167,6 +181,14 @@ the cap is discarded, not deferred
 **Example**: an alt-tab stall → accumulator = 12.3s → `raw_ticks=24` →
 capped to 10, the remaining 6.8s silently discarded (instead of causing a
 cascade of catch-up ticks the following frame too).
+
+**Consumer caveat (2026-07-10 review)**: any downstream invariant phrased
+as "exactly N ticks per game-time interval" (e.g. Villager AI's
+chained-build heartbeat, "exactly 36 ticks at defaults") holds only
+*barring a discard event*. A discard permanently drops simulated time —
+consumers must derive durations from tick COUNTS they observe, never from
+wall-clock or game-clock arithmetic that assumes no tick was ever lost.
+The reciprocal caveat is noted in villager-ai-behavior.md.
 
 *(Godot note: deliberately NOT `Engine.time_scale`/`SceneTree.paused`/
 `Timer` node — these are global and would slow Camera & Input too. A
@@ -188,7 +210,7 @@ project's dependency-injection-over-singleton preference.)*
 | System | Direction | Nature of Dependency |
 |--------|-----------|----------------------|
 | *(none)* | This system depends on | Foundation layer — zero upstream dependencies |
-| Scene/World Management | Depended on by | Calls the time-warp-reset function when a transition begins |
+| Scene/World Management | (edge retired 2026-07-10) | Formerly called the time-warp-reset function on transition begin — removed; warp/pause persist across transitions as global state |
 | Villager AI & Behavior | Depended on by | Consumes game delta and/or tick signal |
 | Needs & Mood System | Depended on by | Consumes tick signal for decay steps |
 | Gathering & Production Chains | Depended on by | Consumes tick signal for production steps |
@@ -255,7 +277,7 @@ of a small "Time HUD" element. Exact placement to be defined in `/ux-design`.
 
 | This Document References | Target GDD | Specific Element Referenced | Nature |
 |---------------------------|-----------|-------------------------------|--------|
-| "Scene/World Management calls the time-warp-reset function" | `design/gdd/scene-world-management.md` | Edge Case: time-warp resets to 1x on transition | Rule dependency |
+| "Time-warp persists unchanged across transitions" | `design/gdd/scene-world-management.md` | Edge Case (REVISED 2026-07-10): warp is global state; the reset call was retired | Rule dependency |
 | "This system's clock is NOT suspended by transitions" | `design/gdd/scene-world-management.md` | Core Rule 4 | Rule dependency |
 | "Camera & Input uses raw engine delta, not game delta" | `design/gdd/camera-input.md` | Formulas section (Pan formula uses raw delta) | Rule dependency |
 | "ticks_per_second, max_ticks_per_frame will be consumed by Villager AI, Needs, Production" | `design/gdd/villager-ai-behavior.md`, `design/gdd/needs-mood-system.md`, `design/gdd/gathering-production-chains.md` (not yet authored) | Tick rate constants | Data dependency |
@@ -286,9 +308,11 @@ missing criteria and 2 precision fixes.)*
 7. **GIVEN** a scene transition begins, **WHEN** it does, **THEN** this
    system's `game_delta` continues to be computed normally (not suspended).
    *[Integration]*
-8. **GIVEN** the time-warp-reset function Scene/World Management calls on
-   transition-begin, **WHEN** invoked, **THEN** it resets `time_warp` to 1
-   without pausing or interrupting `game_delta` continuity. *[Integration]*
+8. **GIVEN** any `time_warp`/pause state, **WHEN** a scene transition
+   begins and completes, **THEN** this system's state (`time_warp`,
+   `paused`, accumulator) is untouched — no API of this system is invoked
+   by transition events. *(REVISED 2026-07-10: replaces the retired
+   time-warp-reset criterion.)* *[Integration]*
 9. **GIVEN** the tick accumulator, **WHEN** `game_delta` is added each
    physics frame, **THEN** a tick fires each time the accumulator crosses
    `tick_interval`, via subtraction (not reset). *[Logic]*
@@ -317,6 +341,13 @@ missing criteria and 2 precision fixes.)*
     `max_ticks_per_frame`, and `max_raw_delta` are all read from config.
     *[Config/Data, Advisory]*
 
+**Added by the 2026-07-10 design review:**
+19. **GIVEN** the game is already paused, **WHEN** pause is requested again (idempotency), **THEN** state is unchanged and no duplicate pause side effects (audio dampening, signal emissions) occur. *[Logic]*
+20. **GIVEN** the game is paused at warp 3x, **WHEN** the player changes warp to 2x and later unpauses, **THEN** the game resumes at 2x — pause survived the warp change, the warp change survived the pause. *[Logic]*
+21. **GIVEN** any external event that changes `time_warp`, **WHEN** it is applied, **THEN** the tick accumulator's stored value is NOT modified — warp changes only affect future `game_delta`, never banked time. *[Logic]*
+22. **GIVEN** multiple systems subscribed to the tick signal, **WHEN** a tick fires, **THEN** exactly ONE global broadcast occurs per tick — consumers share the same emission, no per-consumer timers exist anywhere in the project. *[Integration]*
+23. **GIVEN** a deterministic test harness running 10,000 ticks at fixed `raw_delta`, **WHEN** total simulated time is compared against `10000 × tick_interval`, **THEN** accumulated drift is under one `tick_interval` (the subtract-not-reset guarantee at scale). *[Logic]*
+
 ## Open Questions
 
 | Question | Owner | Deadline | Resolution |
@@ -325,3 +356,4 @@ missing criteria and 2 precision fixes.)*
 | Exact UI trigger for cycling time-warp (keyboard shortcut vs. clickable buttons)? | ux-designer | At `/ux-design` | **RESOLVED 2026-07-10**: Building UI owns the MVP time controls — Space = pause, +/− or direct 1x/2x/3x buttons, top-right HUD (building-ui.md Rules 1/10) |
 | Is "dampened" ambient audio during pause correct, or should it fully mute? | audio-director | At the Audio System GDD | — |
 | Does `ticks_per_second = 2.0` actually fit the granularity Villager AI/Needs decay need? | systems-designer / ai-programmer | At those GDDs | — |
+| Reciprocal of villager-ai-behavior.md OQ9: does any Villager AI duration math implicitly assume zero discard events? (See the Consumer caveat under Max-Ticks-Per-Frame.) *(2026-07-10 review)* | ai-programmer | Pre-VS spike | — |

@@ -292,7 +292,7 @@ This GDD *is* the UI — this section points forward instead:
 | UI Requirements contract (toolbar, stepper, undo, feedback) | `design/gdd/building-system.md` | UI Requirements | This GDD's order sheet |
 | Toast events + why-strings + re-assert rule | `design/gdd/build-validation-navigability.md` | Rule 8, AC 22 | Event contract |
 | Pause/warp trigger ("Building UI/HUD") | `design/gdd/time-tick-system.md` | Core Rule 2 | **Resolved by this GDD** (Rules 1/10 — patch note there) |
-| Action ownership, Suspended, raw-delta pattern | `design/gdd/camera-input.md` | Core Rules 7–8 | New actions under its ownership (Rule 12) |
+| Action ownership, Suspended, raw-delta pattern | `design/gdd/camera-input.md` | Core Rules 7–10 (Rules 9–10 authored 2026-07-10) | New actions under its ownership (Rule 12) |
 | Palette data (`display_name`, `visual_asset`, tier-0) | `design/gdd/resource-item-database.md` | Core Rules 4–8 | Data contract |
 | Blue–orange axis, material colors | `design/art/visual-direction-note.md` | State axis | Visual constraint |
 

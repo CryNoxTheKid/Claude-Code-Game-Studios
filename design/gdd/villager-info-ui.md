@@ -201,7 +201,7 @@ This GDD *is* the UI — pointer forward:
 | Info-UI contract: state labels, distress flags; hit query | `design/gdd/villager-ai-behavior.md` | UI Requirements, Rule 12, Edge Case 2 | Order sheet (villager half) |
 | UI contract: values, band, why-string verbatim | `design/gdd/needs-mood-system.md` | UI Requirements | Order sheet (needs half) |
 | Click ownership, quiet-HUD principle, zones | `design/gdd/building-ui.md` | Rules 1/11 | Sibling coordination |
-| Mouse-ray, click actions, Suspended | `design/gdd/camera-input.md` | Core Rules 7–8 | Input contract |
+| Mouse-ray, click actions, Suspended, raw-delta/pause contract | `design/gdd/camera-input.md` | Core Rules 7–10 (Rules 9–10 authored 2026-07-10) | Input contract |
 | Blue–orange axis, cozy tone | `design/art/visual-direction-note.md` | State axis | Visual constraint |
 | Pillar 2/4, onboarding beat | `design/gdd/game-concept.md` | Pillars, Flow | Scope authority |
 

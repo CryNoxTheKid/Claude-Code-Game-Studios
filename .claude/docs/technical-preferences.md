@@ -47,7 +47,13 @@
 ## Forbidden Patterns
 
 <!-- Add patterns that should never appear in this project's codebase -->
-- [None configured yet — add as architectural decisions are made]
+- **`SceneTree.paused`** — never use for game pause. Pause is owned by the
+  Time & Tick System (`game_delta = 0`); the engine-global pause would also
+  freeze the camera, UI, and transition overlays, which must keep running
+  on raw delta. (Source: time-tick-system.md Formulas + 2026-07-10 review.)
+- **`Engine.time_scale`** — never use for time-warp. Warp is owned by the
+  Time & Tick System (`game_delta` multiplier); the engine-global scale
+  would also speed up camera feel and UI animation. (Same source.)
 
 ## Allowed Libraries / Addons
 

@@ -65,7 +65,11 @@ manually before production.)*
 5. WASD pans the orbit target along the ground plane, direction relative to
    the camera's current yaw ("W" always means "forward relative to view"),
    scaled by delta-time and current distance (panning feels proportionally
-   faster when zoomed out).
+   faster when zoomed out). Screen-edge panning is deliberately NOT
+   included in MVP — a decision, not an omission: edge-pan fights the
+   mouse-driven building workflow (the cursor lives at the screen edges
+   during placement) *(made explicit 2026-07-10 review; revisit at
+   playtest if players ask for it)*.
 6. The orbit target is clamped to the Voxel World's horizontal bounds (plus
    a small margin) so panning cannot drift into the void beyond the valley.
 7. This system owns the InputMap action definitions (e.g., `build_place`,
@@ -76,14 +80,33 @@ manually before production.)*
    camera's projection and the mouse's screen position), so any system
    (e.g., the Building System, which forwards it to Voxel World's raycast)
    can convert the mouse position into a world-space ray without
-   recomputing the camera projection itself.
+   recomputing the camera projection itself. The ray is ALWAYS computable —
+   in every state, including Suspended (frozen transform) — callers never
+   need a "is the ray available?" branch *(clarified 2026-07-10 review)*.
+9. **Raw-delta contract** *(authored 2026-07-10 review — building-ui.md and
+   villager-info-ui.md already cite this contract; it was implied by the
+   Formulas but never stated as a rule)*: all camera motion (rotate, zoom,
+   pan) is driven by RAW engine delta-time, never by Time & Tick's
+   `game_delta`. Camera feel is identical at 1x, 2x, 3x warp.
+10. **Pause contract** *(authored 2026-07-10 review, same provenance)*:
+    game pause does NOT suspend this system — the camera remains fully
+    controllable and input dispatch continues while paused, so the player
+    can inspect their village and queue plans. **Suspended ≠ Pause**:
+    Suspended is exclusively the scene-transition state (see States); the
+    two conditions are independent and neither implies the other.
+11. **Action registration** *(authored 2026-07-10 review)*: the InputMap
+    actions this system owns are registered in the Godot project settings
+    (project.godot) at project scope, not created in code at runtime — the
+    authoritative list is the union of actions named by downstream GDDs
+    (Building System, Building UI, Villager Info UI), collected at
+    `/create-architecture` into the input ADR.
 
 ### States and Transitions
 
 | State | Entry Condition | Exit Condition | Behavior |
 |-------|-----------------|-----------------|----------|
 | Active | Default; also entered from Suspended once a scene finishes loading | A scene transition begins (see Scene/World Management) | Full camera control (rotate/zoom/pan) and input dispatch are enabled |
-| Suspended | A scene transition begins (Scene/World Management's Transitioning state) | Scene transition completes | Camera position freezes; no rotate/zoom/pan; input events are not dispatched to gameplay systems |
+| Suspended | A scene transition begins (Scene/World Management's Transitioning state) | Scene transition completes | Camera position freezes; no rotate/zoom/pan; input events are not dispatched to gameplay systems. **Ordering** *(2026-07-10 review)*: suspension takes effect the moment the transition-begin signal is processed — an input event arriving later in the SAME frame is already ignored; an input processed earlier that frame stands (single-frame greyzone accepted, invisible at 60fps) |
 
 *(Directly implements Scene/World Management's Core Rule 6 — "neither scene
 receives input" during a transition.)*
@@ -204,8 +227,14 @@ unnecessary device-ID logic here later.
 | `pan_speed_factor` | 0.7 | 0.3–1.5 | Faster panning | Slower panning |
 | `max_delta_time` | 0.1s | 0.05–0.2s | Larger possible camera jumps after a hitch | Camera visibly "lags" through a hitch instead of jumping |
 
-*(All values except `pitch_min`/`pitch_max` and `max_delta_time` come directly
-from the playtested building prototype — no invented numbers.)*
+*(Provenance corrected by the 2026-07-10 review — the earlier claim "all
+values come directly from the playtested prototype" overstated: the
+prototype's REPORT.md contains no camera-value findings. The values were
+carried over from the prototype's source configuration, which playtesting
+did not flag as wrong — that is weaker evidence than a positive finding.
+All values are therefore `[assumption — prototype-sourced defaults]`
+except `pitch_min`/`pitch_max` (pole-degeneracy math, see Formulas) and
+`max_delta_time` (engineering judgment). First playtest validates them.)*
 
 ## Visual/Audio Requirements
 
@@ -322,12 +351,23 @@ behavior, InputMap non-interpretation as a positive checkable contract).)*
 15. **GIVEN** an InputMap action fires (e.g. `build_place`), **WHEN** this
     system processes it, **THEN** the emitted signal payload contains only
     the action name string, and the emitting code path contains no branch on
-    that string's value. *[Logic]*
+    that string's value. *[Advisory — code-review check, re-tiered
+    2026-07-10: "contains no branch" is verified by reading the code, not
+    by a runtime assertion]*
 16. **Performance**: camera position recomputation and input processing
     complete within budget every frame. *[DEFERRED — requires full build +
     profiling]*
 17. No hardcoded values — all tuning knob values are read from config/
     exported vars, verified by code review. *[Config/Data, Advisory]*
+
+**Added by the 2026-07-10 design review** *(precision note: all "exact
+same value" comparisons in ACs above — e.g. AC10's restored
+yaw/pitch/distance/target — mean equality within 1e-4, not bitwise float
+equality)*:
+18. **GIVEN** project boot, **WHEN** the InputMap is inspected, **THEN** every action name any downstream GDD references (`build_place`, `build_remove`, camera actions, UI shortcuts) exists as a registered action — no consumer ever queries an unregistered action name. *[Integration]*
+19. **GIVEN** a mouse click that a UI element consumes (Building UI / Villager Info UI click-ownership), **WHEN** the click is handled by the UI layer, **THEN** this system does NOT also emit the corresponding world-action signal for that same click — exactly one owner per click. *[Integration]*
+20. **GIVEN** the pan-bound margin is configured to 0 (the current default), **WHEN** the target is panned hard against a world edge, **THEN** the clamp still behaves per AC7 (zero further delta, no error) — margin 0 is a valid configuration, not an edge case. *[Logic]*
+21. **GIVEN** the mouse is at screen position P, **WHEN** the world-ray is queried and intersected with the ground plane, **THEN** re-projecting that intersection back to screen space yields P within 1 pixel (round-trip projection correctness). *[Logic]*
 
 ## Open Questions
 
