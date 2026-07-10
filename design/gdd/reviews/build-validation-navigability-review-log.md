@@ -75,3 +75,60 @@ ACs 26 → 36 (+ AC5/16/17/18/19/21 rewritten). Core Rules 9 → 11. Edge Cases
 registered). Files touched: build-validation-navigability.md,
 building-system.md (1 reciprocal bullet), villager-ai-behavior.md (1 reciprocal
 OQ3 axis). **Re-review pending in a fresh session.**
+
+## Review — 2026-07-10 — Verdict: NEEDS REVISION (narrow) → revised → APPROVED
+Scope signal: M
+Specialists: game-designer, systems-designer, ai-programmer, godot-specialist, performance-analyst, ux-designer, qa-lead + creative-director (synthesis) + fresh qa-lead verification pass
+Blocking items: 1 | Recommended: 6 (+8 advisory)
+Summary: RE-REVIEW. All 6 prior blockers VERIFIED RESOLVED by 7 specialists
+(B2's "nearest-solid" proven safe against false negatives; per-frame
+batching confirmed two-sided via building-system AC47; B6's suspected
+load-timing contradiction "doesn't hold up"). One new blocker — same-pass
+celebration tie-break (4-way independent convergence: game-designer,
+systems-designer, ux-designer, qa-lead; AC32 non-deterministic) — resolved
+by USER DECISION: **grouped celebration** (all rooms in one pass emit
+celebrate=true with shared pass_group_id; UI presents one combined event;
+cooldown starts after the group). CD expected round-3 approval; delivered.
+Prior verdict resolved: Yes (all 6 blockers hold)
+
+### Patch sweep (all grep-verified + fresh-agent verification)
+1. Same-pass grouping: Rule 11 + Rule 10 payload (pass_group_id) + AC32
+   split into 32 (sequential) / 32b (same-pass) + Visual/Audio one-chime-
+   per-group + Tuning Knobs row reworded.
+2. AC36 re-parameterized (2nd attempt after R5 missed): 100 checked-in
+   seeds, 32×32×16 worlds, 10–40% fill, 50 pairs/seed, 5,000 verdicts,
+   ≤60s CI, tests/integration/build-validation/.
+3. Corner-touch ruling (CD downgraded ai-programmer's finding): trace may
+   pass through another region's interior — intended, flanked-diagonal
+   legality = genuine opening. Rule 2 + Edge Case 14 + AC37.
+4. Rule 11 snapshot: incremental-update mandate (full rebuild only on
+   load) + OQ5 axis (c) resident-memory + load-pass cross-ref (godot +
+   performance convergent finding).
+5. No-cleared-signal model stated in Rule 10; tier-swap (Warning→Info)
+   reconciliation defined; UI seam flag expanded to FOUR items incl. the
+   note that building-ui Rule 9 currently contradicts the debounce.
+6. Game Feel overclaim corrected: first-appearance grace ≠ dismissal
+   debounce; both UI-owned, neither specified yet (game-designer finding).
+7. Downstream table Undesigned → Designed (not yet reviewed); character-
+   occupancy clause in Rule 1 + AC38; AC31 extended to both tiers on load;
+   EC13 VS roof-slope forward note; sealed-pocket-merge no-celebration
+   acknowledged; EC9 knob scoping.
+
+### Verification pass
+Fresh qa-lead agent, 14-point check: 12 VERIFIED + 2 residual mirror
+defects (Tuning Knobs "at most one celebrate=true" contradicting the
+grouping rule; Rule 1 citing AC33 for an untested isolation claim) →
+both patched (row reworded; new AC38 + citation fix) → re-verified
+**CLEAN**. ACs now 38 (26 → 36 round 1 → 38 round 2).
+
+### Carried forward (not this GDD's to fix)
+- Building UI review MUST cover the four-item seam flag (inspection
+  surface, re-show debounce, first-appearance grace, tier-swap
+  reconciliation) and resolve its Rule 9 contradiction.
+- OQ5 axes (a/b/c) → building/AI ADR + pre-VS spike (merged-structure
+  case + resident memory).
+- Advisory: payload-content ACs; Player Fantasy load-re-warning prose;
+  celebration significance (shed-vs-hall) = playtest question.
+
+**Build Validation & Navigability = APPROVED 2026-07-10** (user
+pre-authorized approve-on-clean via the re-review path decision).

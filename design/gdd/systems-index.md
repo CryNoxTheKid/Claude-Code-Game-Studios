@@ -36,7 +36,7 @@ and Full Vision per the concept doc's own scope tiers.
 | 4 | Save/Load & World Persistence | Core | Vertical Slice | Not Started | — | Voxel World, Resource & Item Database, Scene/World Management |
 | 5 | Scene/World Management | Core | MVP | Approved (2026-07-10, 5 review rounds — see review log) | design/gdd/scene-world-management.md | — |
 | 6 | Building System | Gameplay | MVP | Approved | design/gdd/building-system.md | Voxel World, Camera & Input, Resource & Item Database, Time & Tick System |
-| 7 | Build Validation & Navigability | Gameplay | MVP | In Review (2026-07-10 reviewed NEEDS REVISION → revised in-session, re-review pending) | design/gdd/build-validation-navigability.md | Building System, Villager AI & Behavior |
+| 7 | Build Validation & Navigability | Gameplay | MVP | Approved (2026-07-10 — 2 review rounds + verification pass CLEAN, see review log) | design/gdd/build-validation-navigability.md | Building System, Villager AI & Behavior |
 | 8 | Villager AI & Behavior | Gameplay | MVP | Approved | design/gdd/villager-ai-behavior.md | Voxel World, Time & Tick System, Building System |
 | 9 | Needs & Mood System | Gameplay | MVP | Approved (2026-07-10 — review + in-session revision + verification pass CLEAN) | design/gdd/needs-mood-system.md | Villager AI & Behavior, Time & Tick System, Build Validation & Navigability |
 | 10 | Professions & Ranks | Gameplay | Alpha | Not Started | — | Villager AI & Behavior, Gathering & Production Chains |
