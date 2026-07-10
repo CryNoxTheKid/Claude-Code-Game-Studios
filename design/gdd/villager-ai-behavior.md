@@ -1,6 +1,6 @@
 # Villager AI & Behavior
 
-> **Status**: Draft
+> **Status**: Approved (2026-07-10 — full review NEEDS REVISION -> revised -> re-review APPROVED; see design/gdd/reviews/villager-ai-behavior-review-log.md)
 > **Author**: user + Claude Code Game Studios agents
 > **Last Updated**: 2026-07-09
 > **Last Verified**: 2026-07-09
@@ -501,7 +501,7 @@ one tick", which broke at `move_speed` < 2.0)*.
 |--------|-----------|---------------------------|
 | Voxel World | ✅ Designed | Physical occupancy reads for walkability (Rules 8–9); write signals for mid-travel re-pathing. Never mutates the grid |
 | Time & Tick System | ✅ Designed | Tick events (decisions, work, need recovery) + game delta (movement interpolation); pause/warp semantics |
-| Building System | ✅ Designed (In Review) | The construction-job queue and its Core Rule 12 contract — this GDD confirms it and supplies the AI halves (Rules 3–7) |
+| Building System | ✅ Approved | The construction-job queue and its Core Rule 12 contract — this GDD confirms it and supplies the AI halves (Rules 3–7) |
 | Needs & Mood System | ✅ Designed (2026-07-10) | Which needs exist, urgency/wake thresholds, decay and recovery rates (incl. the ground-sleep penalty) — **interface CONFIRMED** by needs-mood-system.md (urgency=25, satisfied=95, ground_penalty=0.4 — registered constants) |
 
 ### Downstream (systems that depend on this one)

@@ -1,6 +1,6 @@
 # Time & Tick System
 
-> **Status**: Draft
+> **Status**: Approved (2026-07-10 — full review APPROVED-with-patches, applied; see design/gdd/reviews/time-tick-system-review-log.md)
 > **Author**: user + Claude Code Game Studios agents
 > **Last Updated**: 2026-07-09
 > **Last Verified**: 2026-07-09
