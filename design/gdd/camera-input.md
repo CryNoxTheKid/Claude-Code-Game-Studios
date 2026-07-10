@@ -105,8 +105,8 @@ manually before production.)*
 
 | State | Entry Condition | Exit Condition | Behavior |
 |-------|-----------------|-----------------|----------|
-| Active | Default; also entered from Suspended once a scene finishes loading | A scene transition begins (see Scene/World Management) | Full camera control (rotate/zoom/pan) and input dispatch are enabled |
-| Suspended | A scene transition begins (Scene/World Management's Transitioning state) | Scene transition completes | Camera position freezes; no rotate/zoom/pan; input events are not dispatched to gameplay systems. **Ordering** *(2026-07-10 review)*: suspension takes effect the moment the transition-begin signal is processed — an input event arriving later in the SAME frame is already ignored; an input processed earlier that frame stands (single-frame greyzone accepted, invisible at 60fps) |
+| Active | Default; also entered from Suspended when a scene transition ends — on transition-complete OR transition-abort *(abort path added 2026-07-10, reciprocal with Scene/World Management's Core Rule 7 three-signal contract: without it, a failed load stranded the camera in Suspended permanently)* | A scene transition begins (see Scene/World Management) | Full camera control (rotate/zoom/pan) and input dispatch are enabled |
+| Suspended | A scene transition begins (Scene/World Management's Transitioning state) | Scene transition completes OR aborts (either end-signal releases Suspended — never complete alone) | Camera position freezes; no rotate/zoom/pan; input events are not dispatched to gameplay systems. **Ordering** *(2026-07-10 review)*: suspension takes effect the moment the transition-begin signal is processed — an input event arriving later in the SAME frame is already ignored; an input processed earlier that frame stands (single-frame greyzone accepted, invisible at 60fps) |
 
 *(Directly implements Scene/World Management's Core Rule 6 — "neither scene
 receives input" during a transition.)*
@@ -206,7 +206,7 @@ unnecessary device-ID logic here later.
 
 | System | Direction | Nature of Dependency |
 |--------|-----------|----------------------|
-| Scene/World Management | This system depends on | Listens for the transition-begin/-complete signal to enter/exit Suspended state |
+| Scene/World Management | This system depends on | Listens for the transition signals: Suspended entered on begin, exited on complete OR abort (abort listener added 2026-07-10, reciprocal with that GDD's Core Rule 7) |
 | Voxel World | (indirect only, via Building System) | See Interactions — no direct call |
 | Building System | Depended on by | Consumes InputMap action signals and the mouse-world-ray query |
 | Building UI | Depended on by | Registers its bindings (`tool_select_1..5`, `time_pause`, `time_speed_up/down`) under this system's action ownership (its Rule 12); follows Suspended (added 2026-07-10, cross-review bidirectional fix) |
@@ -295,7 +295,7 @@ element. Camera settings (e.g., sensitivity) belong to Main Menu & Settings
 
 | This Document References | Target GDD | Specific Element Referenced | Nature |
 |---------------------------|-----------|-------------------------------|--------|
-| "Listens for the transition-begin/-complete signal" | `design/gdd/scene-world-management.md` | Transition signal (already defined there for Save/Load) | State trigger |
+| "Listens for the transition-begin/-complete/-abort signals" | `design/gdd/scene-world-management.md` | Transition signals (Core Rule 7 three-signal contract) | State trigger |
 | "Suspended state directly implements 'neither scene receives input'" | `design/gdd/scene-world-management.md` | Core Rule 6 | Rule dependency |
 | "world_width_cells, world_depth_cells, cell_size bound the pan target" | `design/gdd/voxel-world.md` | Tuning Knobs + `cell_size` constant | Data dependency |
 | "InputMap action results feed the Building System's interpretation" | `design/gdd/building-system.md` (not yet authored) | Action signal consumption | Data dependency |
@@ -333,9 +333,11 @@ behavior, InputMap non-interpretation as a positive checkable contract).)*
 9. **GIVEN** a scene transition begins, **WHEN** the signal fires, **THEN**
    the camera immediately enters Suspended (no rotate/zoom/pan, no input
    dispatch). *[Integration]*
-10. **GIVEN** the camera is Suspended, **WHEN** the transition completes,
-    **THEN** it returns to Active with the exact same yaw/pitch/distance/
-    target it had when suspended. *[Integration]*
+10. **GIVEN** the camera is Suspended, **WHEN** the transition completes —
+    OR aborts on load failure *(abort case added 2026-07-10, reciprocal
+    with Scene/World Management Core Rule 7)* — **THEN** it returns to
+    Active with the exact same yaw/pitch/distance/target it had when
+    suspended. *[Integration]*
 11. **GIVEN** the rotate mouse button is held when a transition begins,
     **WHEN** suspended, **THEN** the held button is ignored until released
     and re-pressed. *[Integration]*

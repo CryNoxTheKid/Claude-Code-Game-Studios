@@ -1,6 +1,55 @@
 # Review Log — Scene/World Management
 
-## Review — 2026-07-10 — Verdict: NEEDS REVISION (re-review #1)
+## Review — 2026-07-10 — Verdict: NEEDS REVISION (re-review #2)
+Scope signal: S
+Specialists: game-designer, systems-designer, qa-lead, godot-specialist + creative-director (senior synthesis)
+Blocking items: 8 | Recommended: ~10
+Summary: All 5 prior blockers HOLD at rule-text level; core design stable.
+But the "each fix spawns a mirror defect" pattern recurred a 3rd time, and
+the CD named its root cause: a TWO-signal model (begin/complete) covering
+THREE outcomes (begin → success OR failure-abort). Top blocker: Core Rule
+7's success-only COMPLETE leaves reversible begin-effects (camera
+Suspended, UI hidden) with no unwind path on a failed load — a confirmed
+soft-lock contradicting AC8. Fix: introduce a first-class transition-ABORT
+signal (the round's one design decision). Second: Core Rule 1 was never
+updated to the World Root topology (still "Valley as active scene" —
+contradicts Core Rule 2, and leaves no engine gate for AC17's boot-halt).
+Remainder: missing topology AC, Booting failure-exit missing from States
+table, cancel-ordering contradiction vs building-system.md's reactive
+Suspended model, AC10(c) flaky-test ambiguity, AC18 split (bit-identical
+untestable + Save/Load undesigned), AC13 scope tag missing (falsifying
+re-review #1's "all 18 tagged" claim — 2nd consecutive round with an
+unverified fix summary; grep-verification now mandatory). CD adjudications:
+return-cue ACs downgraded to advisory (Visual/Feel is ADVISORY-gated) with
+a Core Rule 5 mapping fix instead; change_scene_to_file() guardrail
+ELEVATED to must-land; nav-map/input-routing folded into OQ2.
+Prior verdict resolved: Partially (all 12 fixes present; 3 defective in
+new mirror-image ways: Core Rule 7 abort trap, Booting States-table gap,
+AC13 tag miss)
+
+**Post-review revision (same session, 2026-07-10):** all 8 blockers fixed
+with 3 user decisions: (1) transition-ABORT as a first-class third signal —
+Core Rule 7 is now a three-signal contract (begin = reversible, complete =
+success + irreversible, abort = failure + full unwind), debounce releases
+on either end-signal; (2) return-cue mapping = 3 BUCKETS (completion →
+amber, voluntary exit → new neutral cue, death/retreat → muted; exit-vs-
+retreat enum → Dungeon System GDD) — Core Rule 5 + a third Visual/Audio
+row; (3) reciprocal camera-input.md patch approved (Suspended exits on
+complete OR abort — States, Dependencies, Cross-Refs, AC10). Other fixes:
+Core Rule 1 reworded (engine boots World Root, Valley attached at the boot
+gate); Booting failure-exit formalized in the States table; cancel-ordering
+aligned to building-system.md's reactive Suspended model; AC10(c) →
+deterministic tick advancement; AC18 split (18a Building undo deep-equality
+/ 18b Save/Load DEFERRED); AC13 tagged [VS+]. Folds: change_scene_to_file/
+_packed/reload_current_scene guardrail in Core Rule 2; hosted-systems list
+completed; OQ2 + nav-maps/input-routing/GI facets; AC17 split a/b; AC19
+(World Root sibling topology regression guard); AC20 (advisory cue-split
+guard); AC15 marked provisional (teardown OQ); AC12b baseline → same-scene
+steady-state; AC12 thresholds labeled test-harness constants; 2 new OQs
+(repeat-visit fatigue, boot budget); per-beat duration tuning note.
+ACs now 20 (17a/b, 18a/b). Every fix grep-VERIFIED against both files
+(CD process mandate). **Re-review #3 NOT yet run** — run
+`/design-review design/gdd/scene-world-management.md` in a FRESH session.
 Scope signal: S
 Specialists: game-designer, systems-designer, qa-lead, godot-specialist + creative-director (senior synthesis)
 Blocking items: 2 (+4 execution defects from the prior revision) | Recommended: ~6
