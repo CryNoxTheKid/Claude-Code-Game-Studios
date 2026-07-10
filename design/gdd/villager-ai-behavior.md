@@ -731,7 +731,12 @@ VS/Full-Vision milestones — not part of the Logic gate, re-tiered
    (Rule 10c's stagger under test), Breather step-away/bed-drift
    pathing costs, and Rule 10b's widened all-movement filter scope.
    The per-tick selection budget behind Rule 10c's stagger directive
-   is a core deliverable of that ADR. → *AI ADR + the
+   is a core deliverable of that ADR. Added 2026-07-10 by the Build
+   Validation review: (d) **region flood-fill cost on a sprawling
+   MERGED-STRUCTURE world** — Build Validation's region re-analysis
+   scales with connected build footprint, NOT villager count (its OQ 5
+   axis (b)); the spike must include this case independently of the
+   30-villager population stress. → *AI ADR + the
    performance spike before Vertical Slice*
 4. **Day/night rhythm** — the concept's "day schedules" (work by day,
    sleep by night) layers on top of the need-driven MVP. Requires a

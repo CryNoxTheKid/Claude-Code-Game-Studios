@@ -293,7 +293,13 @@ finished stat-box (the building IS the stats, Pillar 1).
   confirm claiming, pathing-failure, and abandonment semantics.
 - **Build Validation & Navigability** (MVP, downstream): reads completed
   structures (and possibly blueprints) to judge enclosure/livability.
-  This system exposes "a construction completed" signals for it.
+  This system exposes "a construction completed" signals for it —
+  **batched per FRAME** (the same batching mandate as the Voxel World
+  bulk-writes above): N cells completing in one frame, across any number
+  of commands and villagers, fire ONE completion signal. *(Contract
+  required by that GDD's Edge Case 10/AC19 — added 2026-07-10 by its
+  design review; without it, N parallel completions could trigger N
+  region re-analyses in one frame.)*
 - **Building UI** (MVP, downstream): renders the tool palette, material
   selection, wall-height stepper, roof-formation picker, and undo/redo
   buttons; displays validity feedback. All state it shows lives here.

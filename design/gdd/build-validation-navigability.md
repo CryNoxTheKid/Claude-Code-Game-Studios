@@ -87,18 +87,42 @@ meaningful without policing it.
 
 **Room detection (the no-doors MVP definition)**
 
-1. A **candidate interior cell** is an air cell with a solid cell directly
-   above it (roof — at any height within `max_room_height`, default 8) and
-   a solid cell directly below (built floor or terrain). A **candidate
-   region** is a maximal orthogonally-connected set of candidate interior
-   cells.
+1. A **candidate interior cell** is a cell that is **standable per
+   Villager AI's Rule 8, consumed verbatim** — a solid cell directly
+   below (built floor or terrain) and the cell plus the two cells above
+   it empty (`villager_clearance` = 3) — AND **roofed**: scanning
+   straight up from the cell, the NEAREST solid cell sits at most
+   `max_room_height` (default 8) above it. Standability already
+   guarantees that roof is at least `villager_clearance` cells up — a
+   crawlspace (roof 1–2 above the floor) is never interior (Edge Case
+   13). For this analysis, furniture occupancy is transparent: a cell
+   occupied by furniture evaluates as if empty (furniture never counts
+   as floor, wall, or roof), so a furniture item's own cell has a
+   well-defined candidate status (Rule 5, Edge Case 8). A **candidate
+   region** is a maximal orthogonally-connected set of candidate
+   interior cells (orthogonal adjacency defines region *membership*
+   only; movement/reachability uses the villager movement graph, Rule 2).
 2. A candidate region is a **valid room** iff: it has at least
    `min_room_cells` (default 2) interior cells, AND at least one
-   villager-walkable connection to the outside world exists (per Villager
-   AI's exact walkability rules — `villager_clearance` = 3,
-   `max_step_height` = 1, consumed verbatim). The MVP's "door" is simply a
-   walkable gap in the walls; Vertical Slice doors will formalize these
-   openings without changing this definition.
+   villager-walkable connection to the outside world exists. Both halves
+   of that test are pinned:
+   - **The reach graph is the villager movement graph, consumed
+     verbatim** (Villager AI Rules 8–9: standability with
+     `villager_clearance` = 3, orthogonal steps with `max_step_height`
+     = 1, and diagonal steps ONLY when both flanking orthogonal cells
+     are passable — no corner-cutting). It is NOT a plain 4- or
+     8-neighbor flood-fill: it is exactly the graph a villager may walk.
+   - **The outside world** is any standable cell that is NOT roofed (no
+     solid cell within `max_room_height` straight above — open sky, the
+     same scan as Rule 1). The connection test walks the movement graph
+     outward from the region's interior cells until it reaches an
+     open-sky standable cell, or exhausts all reachable cells (→
+     Sealed). Reaching another enclosed space's interior is NOT
+     "outside" — a chain of enclosed spaces is outside-connected only
+     if the chain reaches open sky.
+   The MVP's "door" is simply a walkable gap in the walls; Vertical
+   Slice doors will formalize these openings without changing this
+   definition.
 3. A candidate region with NO walkable connection to the outside is a
    **sealed space** — never a room. If it contains furniture, it raises
    the sealed-space warning (Rule 8); if empty, it is silently ignored
@@ -131,18 +155,65 @@ meaningful without policing it.
 8. Three player-facing outputs, all non-modal, severity-tiered:
    - **Confirmation** (positive): a candidate region becomes a valid room
      → the "room recognized" moment (one-shot celebration cue +
-     persistent subtle status).
-   - **Warning — sealed space with furniture**: furniture exists in a
-     sealed space → persistent gentle warning naming the problem ("the
-     bed can't be reached — the room has no opening").
+     persistent subtle status; edge-detected and paced per Rule 11).
+   - **Warning — sealed space with need-functional furniture**:
+     **need-functional** furniture (furniture with a need-recovery
+     function — MVP: the bed; decorative/inert furniture never warns)
+     exists in a sealed space → persistent gentle warning naming the
+     problem ("the bed can't be reached — the room has no opening").
    - **Info — unsheltered bed**: a claimed/placed bed outside any valid
-     room → low-key hint ("a roof would make this a proper home"),
-     because it works, just sub-optimally.
+     room AND not inside a sealed space (i.e. in the open) → low-key
+     hint ("a roof would make this a proper home"), because it works,
+     just sub-optimally.
+   **The tiers are mutually exclusive per furniture item — Warning
+   supersedes Info**: a bed in a sealed space emits the sealed-space
+   Warning only, never additionally the unsheltered Info hint (one
+   problem, one cue — a helpful eye, not a nag). The mechanical
+   `shelter_status_changed` flag (Rule 10) is independent of both tiers
+   and fires for ALL furniture regardless of type.
 9. This system never blocks, reverts, or auto-fixes a placement (Building
    System Core Rule 10). It also never moves villagers or triggers
    behavior — Villager AI does its own reach checks at claim time (its
    F2/Rule 11); this system's outputs are for the *player's*
    understanding.
+
+**Signal contract and analysis memory**
+
+10. **Signal contract** — this system emits exactly four signals; no
+    other emissions exist:
+
+    | Signal | Payload | Trigger | Consumers |
+    |--------|---------|---------|-----------|
+    | `shelter_status_changed` | item id, `sheltered: bool` | A furniture item's sheltered flag transitions (Rule 5) — exactly one emission per transition, for ALL furniture types | Needs & Mood (recovery ladder), UIs |
+    | `room_recognized` | region cells, `celebrate: bool` | A region transitions non-Room → Room (edge-detected per Rule 11; `celebrate` paced per Rule 11) | UIs (one-shot cue + quiet persistent status) |
+    | `sealed_space_warning` | region cells, affected item ids, why-string | Every qualifying analysis pass while a sealed space contains need-functional furniture (re-emit semantics, AC22) | UIs |
+    | `unsheltered_furniture_info` | item id, why-string | Every qualifying analysis pass while a bed sits unsheltered in the open (Rule 8 exclusivity: never for sealed-space items) | UIs |
+
+    Warning and Info are separate typed signals, not severity payloads
+    of one signal. `shelter_status_changed` is the only signal Needs
+    consumes; the other three are presentational. All current statuses
+    are additionally queryable at any time (state + events model — the
+    same consumption contract Needs & Mood established).
+11. **Transient analysis memory (edge detection + pacing).** The system
+    keeps a transient, never-serialized snapshot of the previous
+    analysis result (per-cell region classification + per-item shelter
+    flags), used ONLY to edge-detect transitions (Rules 8/10) — it is
+    memory for eventing, never a compute cache. Region continuity for
+    the one-shot: a newly valid room fires `room_recognized` only if
+    NONE of its interior cells belonged to a valid room in the previous
+    snapshot — merges and splits of existing rooms never re-fire it.
+    Celebration pacing: at most one `room_recognized` with `celebrate =
+    true` per `room_cue_cooldown_ticks` (Tuning Knobs); further
+    recognitions inside the window emit with `celebrate = false` (quiet
+    status only). On world load, the initial full pass (Edge Case 11)
+    seeds the snapshot silently: statuses become queryable, but no
+    transition events (`shelter_status_changed`, `room_recognized`)
+    fire; Warning/Info emissions DO fire on the load pass (they reflect
+    persisting causes, not transitions — a sealed bed is re-warned
+    immediately after load). This refines Rule 4: "no persistent
+    identity" means nothing serialized and no player-facing room
+    objects — the transient snapshot is rebuilt from the world on every
+    load.
 
 ### States and Transitions
 
@@ -152,7 +223,7 @@ meaningful without policing it.
 |-------|-------|------|----------|
 | Open | Region fails enclosure (no roof/floor coverage or below `min_room_cells`) | Structure change re-evaluation | No status shown — just ordinary outdoors/incomplete construction |
 | Room (valid) | Enclosure met + walkable outside connection | Structure change breaks a condition | "Room recognized" one-shot on entry; furniture inside is sheltered |
-| Sealed | Enclosure met, NO walkable outside connection | An opening is created / region dissolves | Sealed-space warning iff furniture inside; furniture inside is unsheltered (a sealed "room" shelters no one) |
+| Sealed | Enclosure met, NO walkable outside connection — reachable from Open directly (one command can enclose and seal a box in a single commit) or from Room (the last gap closes) | An opening is created / region dissolves | Sealed-space warning iff need-functional furniture inside (Rule 8); furniture inside is unsheltered (a sealed "room" shelters no one) |
 
 **Per furniture item:** Sheltered ↔ Unsheltered (derived purely from its
 cell's region state; changes emit a status event for the Needs recovery
@@ -161,10 +232,15 @@ ladder and the UI).
 ### Interactions with Other Systems
 
 - **Building System** (upstream, MVP): construction-completed/removed
-  signals trigger re-analysis (batched per its Interactions rule); the
-  combined planned-occupancy view is available but unused in MVP
-  (built-only analysis, Rule 7). Resolves its Open Question 7
-  (completed-structure warnings live here).
+  signals trigger re-analysis. **Contract: completion signals are
+  batched per FRAME** (the same batching mandate as its Voxel World
+  bulk-writes) — N cells completing in one frame, across any number of
+  commands and villagers, reach this system as ONE signal → at most one
+  re-analysis pass per frame from construction (Edge Case 10, AC19;
+  reciprocal note added to building-system.md 2026-07-10). The combined
+  planned-occupancy view is available but unused in MVP (built-only
+  analysis, Rule 7). Resolves its Open Question 7 (completed-structure
+  warnings live here).
 - **Villager AI & Behavior** (upstream, MVP): walkability definition
   consumed verbatim (its Rules 8–10; registry constants). No runtime
   calls in either direction — this system runs its own region/reach
@@ -176,7 +252,13 @@ ladder and the UI).
   to the 3-tier ladder — patch). Values stay owned there.
 - **Villager Info UI / Building UI** (MVP, downstream, provisional):
   display the warnings, info hints, and room confirmations; the
-  why-string ("no opening") comes from this system.
+  why-string ("no opening") comes from this system. Dismissal/re-show
+  presentation — including a minimum re-show interval so a dismissed
+  warning does not re-pop while the player is actively editing the
+  affected region — is owned THERE (this system re-emits per pass,
+  AC22). The on-demand inspection surface (room-status query,
+  active-warnings review list) is likewise a UI-owned seam over this
+  system's queryable state (Rule 10) — flagged for those GDDs' reviews.
 - **Township Progression** (Alpha, downstream, provisional): "housed
   villagers" (owned bed, sheltered) is an obvious prosperity input —
   flagged as a seam, not designed here.
@@ -202,7 +284,12 @@ Deliberately NOT formulas (and why):
 - **Region detection / outside-connection test** — flood-fill/BFS-class
   algorithms; same treatment as Voxel World's raycast: deferred to the
   ADR. Analysis scope is bounded by connectivity itself, not by an
-  arbitrary radius.
+  arbitrary radius — deliberately unbounded by any knob: the affected
+  region is fully recomputed per event, with no caching or incremental
+  delta in MVP (Rule 11's snapshot is edge-detection memory, not a
+  compute cache). The cost axis this creates — region size grows with
+  cumulative *connected build footprint*, independent of villager count
+  — is MVP-reachable and explicitly measured by Open Question 5.
 - **Recovery ladder values** (1.0 / 0.7 / 0.4) — owned by the Needs &
   Mood source→rate table; this system supplies only the sheltered flag.
 - **Warning debounce** — inherited from the Building System's batched
@@ -259,10 +346,15 @@ registering as rooms.
 9. **Minimal bedroom.** `min_room_cells` = 2 → a bed cell plus one free
    interior cell is the smallest valid room. A 1-cell roofed niche
    holding a bed is NOT a room — the bed is unsheltered (info hint, not
-   warning).
+   warning). *(Knob-scoped claim, not absolute: `min_room_cells` = 1
+   would make roofed niches count.)*
 10. **Batched construction bursts.** One re-analysis per batched Building
-    System signal, never per cell — a 512-cell command completion
-    triggers one pass over the affected region.
+    System signal, never per cell — and batching is per FRAME, not per
+    command (Interactions): a 512-cell command completing over many
+    frames (N working villagers → at most N cells per frame, Building
+    F3) triggers one re-analysis per frame in which its cells complete;
+    conversely, cells of MANY commands completing in the same frame are
+    covered by that frame's single batched signal → still one pass.
 11. **World load.** A full analysis pass runs once on load; all statuses
     are re-derived from the world (nothing was serialized —
     Interactions). Load-time statuses must equal pre-save statuses
@@ -271,6 +363,18 @@ registering as rooms.
     opening — candidate cells simply end there; reachability uses
     in-bounds cells only. A "room" built against the world edge behaves
     exactly like one built against a cliff (case 5).
+13. **Sub-clearance "interior" (crawlspace).** A space whose roof sits
+    1–2 cells above the floor has NO candidate interior cells (Rule 1's
+    standability gate, `villager_clearance` = 3) and therefore forms no
+    region at all: it is neither a room nor a sealed space. A bed inside
+    such a crawlspace is simply **unsheltered** (Info tier); its
+    unreachability is signaled by the existing complementary channel —
+    Villager AI's claim-time reach check plus Needs' `bed_unreachable`
+    why-string (its Core Rule 11) — not by the sealed-space Warning,
+    which is scoped to candidate regions. The same logic covers single
+    cells under low eaves inside an otherwise valid room: they are not
+    interior cells, and furniture on them is unsheltered (Edge Case 8
+    semantics unchanged).
 
 ## Dependencies
 
@@ -296,8 +400,9 @@ registering as rooms.
 | Knob | Default | Safe Range | Affects |
 |------|---------|-----------|---------|
 | `min_room_cells` | 2 | 1–9 | Smallest valid room (Edge Case 9). 1 would make roofed niches count; large values punish cozy starter huts |
-| `max_room_height` | 8 | 3–16 | How high above an interior cell the roof may sit (Rule 1). **Invariant: must stay ≥ the Building System's max `wall_height` (currently 8 = 8) — retune in lockstep**, or tall single-story builds silently stop registering as rooms |
+| `max_room_height` | 8 | 8–16 | How high above an interior cell the roof may sit (Rule 1). **The safe range's lower bound IS the invariant: must stay ≥ the Building System's max `wall_height` (currently 8 = 8) — retune in lockstep** (enforced BLOCKING at config load, AC27), or tall single-story builds silently stop registering as rooms *(range corrected from 3–16 by the 2026-07-10 review — values 3–7 were inside the old "safe" range yet broke the invariant)* |
 | `unsheltered_bed_multiplier` | 0.7 | 0.5–0.9 | The middle rung of the recovery ladder. **Invariant: `ground_penalty` (0.4) < this < 1.0** — outside that order the ladder collapses and either beds or rooms stop mattering |
+| `room_cue_cooldown_ticks` | 20 (= 10s at 1x) | 0–120 | Celebration pacing (Rule 11): at most one `celebrate = true` room recognition per window; further rooms inside the window emit quiet status only. 0 = every room celebrates |
 
 All values data-driven per the coding standard; none are player-facing.
 
@@ -305,10 +410,17 @@ All values data-driven per the coding standard; none are player-facing.
 
 Room-recognized moment: a subtle one-shot (brief warm highlight tracing
 the room's bounds + a soft chime — cozy, not fanfare; exact treatment to
-the art bible). Warnings/info use the Visual Direction Note's orange
-state family (consistent with the Building System's unreachable ghosts)
-— warning ≠ info in intensity, never red-green. **New assets required**:
-room-highlight effect, sealed-space warning icon, unsheltered info icon.
+the art bible), fired only when `celebrate = true` (Rule 11 pacing;
+quiet-status recognitions get no cue). Warnings/info use the Visual
+Direction Note's orange state family (consistent with the Building
+System's unreachable ghosts) — **differentiated from each other by icon
+SHAPE + label** (distinct silhouettes for the sealed-space warning icon
+vs. the unsheltered info icon), never by hue or intensity alone (the
+Note's §4 day-one pairing rule — intensity is not a valid
+differentiation axis), never red-green. Exact icon designs go to the
+art bible; the pairing axis is committed here. **New assets required**:
+room-highlight effect, sealed-space warning icon, unsheltered info icon
+(two distinct silhouettes).
 
 ## Game Feel
 
@@ -317,7 +429,12 @@ same beat the last cell completes. If a Building System
 command-completion flourish fires simultaneously (finishing the roof
 often completes both), the room cue follows it by a breath rather than
 stacking (one celebration, two layers). Warnings appear calmly after the
-fact — never mid-drag, never interrupting the build flow.
+fact — never mid-drag, never interrupting the build flow. A transient
+seal during a natural build order (boxing in all four walls in one
+command, carving the doorway in the next) is a real Sealed state and a
+real emission — this system stays honest and stateless about it; the
+UI layer's dismissal/debounce ownership (Interactions) is what keeps it
+from reading as a mid-workflow scold.
 
 **Feel acceptance criteria** (subjective, playtest-verified): the first
 room recognition elicits visible delight ("it noticed!"); no tester
@@ -326,11 +443,18 @@ this warning mean."
 
 ## UI Requirements
 
-None owned — supplies to Building UI / Villager Info UI: room status
-(on-demand, not a permanent overlay — clutter violates Pillar 4's calm),
-warnings with why-strings ("the bed can't be reached — the room has no
-opening"), and the one-shot recognition event. Warnings must be
-dismissable but re-assert if the cause persists after further building.
+None owned — this system supplies queryable state and events (Rule 10);
+the SURFACES are owned by Building UI / Villager Info UI: room status
+(on-demand query, not a permanent overlay — clutter violates Pillar 4's
+calm), warnings with why-strings ("the bed can't be reached — the room
+has no opening"), and the one-shot recognition event. Warnings must be
+dismissable but re-assert if the cause persists after further building —
+with the re-show debounce (minimum re-show interval; no re-pop while the
+player is actively editing the affected region) explicitly a UI-owned
+behavior over this system's per-pass re-emissions (AC22). **Seam flag
+for the UI GDDs' reviews**: an on-demand room-status / active-warnings
+inspection surface is required by this contract but not yet specified
+in either UI GDD.
 
 ## Cross-References
 
@@ -342,21 +466,22 @@ dismissable but re-assert if the cause persists after further building.
 | "Does a room need a validated path before it's livable?" | `design/gdd/game-concept.md` | Open Questions | **Resolved by this GDD**: yes — reachability is a room condition (Rule 2) |
 | Orange state family, colorblind-safe | `design/art/visual-direction-note.md` | State axis | Warning/info visual constraint |
 | `villager_clearance`, `max_step_height`, `ground_penalty`, `bed` | `design/registry/entities.yaml` | Registry facts | Locked inputs; `unsheltered_bed_multiplier` + room knobs registered at Phase 5 |
-| NavigationServer3D rebake cost | `docs/engine-reference/godot/` + future building ADR | High-risk flag | Implementation question, NOT resolved here (this design is cell-rule-based and needs no navmesh) |
+| NavigationServer3D rebake cost | `docs/engine-reference/godot/` + future building ADR | High-risk flag | Implementation question, NOT resolved here. This design is *specified* in cell rules, but the implementation approach (cell flood-fill vs. event-scoped navmesh rebake) is the ADR's call — whichever wins must honor Rule 7's event contract (affected-region, per-frame-batched, call-count ACs) and Rule 2's exact movement graph. Backing-store requirement: O(affected-region) cell lookups (Open Question 5) |
 
 ## Acceptance Criteria
 
 *(`qa-lead` consulted — mandatory for this high-risk section even in Lean
 mode. Review produced 5 rewrites and 6 missing criteria; all
-incorporated. Building System signals and Villager AI's distress signal
-are mocked at the boundary per testing standards.)*
+incorporated. The 2026-07-10 full design review added AC27–36 and
+rewrote AC5/16/17/18/19/21. Building System signals and Villager AI's
+distress signal are mocked at the boundary per testing standards.)*
 
 **Room detection**
 1. **GIVEN** a 3×3 interior with full roof, floor, walls, and one 1-wide × 3-high walkable gap (step 0), **WHEN** analyzed, **THEN** it is a valid room (Rule 2).
 2. **GIVEN** the same structure fully sealed, **WHEN** the completion signal fires, **THEN** the region becomes Sealed and is not a room (Rule 3, Edge Case 2).
 3. **GIVEN** a sealed region containing a bed, **WHEN** analyzed, **THEN** the sealed-space warning is raised; **GIVEN** the same region empty, **THEN** no warning (Rule 3).
 4. **GIVEN** a candidate region of exactly `min_room_cells` with a walkable connection, **WHEN** analyzed, **THEN** it is a valid room; **GIVEN** one cell fewer, **THEN** it is not (Edge Case 9).
-5. **GIVEN** a room whose only opening leads onto a 2-cell drop, **WHEN** analyzed, **THEN** the region is Sealed (step-height violation); **GIVEN** an opening with less than 3 cells of vertical clearance, **THEN** likewise Sealed (clearance violation) — both walkability failure modes (Edge Case 4).
+5. **GIVEN** a room whose only opening leads onto a 2-cell drop, **WHEN** analyzed, **THEN** the region is Sealed (step-height violation); **GIVEN** an opening with less than 3 cells of vertical clearance, **THEN** likewise Sealed (clearance violation); **GIVEN** an opening whose outward path leads only into roofed pockets that never reach an open-sky standable cell, **THEN** likewise Sealed (Rule 2's outside definition — the trace runs along the movement graph until open sky, not just one cell past the door) (Edge Case 4).
 6. **GIVEN** an interior cell with roof exactly `max_room_height` above, **WHEN** analyzed, **THEN** it is a candidate cell; **GIVEN** one cell higher, **THEN** it is not (Rule 1 boundary).
 7. **GIVEN** two interiors connected by a gap, **WHEN** analyzed, **THEN** they form ONE region with one status (Edge Case 1).
 8. **GIVEN** a valid room split in two by removing a connecting roof/floor segment, **WHEN** analyzed, **THEN** two independent regions result, each independently evaluated against Rule 2 (Edge Case 7).
@@ -369,24 +494,40 @@ are mocked at the boundary per testing standards.)*
 13. **GIVEN** a roof hole opening above that bed's cell, **WHEN** re-analyzed, **THEN** the bed flips to unsheltered (Edge Case 7).
 14. **GIVEN** a bed in a sealed region, **WHEN** classified, **THEN** it is unsheltered (States table).
 15. **GIVEN** a bed exactly under the roof edge vs. one cell outside it, **WHEN** analyzed, **THEN** the former is sheltered and the latter is not — purely a function of its own cell's candidate status (Edge Case 8).
-16. **GIVEN** a shelter-status change, **WHEN** it occurs, **THEN** exactly one `shelter_status_changed` signal is emitted per transition — Needs and UI subscribe to the same emission (assert emission count = 1, not consumer count).
-17. **GIVEN** an unsheltered bed in the open vs. a bed in a sealed space, **WHEN** classified, **THEN** the former emits an Info-tier event and the latter a Warning-tier event — distinct signal types (Rule 8 severity tiers).
-18. **GIVEN** a region seals with both a villager and a bed inside, **WHEN** analyzed, **THEN** the sealed-space warning fires and the bed flips to unsheltered, independently of Villager AI's distress signal — no suppression or coupling between the two (Edge Case 3; AI signal mocked separately).
+16. **GIVEN** a shelter-status change, **WHEN** it occurs, **THEN** exactly one `shelter_status_changed` signal is emitted per transition — Needs and UI subscribe to the same emission (assert emission count = 1, not consumer count) (Rule 10).
+17. **GIVEN** an unsheltered bed in the open vs. a bed in a sealed space, **WHEN** classified, **THEN** the former emits exactly one `unsheltered_furniture_info` and ZERO `sealed_space_warning`, and the latter exactly one `sealed_space_warning` per pass and ZERO `unsheltered_furniture_info` — distinct signal types, mutually exclusive per item (Rule 8 exclusivity, Rule 10).
+18. **GIVEN** a region seals with both a villager and a bed inside, **WHEN** analyzed, **THEN** the sealed-space warning fires (and the Info-tier emission count for that bed is 0, Rule 8 exclusivity) and the bed flips to unsheltered, independently of Villager AI's distress signal — no suppression or coupling between the two (Edge Case 3; AI signal mocked separately).
 
 **Lifecycle, triggers, and contracts**
-19. **GIVEN** a batched construction signal covering N cells, **WHEN** received, **THEN** exactly one re-analysis pass runs over the affected region (assert analysis call-count = 1) (Rule 7, Edge Case 10).
+19. **GIVEN** a batched construction signal covering N cells completed in one frame — spanning multiple commands and villagers, **WHEN** received, **THEN** exactly one re-analysis pass runs over the affected region(s) (assert analysis call-count = 1 per frame-batch, never per cell or per command) (Rule 7, Edge Case 10, Interactions batching contract).
 20. **GIVEN** no structure-change signals, **WHEN** N frames pass, **THEN** the instrumented analysis call-count stays 0 — event-driven, never per-frame (Rule 7).
-21. **GIVEN** a candidate region becomes a valid room, **WHEN** the transition occurs, **THEN** exactly one "room recognized" one-shot fires — and does NOT re-fire on later re-analyses that keep the room valid (Rule 8).
+21. **GIVEN** a candidate region becomes a valid room, **WHEN** the transition occurs, **THEN** exactly one `room_recognized` fires — and does NOT re-fire on later re-analyses that keep the room valid, NOR when that room later merges with or splits from other valid rooms (Rule 11 continuity: fires only if no interior cell was in a prior valid room).
 22. **GIVEN** a warning's cause persists, **WHEN** any later re-analysis runs, **THEN** the warning event re-emits every qualifying pass regardless of prior UI dismissal — dismiss/re-show presentation is the UI's own (advisory-tier) behavior (UI Requirements).
 23. **GIVEN** blueprint (unbuilt) cells forming a would-be roof, **WHEN** analyzed, **THEN** they do NOT count as solid — analysis is built-only in MVP (Rule 7).
 24. **GIVEN** mocked changed walkability constants in the registry, **WHEN** reachability is evaluated, **THEN** the updated values are used — no independent copies (Rule 2 verbatim-consumption).
 25. **GIVEN** any invalid/sealed configuration, **WHEN** the player completes the placement, **THEN** the Building System's completion signal and world state are unmodified — no block/revert call is ever observed (Rule 9 never-blocks, verified via mock call-count).
 26. **[PROVISIONAL — Save/Load]** **GIVEN** a world state, **WHEN** saved and reloaded (mocked), **THEN** all region and shelter statuses re-derive identically to pre-save (Edge Case 11).
 
-*Config-validation (advisory CI smoke checks, not gameplay ACs):
-(a) `max_room_height ≥` Building's max `wall_height` at load;
-(b) `ground_penalty < unsheltered_bed_multiplier < 1.0` (the two Tuning
-Knob invariants).*
+**Added by design review (2026-07-10)**
+27. **GIVEN** a config where `max_room_height` < the Building System's maximum `wall_height`, **WHEN** config loads, **THEN** the load fails loudly naming the lockstep invariant (Tuning Knobs invariant (a), escalated from advisory to blocking — mirrors Needs & Mood AC29's pattern).
+28. **GIVEN** a floored, fully roofed structure whose roof sits exactly 2 cells above the floor, **WHEN** analyzed, **THEN** zero candidate interior cells exist (Rule 1 standability gate), no region forms, and a bed inside is unsheltered with an Info-tier emission and NO sealed-space warning (Edge Case 13).
+29. **GIVEN** a region whose only outside connection requires a diagonal step with both flanking orthogonal cells passable, **WHEN** analyzed, **THEN** it is a valid room (Rule 2 movement graph — legal flanked diagonal).
+30. **GIVEN** the same geometry with either flanking cell blocked, **WHEN** analyzed, **THEN** the region is Sealed (Rule 2 — no corner-cutting, consumed verbatim from Villager AI Rule 9).
+31. **GIVEN** a world load's initial full analysis pass over a world containing valid rooms and a persisting sealed-bed cause, **WHEN** the pass completes, **THEN** zero `room_recognized` and zero `shelter_status_changed` emissions occur, all statuses are queryable and equal pre-save statuses (extends AC26), AND the `sealed_space_warning` re-emission DOES fire on this pass (Rule 11 silent seeding — transitions silent, persisting causes re-warned).
+32. **GIVEN** two distinct regions become valid rooms within `room_cue_cooldown_ticks` of each other, **WHEN** the second transition occurs, **THEN** both emit `room_recognized`, the first with `celebrate = true` and the second with `celebrate = false` (Rule 11 pacing).
+33. **GIVEN** a full analysis pass over any configuration with mocked villager interfaces, **WHEN** the pass completes, **THEN** zero calls into villager movement/behavior APIs are observed (Rule 9's second half — never moves villagers; call-count mock, companion to AC25's never-blocks half).
+34. **GIVEN** a region seals with a villager but NO furniture inside, **WHEN** analyzed, **THEN** no sealed-space warning fires from this system (Rule 3 — warning iff need-functional furniture; Villager AI's distress is the only cue, mocked separately) (Edge Case 2).
+35. **[PROVISIONAL — no non-need-functional furniture exists in MVP; mocked definition]** **GIVEN** a decorative furniture item in a sealed space, **WHEN** analyzed, **THEN** `shelter_status_changed` fires (unsheltered) but Warning and Info emission counts are both 0 (Rule 8 need-functional scope, Rule 10).
+36. **[Integration — property test]** **GIVEN** seeded randomized bounded terrain and structures, **WHEN** this system's reachability verdicts and Villager AI's pathfinder evaluate the same (start, target) cell pairs, **THEN** the verdicts agree on every pair across all seeds — guarding algorithmic divergence between the two independent implementations of the movement rules (Rule 2; complements AC24's constants-only check).
+
+*Config-validation: invariant (a) `max_room_height ≥` Building's max
+`wall_height` is BLOCKING at config load (AC27). Invariant (b)
+`ground_penalty < unsheltered_bed_multiplier < 1.0` remains an advisory
+smoke check here — its blocking enforcement is owned by Needs & Mood
+(its AC29); this check is the courtesy duplicate. Authoring trap noted:
+needs-mood's `ground_penalty` safe range (0.1–0.8) and
+`unsheltered_bed_multiplier`'s (0.5–0.9) are not mutually safe at their
+extremes — the load check, not the ranges, is the guarantee.*
 
 ## Open Questions
 
@@ -404,9 +545,28 @@ Knob invariants).*
 4. **Wave damage interplay** — do breached walls (destroyed by waves)
    trigger re-analysis and warnings mid-combat, or after? → *Wave
    Defense GDD, after the `/prototype wave-defense` spike*
-5. **Analysis performance at township scale** — region re-analysis cost
-   with large worlds and 20–30 villagers' worth of construction;
-   cell-rule approach vs. NavigationServer3D remains open. →
-   *building/AI ADR + the pre-VS performance spike*
+5. **Analysis performance — two distinct axes** *(reframed by the
+   2026-07-10 review; the old "large worlds and 20–30 villagers"
+   framing pointed the spike at the wrong variable)*:
+   (a) **Signal/analysis frequency** — bounded to at most one pass per
+   frame by the per-frame batching contract (Interactions, AC19);
+   residual cost scales with completion rate at the 20–30 villager
+   ceiling.
+   (b) **Region-size cost — villager-count-INDEPENDENT and
+   MVP-reachable**: the flood-fill is deliberately unbounded (Formulas)
+   and uncached; region size grows with cumulative *connected build
+   footprint* — one player with one villager can, over enough sessions,
+   merge structures until any single-cell edit rescans the whole
+   megastructure. The pre-VS spike MUST include a sprawling
+   merged-structure case, independent of population stress.
+   Also owned by the ADR: the cell-rule vs. NavigationServer3D approach
+   (either must honor Rule 7's event contract and Rule 2's exact
+   movement graph); a backing data structure with O(affected-region)
+   cell lookups (a sparse cell dictionary qualifies;
+   GridMap.get_used_cells-style full iteration does not); and — if
+   Voxel World's ADR adopts chunked streaming — chunk boundaries being
+   distinguishable from the world edge (Edge Case 12). →
+   *building/AI ADR + the pre-VS performance spike (reciprocal axis
+   added to villager-ai-behavior.md OQ 3)*
 6. **"Housed" as a prosperity input** — formalize the owned-sheltered-bed
    status for Township Progression. → *Township Progression GDD, Alpha*
