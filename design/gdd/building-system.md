@@ -15,8 +15,11 @@ previews, undo/redo, material selection from the Resource & Item Database
 palette, and build-over-time construction progress. It composes the
 primitives owned by its four dependencies (Voxel World's grid writes and
 raycast, Camera & Input's mouse-ray and action signals, the item database's
-definitions, Time & Tick's game delta) into the fluid, expressive building
-loop validated by the 2026-07-09 concept prototype (verdict: PROCEED).
+definitions, Time & Tick's game delta) into a fluid, expressive building
+loop — the *planning* half of which (drag tools, surface-aware picking,
+undo) was validated by the 2026-07-09 concept prototype (verdict:
+PROCEED); the *construction* half (build-over-time) is a design hypothesis
+pending the MVP playtest (see Game Feel).
 
 > **Quick reference** — Layer: `Core/Gameplay` · Priority: `MVP` · Key deps: `Voxel World, Camera & Input, Resource & Item Database, Time & Tick System`
 
@@ -79,7 +82,12 @@ warm, furnished home."* The fantasy has three beats:
    I placed by hand where the drag tool wouldn't. *(Design hypothesis —
    build-over-time was explicitly OUT of the prototype's scope; this beat
    is validated only when the MVP playtest confirms construction pacing
-   feels earned rather than tedious.)*
+   feels earned rather than tedious. Second caveat, per the 2026-07-10
+   cross-review: at MVP, walls carry no mechanical value — the minimal
+   roof-on-pillars "carport" is the mechanical optimum (Build Validation
+   Edge Case 6, an accepted known gap). Until the Vertical Slice
+   wall-coverage rule lands, "earned pride" in elaborate builds rests on
+   player expression, not system incentive — deliberate, not hidden.)*
 
 Reference feeling: Stonehearth's self-built homes (the validated draw of
 the whole concept) crossed with Minecraft's direct block-level authorship
@@ -170,10 +178,11 @@ finished stat-box (the building IS the stats, Pillar 1).
       only while a claiming villager is on site.
     - When a cell's build time elapses, this system issues the Voxel World
       write and retires the blueprint cell.
-    *(Provisional contract — Villager AI & Behavior is undesigned; its GDD
-    must confirm claim locking, travel, and abandonment details, but the
-    queue semantics above are owned HERE and are not renegotiable without
-    revising this GDD.)*
+    *(Contract CONFIRMED 2026-07-10 by villager-ai-behavior.md — claim
+    locking (its Rule 4, Edge Case 3), travel/arrival (its F1), and
+    abandonment (its Rule 3, Edge Case 4) are all specified there. The
+    queue semantics above remain owned HERE and are not renegotiable
+    without revising this GDD.)*
 13. Construction consumes game time, not raw time: while paused nothing
     builds; time-warp accelerates construction (Time & Tick's game delta /
     tick events).
@@ -308,9 +317,10 @@ Example: a 5-cell drag at default height → 5 × 3 = **15 blueprint cells**.
 ### F2 — Floor cell set from a drag
 
 `floor_cell_count = (|dx| + 1) × (|dz| + 1)` — a 1-cell-thick rectangle on
-the locked plane. Zero-length drag degenerates to a single 1×1 tile. Maximum
-is bounded by the Voxel World grid dimensions (`world_width_cells` ×
-`world_depth_cells`).
+the locked plane. Zero-length drag degenerates to a single 1×1 tile. The
+practical maximum is `max_cells_per_command` (512, Core Rule 9) — the
+binding limit for any single commit; the world grid dimensions only bound
+the preview clamp (Edge Case 1).
 
 Example: dragging 3 cells in x and 4 in z → 4 × 5 = **20 blueprint cells**.
 
@@ -398,21 +408,22 @@ furniture (`bed`).
    pulsing orange tint (the Visual Direction Note's state axis) and a
    small non-modal UI hint appears ("a build spot can't be reached") —
    this system owns the signal; the unreachability *detection* comes from
-   Villager AI's pathing failures *(provisional)*. The player resolves it
+   Villager AI's pathing failures (its Rule 6). The player resolves it
    by undoing/removing either the blueprint or the obstruction. This
    deliberate patient-but-visible design protects the MVP's "earned pride"
    moment from silent failure (a first-timer who seals a room sees orange,
-   not nothing). *(Retry cadence is a Villager AI GDD decision —
-   provisional.)*
+   not nothing). *(Retry cadence: `unreachable_retry_ticks`, owned by the
+   Villager AI GDD's Tuning Knobs — confirmed 2026-07-10.)*
 6. **Construction target cell is occupied by a character** (villager or
    other unit standing in it). The blueprint is valid; construction of
-   that specific cell is deferred until the cell is clear. *(How the
-   villager is nudged aside is Villager AI's domain — provisional.)*
+   that specific cell is deferred until the cell is clear. *(Nudge-aside
+   is specified in Villager AI's Rule 7 + F4 — confirmed 2026-07-10; note
+   its refinement: Working/Sleeping occupants are never interrupted.)*
 7. **Undo of a partially built command.** Pending blueprint cells are
    canceled, already-built cells are removed instantly (Core Rule 17); any
    villager mid-construction on an affected cell has its job revoked and
-   re-enters normal behavior *(graceful abandon — provisional, Villager AI
-   GDD)*.
+   re-enters normal behavior *(graceful abandon — specified in Villager
+   AI's Rule 3 + Edge Case 4, confirmed 2026-07-10)*.
 8. **Redo into a changed world.** Redo re-validates every cell of the
    command; cells that are no longer valid (occupied since the undo) are
    dropped from the redo with the standard invalid-feedback, valid cells
@@ -429,7 +440,8 @@ furniture (`bed`).
 11. **Furniture removed while in use** (bed removed while the villager
     sleeps in it). Allowed — removal is never blocked by usage; the
     villager is interrupted and re-plans *(interruption semantics —
-    provisional, Villager AI / Needs GDDs)*.
+    specified in Villager AI's Edge Case 5 and Needs' Edge Case 3,
+    confirmed 2026-07-10)*.
 12. **Tool switched or Suspended entered mid-drag.** The drag aborts
     without commit (States table); no partial blueprint is ever created by
     an aborted drag.
@@ -469,7 +481,7 @@ furniture (`bed`).
 | `max_cells_per_command` | 512 | 128–2048 | Hard cap on blueprint cells per commit (Core Rule 9). 512 admits the longest possible wall (64-cell run × height 8); larger floors take multiple drags. Bounds preview draw calls, undo payload, and job-queue injection in one number |
 | `preview_degradation_threshold` | 128 | 32–512 | Above this cell count, the live drag preview degrades from per-cell ghosts to an outline/bounding representation (Dragging state) — protects the frame budget on large drags while keeping the commit exact |
 | `undo_stack_depth` | 50 | 10–200 | How far back a player can undo (Core Rule 17, Edge Case 9). Worst-case memory is now bounded and checkable: 200 commands × 512 cells × a small per-cell record ≈ low single-digit MB — negligible against the 4 GB ceiling. The cap exists for predictability |
-| Unreachable-job retry cadence | — (provisional) | — | How often a walled-in blueprint's job is retried (Edge Case 5) — owned by the Villager AI GDD; listed here so it isn't forgotten |
+| Unreachable-job retry cadence | see `unreachable_retry_ticks` (20) | — | Owned by the Villager AI GDD's Tuning Knobs (confirmed 2026-07-10) — pointer only, value not duplicated here |
 
 All values are data-driven per the coding standard (no hardcoding); the
 Building UI exposes only `wall_height` to the player — the rest are
@@ -511,8 +523,10 @@ das super."* The **construction loop** (blueprint-then-build pacing,
 watching blocks turn real) was explicitly OUT of the prototype's scope
 and is a design hypothesis until the MVP playtest — its feel target is
 Stonehearth's deliberate construction warmth crossed with Minecraft's
-direct block authorship. *(PROVISIONAL: the construction loop's felt
-weight also depends on the undesigned Villager AI's visible labor.)*
+direct block authorship. *(The construction loop's felt weight is
+delivered by Villager AI's visible labor — RESOLVED 2026-07-10: that GDD
+is designed and owns the animation-to-progress lockstep in its Game Feel
+section.)*
 
 **Input responsiveness**:
 - The ghost preview updates on the same frame as cursor movement (raw
@@ -543,8 +557,11 @@ values to the art bible/audio spec, each with a measurable hook):
    and a flourish.
 
 **Weight profile**: planning is weightless (instant, fluid, undoable);
-construction has weight (time, villager labor). This contrast IS the
-design: expression stays frictionless while results feel earned.
+construction has weight (time, villager labor) — **delivered by Villager
+AI's visible labor and animation-to-progress lockstep (its Game Feel
+section), not by this system's timers alone**; this system supplies the
+time cost (F3), Villager AI supplies the felt weight. This contrast IS
+the design: expression stays frictionless while results feel earned.
 
 **Feel acceptance criteria** (subjective, playtest-verified):
 - A first-time player builds an enclosed room within minutes without
@@ -574,7 +591,7 @@ and triggers, never owns.
 | Tick events, pause/warp, max_ticks_per_frame | `design/gdd/time-tick-system.md` | Core Rules, Formulas | F3's time base + burst rule |
 | Palette, tier-0 set, `bed`, visual_asset | `design/gdd/resource-item-database.md` | Core Rules 5–8, Open Question 1 | Data contract; this GDD resolves its Open Question 1 (bed only) |
 | MVP definition, Pillar 1, anti-pillar (no terraforming) | `design/gdd/game-concept.md` | MVP Definition, Pillars | Scope authority |
-| Construction-job queue contract | `design/gdd/villager-ai-behavior.md` (not yet authored) | Job claim/abandon | PROVISIONAL |
+| Construction-job queue contract | `design/gdd/villager-ai-behavior.md` | Job claim/abandon (its Rules 3–7, F1, F4) | CONFIRMED 2026-07-10 |
 
 ## Acceptance Criteria
 
@@ -652,6 +669,10 @@ batch atomicity.)*
 48. **GIVEN** a job is reported unreachable, **WHEN** the report registers, **THEN** the affected ghost switches to the pulsing orange unreachable tint and the non-modal UI hint appears; **WHEN** the obstruction is removed and the job is claimed again, **THEN** the ghost returns to the normal Planned visual (Edge Case 5).
 49. **GIVEN** the furniture tool, **WHEN** a bed blueprint targets a cell supported by a *blueprint* floor cell, **THEN** the commit is valid but the bed's construction cannot start until the support cell is Built (Core Rule 9 furniture clarification).
 
+**Added by re-review (2026-07-10)**
+50. **GIVEN** a drag whose pending cell count exceeds `preview_degradation_threshold`, **WHEN** the preview updates, **THEN** it renders as an outline/bounding representation rather than per-cell ghosts, while the eventual commit remains cell-exact (Dragging state, Tuning Knobs).
+51. *(Cross-reference, not a Building AC)*: the full claim→build→report integration cycle promised by AC21 is concretely owned by **Villager AI AC40/40b** (added 2026-07-10); AC21 is fulfilled by those tests. Performance at population scale is gated by **Villager AI AC39** (milestone-gated) — this system's per-villager burst cost (F3) is part of what that AC measures.
+
 ## Open Questions
 
 1. **Villager AI job contract** — **RESOLVED 2026-07-10**: the queue
@@ -669,6 +690,25 @@ batch atomicity.)*
    vs. this system's own built-cell record (Core Rule 15 resolved the
    *design* question with "yes, needed"; the *mechanism* is architectural).
    → *building ADR via `/create-architecture`*
+3b. **Mid-path solidification race** *(added by the 2026-07-10 re-review)*
+   — villager movement is continuous game-delta interpolation (Villager AI
+   F1), but Edge Case 6's "a cell never becomes solid under a character"
+   guarantee is tick-discrete: whether a villager mid-interpolation INTO a
+   cell counts as "occupying" it, and the intra-frame ordering of AI
+   position update vs. occupancy check, are undefined. Related: a
+   blueprint-only wall is walkable and can complete mid-transit (a
+   consequence of the intentional non-solid-blueprints rule, Core Rule
+   14b). Owned by NEITHER this GDD nor Villager AI alone — it is a seam.
+   → *Building/AI integration section of the building ADR (cross-pointer
+   in villager-ai-behavior.md OQ 3)*
+3c. **Aggregate ghost ceiling + degraded-preview mechanism** *(added by
+   the 2026-07-10 re-review)* — no settlement-wide cap exists on
+   simultaneous Planned/UnderConstruction ghosts (only per-command 512 +
+   per-preview 128), and the degraded outline preview has no stated
+   draw-call story or re-rasterization cadence. Both are rendering-budget
+   concerns for whichever approach the building ADR picks; the memory
+   claim in Tuning Knobs should also gain an explicit per-record byte
+   assumption there. → *building ADR + pre-VS performance spike*
 4. **Rendering/meshing approach** — GridMap vs MultiMesh vs chunked/greedy
    mesher (inherited from game-concept; blueprint ghosts add a rendering
    requirement to whichever approach wins). → *building ADR*

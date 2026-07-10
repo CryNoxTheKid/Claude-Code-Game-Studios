@@ -115,6 +115,15 @@ ever "one of thousands").
    Building System's queue order is availability/tie-breaking only —
    proximity choice is explicitly allowed by that contract). Claiming
    locks the job; no other villager may claim it until released.
+   **Claims are sticky**: the periodic re-evaluation (Rule 2) never
+   re-runs job selection against a held claim — a claimed job is
+   abandoned ONLY via need-preemption (Rule 3), revocation (Edge Case 4),
+   or pathing failure (Rule 6). There is no job-vs-job re-selection
+   mid-travel *(added by the 2026-07-10 review — without this clause, a
+   traveling villager could oscillate between similar-distance jobs as
+   the argmin flips)*. "Available" for the priority list (Rule 2) means
+   queue-non-empty — reachability is discovered lazily at selection time
+   (F2), never as a gate on the ranking itself.
 5. **On site** = the villager occupies the job's target cell or an
    orthogonally adjacent cell (including directly above/below), exactly as
    the Building System defines. Work progress accrues only while on site.
@@ -149,6 +158,37 @@ ever "one of thousands").
 10. These walkability rules are THE definition Build Validation &
     Navigability later checks against — that system asks "can a villager
     (per these rules) reach X?", it does not define its own movement.
+10b. **Re-path filtering is a behavioral contract** *(added by the
+    2026-07-10 review)*: a Voxel World write triggers a re-path
+    evaluation for a Traveling villager ONLY if the changed cell(s)
+    intersect its remaining path or that path's clearance envelope
+    (the cells whose occupancy the path's walkability depends on).
+    Writes elsewhere are ignored by design. This filter is part of the
+    design (AC18's correctness depends on it), independent of whatever
+    throttling strategy the AI ADR adds on top — without it, the
+    synchronous signal fan-out cost at 30 villagers would be baked in
+    structurally.
+
+**Life texture (MVP — added by the 2026-07-10 review)**
+
+7b. **The breather beat**: after `jobs_before_break` (default 4)
+    consecutively completed construction jobs, the villager takes a
+    **Breather** before claiming another job — a short non-productive
+    beat (`breather_duration_ticks`, default 90 ≈ 45s game time at 1x):
+    it steps away from the work site, sits on a nearby block or stands
+    and looks around. Work-claiming is suppressed for the duration;
+    urgent needs still preempt normally. *(Rationale: the review found
+    the strict priority list produces a tireless machine; the breather
+    is the minimal rhythm that reads as "a person working," directly
+    serving Pillar 2's design test. It is deliberately cosmetic-plus-
+    pacing — no need value changes.)*
+7c. **Idle micro-behaviors**: Wandering is not a single amble — the
+    villager varies between walking to a wander target, pausing to look
+    around, sitting briefly on a standable block, and drifting toward
+    its owned bed's area when one exists. Selection among micro-behaviors
+    uses the same injected RNG as F3 (deterministic in tests). Pure
+    flavor, no gameplay effect — but load-bearing for the "settlement
+    has a pulse" fantasy the MVP playtest measures.
 
 **Home and sleep (MVP's move-in moment)**
 
@@ -168,8 +208,15 @@ ever "one of thousands").
 14. The population ceiling is 20–30 concurrent villagers at Full Vision
     (MVP: exactly 1; Vertical Slice: ~5 per the concept). This ceiling is
     a design commitment (individual legibility, Pillar 2), and the
-    performance budget assumes it. *Spawning/recruiting new villagers is
-    owned by Township Progression (Alpha) — not this system.*
+    performance budget assumes it.
+14b. **Starting roster** *(added by the 2026-07-10 review — resolves the
+    VS tier mismatch)*: at world generation, this system places
+    `starting_villager_count` villagers (config: MVP = 1, Vertical
+    Slice = 5) at valid standable cells near the world center. This GDD
+    owns the STARTING population; Township Progression (Alpha) owns all
+    GROWTH beyond it (arrivals, recruitment). This reconciles the
+    concept's "~5 villagers at VS" with Rule 14's tiering — without it,
+    no system could place villagers 2–5 before Alpha.
 
 ### States and Transitions
 
@@ -181,7 +228,8 @@ ever "one of thousands").
 | Traveling | Activity chosen with a distant target | Arrival on site / target invalidated / preemption | Follows the computed path cell-by-cell; re-paths if a Voxel World write blocks the path |
 | Working | Arrived at claimed job, on site | Cell Built / job revoked / preemption | Applies tick progress to the claimed cell (Building System F3); plays work animation/sound |
 | Sleeping | Arrived at owned bed (or ground fallback) with urgent sleep need | Wake threshold reached / bed removed under them | Restores sleep need per tick (rates owned by Needs GDD) |
-| Wandering | Decided Idle | Any higher-priority activity appears (checked every `decision_interval` ticks) | Ambles between nearby standable cells; pure flavor, no gameplay effect |
+| Breather | `jobs_before_break` consecutive jobs completed | `breather_duration_ticks` elapse / urgent need preempts | Non-productive rest beat near the work site (sit/look around); work-claiming suppressed; needs still decay and preempt (Rule 7b) |
+| Wandering | Decided Idle | Any higher-priority activity appears (checked every `decision_interval` ticks); interruption takes effect at the end of the current 1-cell step | Varies among micro-behaviors (walk, pause-and-look, sit, drift toward owned bed's area — Rule 7c); pure flavor, no gameplay effect |
 
 *(No "Suspended" state: villagers live in the Valley and keep simulating
 during scene transitions and dungeon excursions — Scene/World Management's
@@ -244,21 +292,37 @@ wall-clock seconds.
 arrival routinely happens between ticks. Working state is entered
 immediately on arrival (visually), but the first work-progress increment
 is credited at the NEXT tick boundary — no partial-tick credit, ever.
-(Cross-reference: Building System F3 consumes this rule; without it,
-effective build times would drift by up to one tick per job.)
+**This applies to EVERY Traveling→Working transition, including the
+1-cell step between adjacent cells of the same command** — each new cell
+costs its step time (F1) plus alignment to the next tick boundary before
+its first credit *(pinned by the 2026-07-10 review: Building F3's
+36-tick example explicitly excludes travel/alignment, so chained cells
+cost 4 ticks each PLUS per-cell step-and-align overhead — integration
+test AC40 measures the real total)*. (Cross-reference: Building System
+F3 consumes this rule; without it, effective build times would drift by
+up to one tick per job.)
 
 ### F2 — Job selection
 
 `chosen_job = argmin(path_length_cells)` over available reachable jobs;
-tie-break by queue order (older commit first).
+tie-break by queue order (older commit first); **same-command ties break
+by cell index within the command** (the deterministic rasterization order
+Building F1/F2 produce) — all cells of one command share a commit
+timestamp, so this secondary key is what makes selection deterministic
+(added by the 2026-07-10 review; the coding standard requires same-result
+every run).
 
 **Approximation contract** (required for implementations to converge):
 candidates are pre-filtered to the nearest `job_candidate_count` (default
 5) by straight-line (Chebyshev) distance; only those are true-path
 checked; if all fail reachability, the next `job_candidate_count` are
-tried, and so on. "Nearest" therefore formally means: *nearest true-path
-job among the straight-line-nearest candidates* — deterministic and
-bounded, never a full-queue pathfind.
+tried — up to a hard total of `max_selection_candidates` (default 15 =
+three rounds) per selection pass. If all candidates fail, the villager
+falls through the priority list (Edge Case 7) for this pass;
+`unreachable_retry_ticks` governs later re-attempts. Worst-case pathfind
+attempts per pass are therefore bounded at 15 per villager — never a
+full-queue pathfind (cap added by the 2026-07-10 review; uncapped, a
+512-job queue × 30 villagers permitted ~15,000 attempts in one pass).
 
 ### F3 — Wander target selection
 
@@ -275,12 +339,21 @@ wander tests are deterministic without seeding globals.
 
 ### F4 — Nudge-aside target selection
 
-`vacate_target = argmin(height_difference, then Chebyshev distance to
-requester)` over standable cells orthogonally adjacent to the occupant;
-tie-break by a fixed scan order (N, E, S, W). Deterministic — the same
-situation always produces the same step. If no adjacent standable cell
-exists, the vacate request fails and the builder's cell stays deferred
-(Building System Edge Case 6).
+`vacate_target = argmin(height_difference), then argMAX(Chebyshev
+distance to requester)` over standable cells orthogonally adjacent to the
+occupant; tie-break by a fixed scan order (N, E, S, W). The occupant
+steps AWAY from the requesting builder — never toward it *(direction
+corrected by the 2026-07-10 review: the original argmin-distance pulled
+the occupant into the builder's own working zone)*. Deterministic — the
+same situation always produces the same step. If no adjacent standable
+cell exists, the vacate request fails and the builder's cell stays
+deferred (Building System Edge Case 6).
+
+**Step semantics**: the vacate is a normal walking step at `move_speed`
+(F1 interpolation — never a teleport); the builder's target cell simply
+remains deferred until the step completes and the cell is clear. There
+is no timing promise tied to tick length *(replaces the original "within
+one tick", which broke at `move_speed` < 2.0)*.
 
 ### Deliberately NOT formulas (and why)
 
@@ -309,7 +382,18 @@ exists, the vacate request fails and the builder's cell stays deferred
    unreachable-blueprint philosophy: visible, patient, player-fixable.)*
 3. **Two villagers race for the same job.** Claims are atomic: exactly one
    succeeds; the loser's F2 selection simply proceeds to its next
-   candidate. No error state, no double-work.
+   candidate. No error state, no double-work. **Winner determinism**:
+   same-tick claim contention resolves in villager processing order
+   (stable villager index) — deterministic across runs, matching the
+   F2/F3/F4 determinism contracts *(added 2026-07-10)*.
+3b. **Urgent need fires while already Traveling to satisfy that same
+   need.** No-op — the villager continues; re-evaluation confirms the
+   current activity is already the top priority *(made explicit
+   2026-07-10)*. For VS+ with multiple need types: if a DIFFERENT need
+   becomes more urgent (lower value) than the one being pursued, the
+   standard preemption applies; ties break by a fixed need-priority
+   order defined in the Needs GDD when multiple needs land (its schema
+   note).
 4. **Job revoked mid-work** (player undo/removal — Building Edge Case 7).
    The villager stops at the current tick boundary, plays no failure
    reaction (the world simply changed), and re-enters Deciding. Its claim
@@ -341,9 +425,12 @@ exists, the vacate request fails and the builder's cell stays deferred
     whose job no longer exists dissolves and the villager re-enters
     Deciding. Never crash on a stale reference.
 12. **MVP degenerate case: zero jobs, zero urgent needs.** The single
-    villager wanders indefinitely — this is the correct, calm baseline
-    state of an idle settlement, not a bug. (It is also the first thing a
-    player sees before building anything: a villager waiting for a home.)
+    villager idles indefinitely, cycling the Rule 7c micro-behaviors —
+    an acceptable MVP baseline (revisit at VS with more villagers and
+    the day rhythm): varied idling should read as "waiting for a home,"
+    not aimlessness. The MVP playtest verifies this reading (Game Feel
+    criteria) — softened from "correct baseline" per the 2026-07-10
+    review; the claim is a hypothesis until tested.
 
 ## Dependencies
 
@@ -380,6 +467,10 @@ exists, the vacate request fails and the builder's cell stays deferred
 | `wander_radius` | 8 cells | 3–16 | How far idle villagers roam (F3). Larger = livelier settlement but villagers drift farther from future jobs |
 | `wander_interval` | 6 ticks (= 3s at 1x) | 2–20 | How often a wander target is re-picked (F3) |
 | `job_candidate_count` | 5 | 3–10 | F2's pre-filter width. Larger = closer to a true global "nearest" at more pathfinding cost |
+| `max_selection_candidates` | 15 | 5–30 | Hard total candidate cap per F2 selection pass (added 2026-07-10). Bounds worst-case pathfinds per villager per pass; exceeded → fall through to Wandering, retry via `unreachable_retry_ticks` |
+| `jobs_before_break` | 4 | 2–10 | Consecutive jobs before a Breather (Rule 7b). Lower = more human, slower construction; higher = more machine-like |
+| `breather_duration_ticks` | 90 (= 45s at 1x) | 30–240 | Length of the rest beat. Too short reads as a glitch; too long frustrates waiting players |
+| `starting_villager_count` | 1 (MVP) / 5 (VS config) | 1–8 | The world-generation starting roster (Rule 14b). Growth beyond it is Township Progression's (Alpha) |
 | Population ceiling | 20–30 (Full Vision) | design commitment, not a slider | MVP: 1, Vertical Slice: ~5. Raising it beyond 30 invalidates the per-agent AI assumption AND the Pillar-2 individual-legibility promise — treat as a design change, not a tune |
 
 All values data-driven per the coding standard; none are player-facing.
@@ -460,7 +551,7 @@ testing standards — those ACs do NOT wait for that GDD.)*
 2. **GIVEN** an available job and no urgent need, **WHEN** deciding, **THEN** the job is chosen over wandering.
 3. **GIVEN** no jobs and no urgent needs, **WHEN** deciding, **THEN** the villager wanders — indefinitely and without error (Rule 2, Edge Case 12).
 4. **GIVEN** a Working villager whose need becomes urgent, **WHEN** the `decision_interval` re-check fires, **THEN** the current tick's work completes, the claim is released, and the need is pursued (Rule 3 graceful preemption).
-5. **GIVEN** any activity ends, **WHEN** Deciding runs, **THEN** the next state is assigned within the same tick invocation — Deciding never consumes an additional tick.
+5. **GIVEN** any activity ends, **WHEN** Deciding runs, **THEN** the next state is assigned before any further tick is processed — assert the tick counter does not increment between activity-end and state assignment within a single decide() invocation.
 
 **Jobs and construction**
 6. **GIVEN** multiple available jobs, **WHEN** selecting, **THEN** the nearest-by-true-path among the straight-line-nearest `job_candidate_count` candidates is chosen; ties break by older commit (F2).
@@ -479,7 +570,7 @@ testing standards — those ACs do NOT wait for that GDD.)*
 17. **GIVEN** a Planned blueprint cell in the path, **WHEN** pathing, **THEN** the cell is treated as passable (Building Core Rule 14b).
 18. **GIVEN** a Voxel World write blocks the current path mid-travel, **WHEN** the write signal fires, **THEN** the villager re-paths from its current cell (Edge Case 1).
 19. **GIVEN** a Traveling villager whose target becomes invalid before arrival (bed destroyed, job voided) with no re-path possible, **WHEN** detected, **THEN** it exits to Deciding and re-selects — never keeps traveling toward a dead target (state table).
-20. **GIVEN** any frame during travel, **WHEN** position is sampled, **THEN** per-frame displacement never exceeds `move_speed × game_delta` (no teleporting).
+20. **GIVEN** a sequence of injected `game_delta` values during Traveling (including a warped value), **WHEN** position is sampled after each simulated movement update, **THEN** per-step displacement never exceeds `move_speed × game_delta` — property-based check over ≥5 delta samples, driven against the movement-update function directly (no real engine frames needed).
 21. **GIVEN** pause, **WHEN** real time passes, **THEN** position is unchanged; **GIVEN** 2x warp, **THEN** wall-clock travel halves while game-time cost is constant (F1 invariance).
 
 **Sleep and home**
@@ -502,9 +593,29 @@ testing standards — those ACs do NOT wait for that GDD.)*
 34. **GIVEN** an idle occupant in a builder's target cell, **WHEN** the vacate request fires, **THEN** the occupant steps to the F4 target within one tick; **GIVEN** a Working/Sleeping occupant, **THEN** it is not interrupted (Rule 7).
 35. **GIVEN** a vacate-target tie on height difference and distance, **WHEN** resolved, **THEN** the fixed N/E/S/W scan order breaks the tie identically every run (F4 determinism).
 36. **GIVEN** a tick burst of `max_ticks_per_frame`, **WHEN** processed, **THEN** at most one decision re-evaluation occurs per processed tick, in order (Edge Case 9).
-37. **GIVEN** a scene transition (player to dungeon), **WHEN** it completes, **THEN** villager activities continue uninterrupted in the Valley (Edge Case 10).
+37. **GIVEN** a scene-transition integration test (`tests/integration/scene_transition/`) driving mocked Scene/World Management transition signals, **WHEN** the transition completes, **THEN** villager tick-driven activities have advanced exactly as many ticks as elapsed Valley game time — continuity verified numerically, not by observation (Edge Case 10).
 38. **[PROVISIONAL — Save/Load undesigned, VS tier]** **GIVEN** a deserialized claimed-job or bed-owner id that no longer exists, **WHEN** load completes, **THEN** the stale claim dissolves and the villager enters Deciding — never crashes (Edge Case 11; testable now against a mocked serializer contract).
 39. **[PROVISIONAL — milestone-gated]** **GIVEN** the Vertical Slice population (~5) and the Full Vision ceiling (30), **WHEN** simulating at 1x and 3x warp, **THEN** the 16.6ms frame budget is maintained — enforced at those milestones, never a blocker for MVP Done (population ceiling).
+
+**Added by the Building System re-review (2026-07-10) — these fulfill Building AC21/36b's promised integration coverage**
+40. **GIVEN** a real villager and one real queued blueprint cell, **WHEN** it claims the job, travels to site, and accumulates ticks to completion, **THEN** the cell transitions to Built via the Building System's write, the job is removed from the queue, and the villager re-enters Deciding — the full claim→build→report cycle (integration test; closes Building System AC21).
+40b. **GIVEN** a builder on-site with its target cell occupied and construction deferred, **WHEN** the occupant vacates via F4, **THEN** the target cell becomes free and construction progress resumes on the next tick without re-claiming the job (occupied→deferred→resumed transition; complements Building AC36 and this GDD's AC34).
+*(Harness note for AC40/40b: `tests/integration/villager_ai/build_job_cycle_test.gd`, using real Building System components — both GDDs are Designed; no playtest-doc fallback.)*
+
+**Added by the 2026-07-10 design review**
+41. **GIVEN** a Working villager with no urgent need, **WHEN** the `decision_interval` re-check fires, **THEN** it remains Working with no state change and no job re-selection — the periodic re-check is a preemption check, never an implicit interruption (Rule 2 + Rule 4 claim-stickiness).
+42. **GIVEN** a builder requests a vacate on a cell occupied by a villager mid-work on its own claimed job, **WHEN** the request resolves, **THEN** it is deferred and the occupant's claim is never revoked (Rule 7 negative guarantee).
+43. **GIVEN** two villagers with simultaneous urgent sleep targeting the same unowned reachable bed, **WHEN** claims resolve, **THEN** exactly one succeeds atomically (winner by stable villager processing order — Edge Case 3) and the loser falls back per Rule 12.
+44. **GIVEN** a villager with an owned reachable bed AND a closer unowned free bed, **WHEN** urgent sleep triggers Deciding, **THEN** it goes to its owned bed — never the closer unowned one (Rule 12 owned-bed preference).
+45. **GIVEN** a standable cell exactly at `wander_radius` distance, **WHEN** the flood-fill runs, **THEN** it is included; one cell beyond, excluded — inclusive boundary, deterministic (F3).
+46. **GIVEN** `jobs_before_break` consecutive completed jobs, **WHEN** the last completes, **THEN** the villager enters Breather for `breather_duration_ticks`, claims no job during it, and an urgent need still preempts it normally (Rule 7b).
+47. **GIVEN** `starting_villager_count` = N (mocked config), **WHEN** world generation completes, **THEN** exactly N villagers exist at valid standable cells (Rule 14b).
+
+*(Evidence-tier note per the project test table: AC1–8, 10–36, 41–47 are
+blocking headless unit tests; AC9, 37, 40, 40b are blocking integration
+tests; AC38 is provisional-integration (Save/Load); AC39 is formally an
+Advisory/Performance criterion gated at VS/Full-Vision milestones — not
+part of the Logic gate, re-tiered 2026-07-10.)*
 
 ## Open Questions
 
@@ -520,8 +631,23 @@ testing standards — those ACs do NOT wait for that GDD.)*
    choice is architectural, not design. → *AI ADR via `/create-architecture`*
 3. **Pathfinding algorithm + re-path storm cost** — algorithm choice, and
    whether N villagers re-pathing on every Voxel World write signal needs
-   throttling/batching at scale. → *AI ADR + the performance spike before
-   Vertical Slice*
+   throttling/batching at scale. Also added by the 2026-07-10 re-review:
+   (a) **mid-path solidification race** — this GDD's continuous movement
+   interpolation (F1) vs. the Building System's tick-discrete "never
+   solid under a character" guarantee (its Edge Case 6) leaves a
+   mid-interpolation villager's occupancy undefined (see building-system.md
+   OQ 3b — a shared seam owned by the building/AI ADR; note it also
+   governs F4 targeting and Edge Case 2 walled-in queries, not just
+   Edge Case 6 deferral); (b) **job-queue scan cost** — now bounded
+   per-pass by `max_selection_candidates` (15), but aggregate cost across
+   30 villagers remains the ADR's to architect; (c) **wander flood-fill
+   aggregate cost** at the population ceiling (small, but include it in
+   the spike scope). **The pre-VS performance spike must include a
+   synthetic 30-villager stress case** (unreachable-job-dense + parallel
+   construction write-storm at 3x warp) even though VS ships with 5 —
+   cheap insurance against discovering a structural flaw after Alpha
+   content lands (2026-07-10 review recommendation). → *AI ADR + the
+   performance spike before Vertical Slice*
 4. **Day/night rhythm** — the concept's "day schedules" (work by day,
    sleep by night) layers on top of the need-driven MVP. Requires a
    day/night clock nobody owns yet (Time & Tick extension?). → *Needs &
@@ -533,3 +659,19 @@ testing standards — those ACs do NOT wait for that GDD.)*
    villagers (Edge Case 2, Rule 12). → *art bible + Villager Info UI GDD*
 7. **Villager behavior during waves** — flee, hide, keep working?
    → *Wave Defense GDD, after the `/prototype wave-defense` spike*
+8. **Bed assignment affordance** *(added by the 2026-07-10 review)* —
+   the player never chooses WHO lives WHERE (Rule 11 is
+   first-claim-permanent). Fine at MVP (1 villager); at VS+ the
+   stewardship fantasy ("they live in what I built") may want a
+   reassignment affordance. → *VS revision of this GDD + Villager Info
+   UI (a "reassign bed" interaction candidate)*
+9. **Engine-reference documentation gaps** *(found by the 2026-07-10
+   review)* — `docs/engine-reference/godot/` lacks entries on 4.5+
+   physics interpolation (relevant to movement smoothness at warp) and
+   4.4+ typed Dictionaries (relevant to the grid-walk hot paths). →
+   *engine-reference refresh before the AI/building ADRs*
+10. **Extreme-tuning travel caveat** — at max world size (256×256) and
+   min `move_speed` (1.5), a villager can spend 340+ game-seconds
+   traveling with its need pinned at 0 (harmless per Needs Rule 5, but
+   long floor-value stretches). Note when retuning world size or speed.
+   → *tuning documentation, no design change*

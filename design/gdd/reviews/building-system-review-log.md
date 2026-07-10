@@ -13,6 +13,25 @@ signal), and false prototype provenance on build-over-time pacing (2 finds —
 the prototype explicitly excluded build-over-time).
 Prior verdict resolved: First review
 
+## Review — 2026-07-10 — Verdict: APPROVED
+Scope signal: XL
+Specialists: game-designer, systems-designer, qa-lead, ai-programmer, godot-specialist, gameplay-programmer, performance-analyst + creative-director (senior synthesis)
+Blocking items: 0 | Recommended: 5 doc-cleanup patches + 1 ADR seam + backlog (all applied in-session)
+Summary: RE-REVIEW after the 2026-07-09 NEEDS REVISION. All 10 prior
+blockers verified as HOLDING under a second adversarial pass (incl.
+numerically: 512-cap inclusive boundary, F3↔Villager-AI-F1 timing
+convergence, lockstep no-off-by-one). Residue was documentation hygiene
+(summary overclaim, stale "provisional" body text, weight-ownership
+deferral, carport caveat, F2 cap mention — all patched), one genuine seam
+(mid-path solidification race → building/AI ADR, OQ 3b + Villager AI OQ 3),
+and additive rigor (AC50 + Villager AI AC40/40b added; ghost ceiling +
+degraded-preview mechanism + memory-byte assumption → ADR backlog, OQ 3c).
+CD: "Ship it — the doc needs a proofreader and an ADR, not another
+adversarial round."
+Prior verdict resolved: Yes
+
+## Review — 2026-07-09 — Verdict: NEEDS REVISION (superseded)
+
 **Post-review revision (same session, 2026-07-09):** all 10 blocking items
 resolved in-session with user decisions: `max_cells_per_command=512` +
 `preview_degradation_threshold=128`; self-write exemption + bulk-write
