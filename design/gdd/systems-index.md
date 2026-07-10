@@ -52,7 +52,7 @@ and Full Vision per the concept doc's own scope tiers.
 | 20 | Resource & Item Database | Economy | MVP | Approved (2026-07-10 — review + in-session revision + verification pass CLEAN) | design/gdd/resource-item-database.md | — |
 | 21 | Economy Balance (Sinks) | Economy | Alpha | Not Started | — | Gathering & Production Chains, Storage & Inventory, Building System |
 | 22 | Building UI | UI | MVP | Approved (2026-07-10 — MAJOR → rebuild → re-review → verification CLEAN, see review log) | design/gdd/building-ui.md | Building System, Build Validation & Navigability, Resource & Item Database, Time & Tick System |
-| 23 | Villager Info UI | UI | MVP | Designed | design/gdd/villager-info-ui.md | Villager AI & Behavior, Needs & Mood System |
+| 23 | Villager Info UI | UI | MVP | Approved (2026-07-11 — review + in-session revision + verification pass CLEAN) | design/gdd/villager-info-ui.md | Villager AI & Behavior, Needs & Mood System |
 | 24 | Economy UI | UI | Alpha | Not Started | — | Storage & Inventory, Trade System |
 | 25 | Combat/Wave UI | UI | Vertical Slice | Not Started | — | Squad & Combat System, Wave Defense |
 | 26 | Township UI | UI | Alpha | Not Started | — | Township Progression |
@@ -229,8 +229,8 @@ as a separate category, since this project has exactly one persistence-related s
 |--------|-------|
 | Total systems identified | 32 |
 | Design docs started | 11 |
-| Design docs reviewed | 0 |
-| Design docs approved | 0 |
+| Design docs reviewed | 11 |
+| Design docs approved | 11 (all MVP — completed 2026-07-11) |
 | MVP systems designed | 11/11 |
 | Vertical Slice systems designed | 0/8 |
 

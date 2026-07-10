@@ -220,6 +220,11 @@ dense RTS command card, nested ribbon menus, or modal dialog churn.
    /ux-design pass — the ACTIONS are the commitment, not the keys
    (Q/E are camera-owned and avoided; Tab collides with Godot's
    built-in `ui_focus_next` and needs explicit resolution there).
+   **Esc releases HUD keyboard focus WITHOUT dismissing** (distinct
+   from `toast_dismiss`): a focused toast or expanded anchor loses
+   focus on Esc, and only an Esc pressed with NO HUD focus falls
+   through to world-level handlers — e.g., Villager Info UI's deselect
+   (its Rule 1 Esc routing; reciprocal clause added 2026-07-11).
 9c. **The issues anchor** *(seam item 1 — the on-demand inspection
    surface)*: a compact counter at the top of the notification zone
    ("N ⚠"), visible iff at least one active warning/info exists
@@ -254,12 +259,17 @@ dense RTS command card, nested ribbon menus, or modal dialog churn.
     pick is suppressed (the Building System's ghost hides — no
     accidental building behind the toolbar). Everything else flows
     through the established Camera & Input → Building System pipeline
-    untouched. **Event-routing requirement** *(added 2026-07-10)*:
-    hover suppression gates pick *starts* via a queryable flag consumed
-    by the world-pick pipeline — the HUD must NOT consume the
-    pointer-release event of an in-progress world drag (Edge Case 5
-    depends on the drag owner still observing the release; a naive
-    whole-zone mouse-filter=STOP would swallow it).
+    untouched. **Event-routing requirement** *(added 2026-07-10;
+    generalized 2026-07-11)*: hover suppression gates pick *starts*
+    via a queryable flag consumed by the world-pick pipeline — **the
+    flag is the SHARED gate for EVERY world-pick consumer**: the
+    Building System's ghost/placement pick AND Villager Info UI's
+    villager-selection query (its Rule 1 HUD-hover gate) both honor
+    it; the ghost hiding is one consequence, not the flag's scope. The
+    HUD must NOT consume the pointer-release event of an in-progress
+    world drag (Edge Case 5 depends on the drag owner still observing
+    the release; a naive whole-zone mouse-filter=STOP would swallow
+    it).
 12. New InputMap actions introduced by this GDD (`tool_select_1..5`,
     `time_pause`, `time_speed_up/down`, and — added 2026-07-10 —
     `toast_focus_cycle`, `toast_dismiss`, `toggle_issues`,

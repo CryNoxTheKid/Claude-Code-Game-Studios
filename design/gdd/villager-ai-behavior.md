@@ -587,10 +587,16 @@ should feel calm and informed, never confused about what it's doing.
 ## UI Requirements
 
 None owned — this system renders no UI. It supplies to the Villager Info
-UI (MVP, downstream): villager name, current state (Deciding/Traveling/
-Working/Sleeping/Wandering as player-readable labels), current need levels
-(values via Needs GDD), and distress flags (trapped, ground-sleeping,
-no-bed). The UI renders and never owns.
+UI (MVP, downstream): villager name, current state (**Deciding/Traveling/
+Working/Sleeping/Breather/Wandering** — SIX states as player-readable
+labels; *corrected 2026-07-11 by the Villager Info UI review: this list
+was stale, omitting Breather, which the state table and Rule 7b added at
+this GDD's own review*), current need levels (values via Needs GDD), and
+distress flags (**trapped, ground-sleeping** — *"no-bed" folded into
+ground-sleeping 2026-07-11, user decision: Rule 12 has no awake-no-bed
+limbo state, so bedlessness becomes visible exactly as ground-sleeping;
+the "no bed" CAUSE still reaches the player verbatim via Needs' why-string
+templates*). The UI renders and never owns.
 
 ## Cross-References
 
