@@ -1,5 +1,23 @@
 # Review Log — Needs & Mood System
 
+## Review — 2026-07-10 — Verdict: APPROVED (verification pass)
+Scope signal: L
+Specialists: qa-lead (fresh verification agent, grep-verification per the
+project's terminal-cycle discipline)
+Blocking items: 0 (3 residual mirror-defects found and fixed in-session) |
+Recommended: 0
+Summary: All 17 fix areas across the 3-file changeset VERIFIED with
+quoted evidence (state+events model, source enum, Core Rules 10/11,
+states table, EC1/EC3, F2 clamp, BVN row, pacing note, probes, ACs
+14/24–35, OQ4/7/8, villager-ai reciprocals, building 17b). Mirror-defect
+hunt caught 3 propagation residues: villager-ai OQ1 still said "reports
+only bed-vs-ground" (contradicting its own patched Interactions row),
+villager-ai AC24 still used the pre-widening "reduced-recovery flag",
+and needs-mood's Overview still described the binary two-tier model.
+All 3 patched → re-verified CLEAN (micro-sweep: no unquoted stale
+phrasing). Status: **APPROVED** (user pre-authorized approve-on-clean).
+Prior verdict resolved: Yes (11 must-fixes + 3 verification residues)
+
 ## Review — 2026-07-10 — Verdict: NEEDS REVISION
 Scope signal: L
 Specialists: game-designer, systems-designer, ai-programmer, qa-lead

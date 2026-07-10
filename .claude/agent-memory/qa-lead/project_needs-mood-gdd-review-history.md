@@ -86,3 +86,79 @@ addressed. When re-reviewing, grep the actual current AC/Core-Rule text for
 a why-string Core Rule/Formula and for new ACs covering Edge Case 11 and the
 Edge Case 3 Urgent-branch before trusting a "fixed" changelog summary — see
 [[feedback-verify-fix-claims-against-file]].
+
+**r2 (2026-07-10, final grep-verification pass, bounded — not a full
+adversarial round) — DEFECTS FOUND, not CLEAN.** All 11 r1 must-fixes
+verified genuinely applied at their cited locations across the three files
+(needs-mood-system.md Core Rules 3/4/10/11, States table, EC1/EC3, F2 clamp
++ worked example, Upstream/Downstream/Quick-Ref rows, Tuning Knobs pacing
+note, Game Feel probes, AC14/24-35, OQ4/7/8; villager-ai-behavior.md
+Interactions row, Cross-References, Downstream table, EC5; building-system.md
+Core Rule 17b + EC11 cross-ref) — the mechanical/formula work is solid.
+
+The bounded mirror-defect hunt found the propagation sweep missed 3 spots,
+same pattern as every prior round (one location patched, sibling text left
+stale):
+1. **villager-ai-behavior.md Open Question 1** (marked "RESOLVED
+   2026-07-10") self-contradicts its own patched Interactions row — OQ1
+   still says "this system still reports only bed-vs-ground" and frames the
+   interface as bare "edge-triggered signals," while the Interactions row
+   (correctly patched) states the widened 5-value enum and the state+events-
+   as-hints model (Needs Core Rule 3). The enum-widening fix landed in the
+   Interactions table only, not the OQ1 summary it was supposed to resolve.
+2. **villager-ai-behavior.md AC24** still uses pre-widening "reduced-
+   recovery flag set" language (also echoed in Rule 12 and EC5 prose,
+   lines 226/464) instead of the source-enum contract, and its GIVEN ("no
+   reachable bed") spans two now-distinct enum values
+   (`ground_no_bed_owned` vs `ground_bed_unreachable`, which drive different
+   why-strings per Needs Core Rule 11) without specifying which applies —
+   under-specified relative to the widened enum it should test.
+3. **needs-mood-system.md Overview** (System-facing, line ~40, unquoted, no
+   revision annotation) still describes the recovery model as pre-widening
+   binary "bed = full-rate sleep; ground = penalized sleep," omitting the
+   unsheltered-bed middle rung the revision treats as the signature Pillar-1
+   payoff. Minor/non-blocking but genuine staleness.
+
+Minor non-blocking nits noted, not counted as defects: AC8 says "mocked bed
+source" rather than naming `bed_sheltered` (harmless, unambiguous given
+AC28 covers `bed_unsheltered` separately); AC32 doesn't test the
+`bed_sheltered`/not-sleeping "no suffix" template branch specifically, but
+it's a pure why-string-function unit test with mocked inputs, so this is a
+coverage nicety not a defect.
+
+**Verdict**: DEFECTS FOUND — recommend a narrow targeted patch (OQ1
+rewrite + AC24 update, optionally the Overview line) rather than a full
+re-review; defects are localized and don't touch previously-adjudicated
+architecture (state+events model, revocation contract, OQ-track decisions,
+G1 no-tuning — none reopened).
+
+**Why**: confirms the project's recurring mirror-defect pattern generalizes
+beyond scene-world-management — even a well-executed, mechanically-verified
+revision session reliably leaves stale text in the summary/OQ layer when a
+core contract (here: the source enum) is widened mid-review. Grep for the
+NEW terminology across ALL files in a multi-file changeset, not just the
+Core-Rule/table it was formally added to.
+
+**How to apply**: For any GDD revision that widens an enum/contract
+touching multiple files, grep every file in the changeset for the OLD
+terminology it replaces (e.g. "bed-vs-ground", "reduced-recovery flag") —
+Open Questions and AC bodies are the most likely places to retain it,
+since they're rarely the section a targeted patch touches.
+
+**r3 (2026-07-10, targeted re-verification of the 3 r2 defects) — CLEAN,
+Approved.** All 3 patches verified genuinely applied: villager-ai-behavior.md
+OQ1 now states the state+events-as-hints model and the 5-value enum
+matching the Interactions row (no more "reports only bed-vs-ground"); AC24
+now specifies both ground enum branches
+(`ground_no_bed_owned`/`ground_bed_unreachable`) with the disambiguating
+condition instead of "reduced-recovery flag"; needs-mood-system.md Overview
+now states the 3-tier ladder (sheltered 1.0/unsheltered 0.7/ground 0.4)
+instead of binary bed/ground. Micro-sweep grep for `reduced-recovery flag`
+/ `bed-vs-ground` across both files: needs-mood-system.md clean; the one
+hit in villager-ai-behavior.md is AC24's own properly-quoted historical
+citation ("...from the pre-widening 'reduced-recovery flag'..."), not a
+live defect. Generic unhyphenated "reduced recovery" prose still exists at
+Rule 12 (line 226) and EC5 (line 464) but was never one of the flagged
+defects and isn't contradictory — left as acceptable informal description.
+**GDD status: ready for Approved** (both needs-mood-system.md and
+villager-ai-behavior.md).

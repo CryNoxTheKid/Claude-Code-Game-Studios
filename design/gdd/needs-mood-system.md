@@ -1,8 +1,9 @@
 # Needs & Mood System
 
-> **Status**: In Review (full review 2026-07-10 NEEDS REVISION — all 11
+> **Status**: APPROVED (2026-07-10 — full review NEEDS REVISION → 11
 > must-fixes revised in-session incl. reciprocal villager-ai/building
-> patches, re-review pending)
+> patches → verification pass CLEAN after 3 residual mirror-defects fixed;
+> see design/gdd/reviews/needs-mood-system-review-log.md)
 > **Author**: user + Claude Code Game Studios agents
 > **Last Updated**: 2026-07-10
 > **Last Verified**: 2026-07-10
@@ -37,9 +38,11 @@ the concept's MVP hypothesis made measurable — "a villager with needs
 time. Each need is a 0–100 value decaying per tick; thresholds trigger
 urgency (consumed by Villager AI's priority list) and wake/satisfaction;
 recovery rates depend on HOW the need is satisfied — the Building→Needs
-seam: furniture defines recovery quality (bed = full-rate sleep; ground =
-penalized sleep), which is exactly how "the building IS the stats"
-(Pillar 1) enters the simulation. Mood is a derived read-only aggregate
+seam: furniture defines recovery quality (sheltered bed = full-rate
+sleep; unsheltered bed = the ×0.7 middle rung; ground = penalized ×0.4 —
+the 3-tier ladder, aligned here at the 2026-07-10 verification pass),
+which is exactly how "the building IS the stats" (Pillar 1) enters the
+simulation. Mood is a derived read-only aggregate
 of need satisfaction (MVP: one need → simple mapping; the schema
 anticipates more needs and, later, mood modifiers from Relationships/
 events). This GDD owns all values and formulas; it owns NO behavior —

@@ -643,7 +643,7 @@ testing standards — those ACs do NOT wait for that GDD.)*
 **Sleep and home**
 22. **GIVEN** a first urgent sleep need and an unowned reachable bed, **WHEN** deciding, **THEN** the villager claims that bed permanently (move-in, Rule 11).
 23. **GIVEN** an owned reachable bed and urgent sleep, **WHEN** deciding, **THEN** the villager sleeps in its own bed.
-24. **GIVEN** no reachable bed and urgent sleep, **WHEN** deciding, **THEN** the villager sleeps on the ground at its current cell with the reduced-recovery flag set (Rule 12; rates mocked).
+24. **GIVEN** no reachable bed and urgent sleep, **WHEN** deciding, **THEN** the villager sleeps on the ground at its current cell and reports the correct ground source enum — `ground_no_bed_owned` if it owns no bed, `ground_bed_unreachable` if it owns one it cannot reach (Rule 12; enum per needs-mood Core Rules 4/10, updated at the 2026-07-10 verification pass from the pre-widening "reduced-recovery flag"; rates mocked).
 25. **GIVEN** the sleep need restored above the wake threshold (mocked), **WHEN** the tick fires, **THEN** the villager wakes and re-enters Deciding (Rule 13).
 26. **GIVEN** a bed removed while the villager sleeps in it, **WHEN** the removal registers, **THEN** the villager wakes immediately and ownership dissolves (Edge Case 5).
 27. **GIVEN** an owned but unoccupied bed removed, **WHEN** the removal registers, **THEN** ownership dissolves and a new bed is claimed at the next urgent sleep (Edge Case 6).
@@ -694,12 +694,17 @@ VS/Full-Vision milestones — not part of the Logic gate, re-tiered
 
 ## Open Questions
 
-1. **Needs & Mood interface confirmation** — **RESOLVED 2026-07-10**:
-   `needs-mood-system.md` confirms the interface — edge-triggered "need
-   urgent"/"need satisfied" signals (urgency_threshold=25,
-   satisfied_threshold=95), source-scored recovery via the 3-tier ladder
-   (sheltered bed 1.0 / unsheltered bed 0.7 / ground 0.4 — shelter flag
-   from Build Validation; this system still reports only bed-vs-ground),
+1. **Needs & Mood interface confirmation** — **RESOLVED 2026-07-10**
+   *(text updated at the needs-mood review's verification pass — the
+   prior wording contradicted the patched Interactions row)*:
+   `needs-mood-system.md` confirms the interface — QUERYABLE per-need
+   state with edge events as latency hints (its Core Rule 3;
+   urgency_threshold=25, satisfied_threshold=95), source-scored recovery
+   via the 3-tier ladder (sheltered bed 1.0 / unsheltered bed 0.7 /
+   ground 0.4 — shelter flag from Build Validation), reported via
+   discrete `start_recovery`/`stop_recovery` calls carrying the 5-value
+   source ENUM (bed_sheltered / bed_unsheltered / ground_no_bed_owned /
+   ground_bed_unreachable / ground_trapped — its Core Rules 4/10/11),
    all thresholds/multipliers registered constants.
 2. **AI architecture** — behavior tree vs. utility layer vs. plain FSM per
    agent. The 20–30 ceiling explicitly permits deep per-agent AI; the
