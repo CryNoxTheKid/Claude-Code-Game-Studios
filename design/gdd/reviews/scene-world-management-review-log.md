@@ -1,6 +1,69 @@
 # Review Log — Scene/World Management
 
-## Review — 2026-07-10 — Verdict: NEEDS REVISION (re-review #2)
+## Review — 2026-07-10 — Verdict: APPROVED (re-review #4, grep-verification pass)
+Scope signal: S
+Specialists: qa-lead (fresh verification agent — per the CD's terminal-cycle
+mandate, NOT a full adversarial round)
+Blocking items: 0 (2 residual single-clause defects found and fixed
+in-session) | Recommended: 0
+Summary: All 5 re-review-#3 fixes VERIFIED with quoted line evidence; all
+folds verified; camera-input.md reciprocity confirmed. The pass caught 2
+final mirror-residues: (1) the build-placement row still labeled the
+aborted drag a "reversible begin-effect," contradicting the corrected
+load-failure row that cross-references it; (2) Core Rule 7's
+transition-complete bullet listed only 2 of the 3 unwind effects
+(overlay missing), asymmetric with the abort bullet. Both patched as
+single-clause edits and RE-VERIFIED by the same agent: final call CLEAN —
+all 7 "reversible begin-effect" occurrences taxonomy-consistent, success/
+abort branches symmetric. First CLEAN pass after 5 rounds. Status:
+**APPROVED** (systems index updated; user pre-authorized approve-on-clean).
+Prior verdict resolved: Yes (5/5 blockers + 2 verification residues)
+## Review — 2026-07-10 — Verdict: NEEDS REVISION (re-review #3 — terminal patch cycle)
+Scope signal: S
+Specialists: game-designer, systems-designer, qa-lead, godot-specialist + creative-director (senior synthesis)
+Blocking items: 5 | Recommended: ~11
+Summary: FIRST ROUND WITH ZERO REGRESSIONS — all 8 re-review-#2 fixes hold,
+all reciprocal files (camera-input, building-system, building-ui,
+villager-info-ui, time-tick) verified consistent, AC10 tick math
+cross-checked correct. CD: round-4 findings are a DIFFERENT CLASS than
+rounds 1-3 — no design traps, only propagation residue around the new
+abort signal + honesty/scoping text. Convergent top blocker (found
+independently by 3 specialists, and PREDICTED by systems-designer's agent
+memory): the double-trigger debounce still said "until the first
+completes" in the Edge Case row and AC7 — stale two-signal wording that,
+implemented literally, re-creates the transition-lockout soft-lock.
+Others: overlay-unwind missing from AC8/States/Visual-Audio (no abort row
+existed to test against); "no trace" overclaim vs. the unrestored
+in-flight drag (taxonomy mislabel); return-direction abort undefined
+(every abort sentence said "load failure" but return is an UNLOAD);
+SceneTree.current_scene property-assignment missing from the Core Rule 2
+guardrail. CD verdict: NEEDS REVISION as the TERMINAL patch-and-confirm
+cycle — re-review #4 should be a grep-verification pass, NOT another
+5-agent adversarial round; mandatory propagation sweep with every fix.
+Prior verdict resolved: Yes (8/8 hold; new findings are propagation gaps,
+not regressions)
+
+**Post-review revision (same session, 2026-07-10):** all 5 blockers fixed
+with 1 user decision: **abort is ENTRY-ONLY** (return handback cannot
+abort by construction — Valley always exists per Core Rule 4; freeing the
+Dungeon is teardown → existing teardown-ordering OQ; no stranding
+safeguard needed). Fixes: debounce Edge Case row + AC7 rewritten with
+positive abort-release test; AC8 + States parenthetical extended to the
+full camera/UI/overlay triad + new Visual/Audio ABORT row (treatment →
+/asset-spec incl. minimum-display-duration guard + tint distance);
+"no trace" claim scoped (irreversible + presentation state; explicit
+in-flight-interaction exception, drag mislabel corrected); entry-only
+declared in Core Rule 7/States/Edge-Case/AC8; guardrail + `current_scene`
+property assignment + never-free-World-Root corollary. Folds: signal-name
+capitalization normalized; Booting row → AC17b + HALT declared terminal
+(app restart); milestone-gated defined; AC12a/12b/13 → GWT (12b + 90-frame
+hold precondition); AC15 process_frame disambiguation; AC10(c) → derived
+value (10 × ticks_per_second); AC17a circular WHEN reworded; abort-while-
+paused composition explicit; anti-spam note (ignored-not-queued); boot-
+HALT ≠ SceneTree.paused ADR note. Propagation sweep grep-VERIFIED (stale
+two-signal wording only survives as quoted history in revision notes).
+**Final verification pass pending** (per CD: grep-verification, not a
+full adversarial round).
 Scope signal: S
 Specialists: game-designer, systems-designer, qa-lead, godot-specialist + creative-director (senior synthesis)
 Blocking items: 8 | Recommended: ~10
