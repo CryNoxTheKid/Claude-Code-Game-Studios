@@ -159,15 +159,27 @@ ever "one of thousands").
     Navigability later checks against — that system asks "can a villager
     (per these rules) reach X?", it does not define its own movement.
 10b. **Re-path filtering is a behavioral contract** *(added by the
-    2026-07-10 review)*: a Voxel World write triggers a re-path
-    evaluation for a Traveling villager ONLY if the changed cell(s)
-    intersect its remaining path or that path's clearance envelope
-    (the cells whose occupancy the path's walkability depends on).
-    Writes elsewhere are ignored by design. This filter is part of the
-    design (AC18's correctness depends on it), independent of whatever
-    throttling strategy the AI ADR adds on top — without it, the
-    synchronous signal fan-out cost at 30 villagers would be baked in
-    structurally.
+    2026-07-10 review; scope widened by the re-review)*: a Voxel World
+    write triggers a re-path/re-validation evaluation for **any moving
+    villager — Traveling, a Wandering step, a Breather step-away, or an
+    F4 vacate step** — ONLY if the changed cell(s) intersect the
+    remaining movement's cells or their **clearance envelope, defined
+    explicitly as: each movement cell plus the two cells directly above
+    it (the `villager_clearance` column, Rule 8) plus, for diagonal
+    steps, both flanking orthogonal cells (Rule 9)**. Writes elsewhere
+    are ignored by design. This filter is part of the design (AC18's
+    correctness depends on it), independent of whatever throttling
+    strategy the AI ADR adds on top — without it, the synchronous
+    signal fan-out cost at 30 villagers would be baked in structurally.
+10c. **Deciding-pass staggering directive** *(added by the re-review)*:
+    when many villagers enter Deciding in the same frame (e.g., a large
+    command's completion frees many jobs at once), their F2 selection
+    passes are staggered across frames rather than all executing in one
+    — a synchronized pass of 30 × 15 pathfinds could alone exceed the
+    16.6ms frame budget. The stagger mechanism and per-tick selection
+    budget are owned by the performance/AI ADR; this rule only mandates
+    THAT staggering exists. Villager order within the stagger follows
+    the stable processing order (Edge Case 3) for determinism.
 
 **Life texture (MVP — added by the 2026-07-10 review)**
 
@@ -175,17 +187,31 @@ ever "one of thousands").
     consecutively completed construction jobs, the villager takes a
     **Breather** before claiming another job — a short non-productive
     beat (`breather_duration_ticks`, default 90 ≈ 45s game time at 1x):
-    it steps away from the work site, sits on a nearby block or stands
-    and looks around. Work-claiming is suppressed for the duration;
-    urgent needs still preempt normally. *(Rationale: the review found
-    the strict priority list produces a tireless machine; the breather
-    is the minimal rhythm that reads as "a person working," directly
-    serving Pillar 2's design test. It is deliberately cosmetic-plus-
-    pacing — no need value changes.)*
+    it steps away from the work site (target chosen by F4's selection
+    with the just-finished cell as "requester" — reusing the existing
+    deterministic rule; the target must be standable per Rule 8), sits
+    or stands and looks around. Work-claiming is suppressed for the
+    duration; urgent needs still preempt normally. **Integration
+    precisions** *(re-review)*: the Breather check slots into Deciding
+    between "job completed" and re-running priority tier 2 — it can
+    only ever begin BETWEEN jobs, never mid-claim; its duration runs on
+    a dedicated ticks-since-entry counter, independent of
+    `decision_interval`; environmental interruptions behave like
+    Wandering's (walled-in → Edge Case 2 distress; the block it sits
+    on being removed → stand up in place, continue the Breather).
+    *(Rationale: the review found the strict priority list produces a
+    tireless machine; the breather is the minimal rhythm that reads as
+    "a person working," directly serving Pillar 2's design test. It is
+    deliberately cosmetic-plus-pacing — no need value changes.)*
 7c. **Idle micro-behaviors**: Wandering is not a single amble — the
     villager varies between walking to a wander target, pausing to look
     around, sitting briefly on a standable block, and drifting toward
-    its owned bed's area when one exists. Selection among micro-behaviors
+    its owned bed's area when one exists — **bed-drift is bounded by
+    F3's rules: the drift target is simply the flood-fill cell nearest
+    the bed WITHIN `wander_radius`; if the bed lies beyond the radius,
+    the villager drifts to the radius edge, never pathing outside F3's
+    bounded set** *(re-review: unbounded drift would have been an
+    uncounted goal-directed pathfind)*. Selection among micro-behaviors
     uses the same injected RNG as F3 (deterministic in tests). Pure
     flavor, no gameplay effect — but load-bearing for the "settlement
     has a pulse" fantasy the MVP playtest measures.
@@ -293,24 +319,32 @@ arrival routinely happens between ticks. Working state is entered
 immediately on arrival (visually), but the first work-progress increment
 is credited at the NEXT tick boundary — no partial-tick credit, ever.
 **This applies to EVERY Traveling→Working transition, including the
-1-cell step between adjacent cells of the same command** — each new cell
-costs its step time (F1) plus alignment to the next tick boundary before
-its first credit *(pinned by the 2026-07-10 review: Building F3's
-36-tick example explicitly excludes travel/alignment, so chained cells
-cost 4 ticks each PLUS per-cell step-and-align overhead — integration
-test AC40 measures the real total)*. (Cross-reference: Building System
-F3 consumes this rule; without it, effective build times would drift by
-up to one tick per job.)
+1-cell step between adjacent cells of the same command.** **Clock
+model (pinned by the 2026-07-10 re-review): ticks are a GLOBAL
+fixed-cadence heartbeat, never a per-villager countdown that resets on
+travel.** A step shorter than one tick period (e.g., 1 cell at default
+`move_speed` 3.0 = 0.667 ticks) is absorbed between global ticks — the
+villager arrives before the next scheduled tick and that tick credits
+the new cell with zero waste, so a 9-cell adjacent chain costs exactly
+36 ticks at default tuning (matching Building F3's example). Only when
+a step exceeds one tick period (slow `move_speed` tuning, longer travel)
+do skipped global ticks become real overhead. Integration test AC40
+measures the true total at any tuning. (Cross-reference: Building
+System F3 consumes this rule; without it, effective build times would
+drift by up to one tick per job.)
 
 ### F2 — Job selection
 
 `chosen_job = argmin(path_length_cells)` over available reachable jobs;
 tie-break by queue order (older commit first); **same-command ties break
-by cell index within the command** (the deterministic rasterization order
-Building F1/F2 produce) — all cells of one command share a commit
-timestamp, so this secondary key is what makes selection deterministic
-(added by the 2026-07-10 review; the coding standard requires same-result
-every run).
+by lexicographic cell coordinates (y, then x, then z)** — all cells of
+one command share a commit timestamp, and coordinates are a
+Building-System-independent, trivially deterministic secondary key
+*(revised by the 2026-07-10 re-review: the earlier "cell index within
+the command" cited a rasterization-order artifact Building System only
+actually defines for walls, not floors/roofs — coordinates exist for
+every cell unconditionally)*. The coding standard requires same-result
+every run.
 
 **Approximation contract** (required for implementations to converge):
 candidates are pre-filtered to the nearest `job_candidate_count` (default
@@ -341,10 +375,14 @@ wander tests are deterministic without seeding globals.
 
 `vacate_target = argmin(height_difference), then argMAX(Chebyshev
 distance to requester)` over standable cells orthogonally adjacent to the
-occupant; tie-break by a fixed scan order (N, E, S, W). The occupant
+occupant; tie-break by a fixed scan order (N, E, S, W — **axis
+convention: N = −z, E = +x, S = +z, W = −x**, pinned 2026-07-10 as no
+compass→axis mapping existed anywhere in the project). The occupant
 steps AWAY from the requesting builder — never toward it *(direction
 corrected by the 2026-07-10 review: the original argmin-distance pulled
-the occupant into the builder's own working zone)*. Deterministic — the
+the occupant into the builder's own working zone; independently
+re-verified in the re-review — the diametrically opposite cell uniquely
+wins in standard orthogonal geometry)*. Deterministic — the
 same situation always produces the same step. If no adjacent standable
 cell exists, the vacate request fails and the builder's cell stays
 deferred (Building System Edge Case 6).
@@ -516,6 +554,12 @@ should feel calm and informed, never confused about what it's doing.
   help; nobody describes villager motion as "teleporting" or "jittery";
   the move-in moment (first bed claim + sleep) reads as a small story
   beat, not a state change.
+- **Explicit playtest question** *(2026-07-10 re-review)*: the Breather
+  + idle micro-behaviors added life texture to Wandering and pauses —
+  Working and Sleeping remain purely mechanical by design. Does the
+  villager still read as "a person" across a full work-sleep cycle, or
+  do the untouched states break the illusion? Author further texture
+  ONLY if the playtest says so (evidence before rules).
 
 ## UI Requirements
 
@@ -554,7 +598,7 @@ testing standards — those ACs do NOT wait for that GDD.)*
 5. **GIVEN** any activity ends, **WHEN** Deciding runs, **THEN** the next state is assigned before any further tick is processed — assert the tick counter does not increment between activity-end and state assignment within a single decide() invocation.
 
 **Jobs and construction**
-6. **GIVEN** multiple available jobs, **WHEN** selecting, **THEN** the nearest-by-true-path among the straight-line-nearest `job_candidate_count` candidates is chosen; ties break by older commit (F2).
+6. **GIVEN** multiple available jobs, **WHEN** selecting, **THEN** the nearest-by-true-path among the straight-line-nearest `job_candidate_count` candidates is chosen; ties break by older commit, then by lexicographic cell coordinates (y, x, z) for same-command ties — deterministic every run (F2, updated wording 2026-07-10 re-review).
 7. **GIVEN** all `job_candidate_count` nearest candidates fail the true-path check, **WHEN** selecting, **THEN** the next `job_candidate_count` candidates are evaluated in turn, deterministically — never a full-queue pathfind (F2 fallback).
 8. **GIVEN** a claimed job, **WHEN** another villager attempts to claim it, **THEN** the claim fails atomically and the loser selects its next candidate (Edge Case 3).
 9. **GIVEN** pathing to a claimed job fails, **WHEN** the failure registers, **THEN** it is reported to the Building System, the claim is released, and the next candidate is tried (Rule 6).
@@ -608,14 +652,22 @@ testing standards — those ACs do NOT wait for that GDD.)*
 43. **GIVEN** two villagers with simultaneous urgent sleep targeting the same unowned reachable bed, **WHEN** claims resolve, **THEN** exactly one succeeds atomically (winner by stable villager processing order — Edge Case 3) and the loser falls back per Rule 12.
 44. **GIVEN** a villager with an owned reachable bed AND a closer unowned free bed, **WHEN** urgent sleep triggers Deciding, **THEN** it goes to its owned bed — never the closer unowned one (Rule 12 owned-bed preference).
 45. **GIVEN** a standable cell exactly at `wander_radius` distance, **WHEN** the flood-fill runs, **THEN** it is included; one cell beyond, excluded — inclusive boundary, deterministic (F3).
-46. **GIVEN** `jobs_before_break` consecutive completed jobs, **WHEN** the last completes, **THEN** the villager enters Breather for `breather_duration_ticks`, claims no job during it, and an urgent need still preempts it normally (Rule 7b).
+46a. **GIVEN** `jobs_before_break` consecutive completed jobs, **WHEN** the last completes, **THEN** the villager enters Breather (Rule 7b entry).
+46b. **GIVEN** an active Breather and available jobs, **WHEN** ticks fire, **THEN** no job is claimed for the full `breather_duration_ticks` (claim suppression).
+46c. **GIVEN** an active Breather and a mocked urgent need, **WHEN** the need registers, **THEN** the Breather is preempted normally (needs win).
 47. **GIVEN** `starting_villager_count` = N (mocked config), **WHEN** world generation completes, **THEN** exactly N villagers exist at valid standable cells (Rule 14b).
 
-*(Evidence-tier note per the project test table: AC1–8, 10–36, 41–47 are
-blocking headless unit tests; AC9, 37, 40, 40b are blocking integration
-tests; AC38 is provisional-integration (Save/Load); AC39 is formally an
-Advisory/Performance criterion gated at VS/Full-Vision milestones — not
-part of the Logic gate, re-tiered 2026-07-10.)*
+**Added by the 2026-07-10 re-review**
+48. **GIVEN** a Breather with no preemption, **WHEN** `breather_duration_ticks` elapse, **THEN** the villager returns to Deciding and job-claiming resumes on the next Deciding pass (Breather normal exit).
+49. **GIVEN** a Voxel World write NOT intersecting a moving villager's remaining movement cells or their clearance envelope, **WHEN** the signal fires, **THEN** zero re-path evaluations occur for that villager — assert call-count == 0 (Rule 10b negative case; the filter's entire perf purpose).
+50. **GIVEN** an occupant with at least one strictly-farther and one strictly-closer standable adjacent cell relative to the requester, **WHEN** vacating via F4, **THEN** the chosen cell strictly increases Chebyshev distance to the requester — never decreases (F4 direction-correctness; guards the corrected inversion).
+
+*(Evidence-tier note per the project test table: AC1–8, 10–36, 41–50 are
+blocking headless unit tests (incl. the 46a/b/c split); AC9, 37, 40, 40b
+are blocking integration tests; AC38 is provisional-integration
+(Save/Load); AC39 is formally an Advisory/Performance criterion gated at
+VS/Full-Vision milestones — not part of the Logic gate, re-tiered
+2026-07-10.)*
 
 ## Open Questions
 
@@ -646,7 +698,12 @@ part of the Logic gate, re-tiered 2026-07-10.)*
    synthetic 30-villager stress case** (unreachable-job-dense + parallel
    construction write-storm at 3x warp) even though VS ships with 5 —
    cheap insurance against discovering a structural flaw after Alpha
-   content lands (2026-07-10 review recommendation). → *AI ADR + the
+   content lands (2026-07-10 review recommendation). Re-review
+   additions to the stress scope: synchronized mass-Deciding spikes
+   (Rule 10c's stagger under test), Breather step-away/bed-drift
+   pathing costs, and Rule 10b's widened all-movement filter scope.
+   The per-tick selection budget behind Rule 10c's stagger directive
+   is a core deliverable of that ADR. → *AI ADR + the
    performance spike before Vertical Slice*
 4. **Day/night rhythm** — the concept's "day schedules" (work by day,
    sleep by night) layers on top of the need-driven MVP. Requires a

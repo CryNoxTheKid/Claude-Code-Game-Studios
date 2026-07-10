@@ -1,5 +1,28 @@
 # Review Log — Villager AI & Behavior
 
+## Review — 2026-07-10 — Verdict: APPROVED (re-review)
+Scope signal: L
+Specialists: game-designer, ai-programmer, systems-designer, qa-lead, godot-specialist, performance-analyst + creative-director (senior synthesis)
+Blocking items: 0 | Recommended: patches A–G, I (all applied in-session) + 1 playtest question logged
+Summary: RE-REVIEW after same-day NEEDS REVISION. All 8 prior blockers
+verified holding in intent; F4's direction fix independently re-verified
+correct (a suspected tie-degeneracy was disproven by recomputation).
+Residue was precision text INSIDE the fixes: F2 tie-break re-based on
+lexicographic cell coordinates (the cited rasterization index doesn't
+exist for floors/roofs), N/E/S/W axis convention pinned (N=−z, E=+x),
+the chained-build clock model stated (global heartbeat absorbs sub-tick
+steps → 36 ticks at defaults), Rule 10b widened to ALL villager movement
+with an explicitly enumerated clearance envelope, Breather integration
+precisions (F4-based step-away, dedicated timer, environmental
+interrupts), Rule 10c mass-Deciding stagger directive (per-tick budget →
+performance ADR), bed-drift bounded to wander_radius, ACs 46 split +
+48–50 added (Breather exit, re-path-filter NEGATIVE case, F4
+direction-correctness). Working/Sleeping's remaining machine-feel logged
+as an explicit playtest question (evidence before rules — CD
+adjudication). CD: "imprecise prose over sound design — the approvable
+failure mode."
+Prior verdict resolved: Yes
+
 ## Review — 2026-07-10 — Verdict: NEEDS REVISION
 Scope signal: L
 Specialists: game-designer, ai-programmer, systems-designer, qa-lead, godot-specialist, performance-analyst + creative-director (senior synthesis)

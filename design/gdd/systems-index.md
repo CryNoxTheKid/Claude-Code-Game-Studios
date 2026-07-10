@@ -37,7 +37,7 @@ and Full Vision per the concept doc's own scope tiers.
 | 5 | Scene/World Management | Core | MVP | Designed | design/gdd/scene-world-management.md | — |
 | 6 | Building System | Gameplay | MVP | Approved | design/gdd/building-system.md | Voxel World, Camera & Input, Resource & Item Database, Time & Tick System |
 | 7 | Build Validation & Navigability | Gameplay | MVP | Designed | design/gdd/build-validation-navigability.md | Building System, Villager AI & Behavior |
-| 8 | Villager AI & Behavior | Gameplay | MVP | In Review | design/gdd/villager-ai-behavior.md | Voxel World, Time & Tick System, Building System |
+| 8 | Villager AI & Behavior | Gameplay | MVP | Approved | design/gdd/villager-ai-behavior.md | Voxel World, Time & Tick System, Building System |
 | 9 | Needs & Mood System | Gameplay | MVP | Designed | design/gdd/needs-mood-system.md | Villager AI & Behavior, Time & Tick System |
 | 10 | Professions & Ranks | Gameplay | Alpha | Not Started | — | Villager AI & Behavior, Gathering & Production Chains |
 | 11 | Relationships & Bonds | Gameplay | Alpha | Not Started | — | Villager AI & Behavior, Needs & Mood System |
