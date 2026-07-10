@@ -49,7 +49,7 @@ and Full Vision per the concept doc's own scope tiers.
 | 17 | Dungeon System | Gameplay | Vertical Slice | Not Started | — | Squad & Combat System |
 | 18 | Township Progression / Prosperity | Progression | Alpha | Not Started | — | Gathering & Production Chains, Building System, Villager AI & Behavior |
 | 19 | Recipe/Blueprint Unlocks | Progression | Alpha | Not Started | — | Township Progression, Gathering & Production Chains |
-| 20 | Resource & Item Database | Economy | MVP | In Review (reviewed 2026-07-10, revision in progress) | design/gdd/resource-item-database.md | — |
+| 20 | Resource & Item Database | Economy | MVP | Approved (2026-07-10 — review + in-session revision + verification pass CLEAN) | design/gdd/resource-item-database.md | — |
 | 21 | Economy Balance (Sinks) | Economy | Alpha | Not Started | — | Gathering & Production Chains, Storage & Inventory, Building System |
 | 22 | Building UI | UI | MVP | Designed | design/gdd/building-ui.md | Building System, Build Validation & Navigability, Resource & Item Database, Time & Tick System |
 | 23 | Villager Info UI | UI | MVP | Designed | design/gdd/villager-info-ui.md | Villager AI & Behavior, Needs & Mood System |

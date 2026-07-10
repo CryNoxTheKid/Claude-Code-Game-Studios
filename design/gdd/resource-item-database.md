@@ -1,7 +1,8 @@
 # Resource & Item Database
 
-> **Status**: In Review (full review 2026-07-10 NEEDS REVISION — all Tier-A/B
-> findings revised in-session, re-review pending)
+> **Status**: APPROVED (2026-07-10 — full review NEEDS REVISION → all findings
+> revised in-session → verification pass CLEAN; see
+> design/gdd/reviews/resource-item-database-review-log.md)
 > **Author**: user + Claude Code Game Studios agents
 > **Last Updated**: 2026-07-10
 > **Last Verified**: 2026-07-10
@@ -264,7 +265,10 @@ Deliberately NOT formulas (and why):
 3. **`missing_item` is reserved.** Boot validation rejects any authored
    entry using the id `missing_item` — it can never be overridden by data.
 4. **Duplicate ids across data files.** Boot validation fails (Failed state)
-   naming both files. The game never launches with an ambiguous database.
+   naming both entries AND both source files *(harmonized with AC3 at the
+   2026-07-10 verification pass — the two locations previously asserted
+   "entries" vs "files")*. The game never launches with an ambiguous
+   database.
 5. **Unknown category or material_family value in an entry.** Boot
    validation fails naming the entry — categories and families are fixed
    enums (Core Rule 5), not free text.

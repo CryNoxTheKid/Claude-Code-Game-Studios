@@ -1,6 +1,6 @@
 ---
 name: project-ridb-gdd-review-history
-description: resource-item-database.md first adversarial AC review (2026-07-10) — 7 BLOCKING findings, verdict NEEDS REVISION; check before any re-review
+description: resource-item-database.md review history — round 1 NEEDS REVISION (7 blockers), round 2 grep-verification found 1 residual mirror-defect (AC3/Edge Case 4)
 metadata:
   type: project
 ---
@@ -64,3 +64,54 @@ Case 4 wording now match; AC19's copy-vs-reference question was actually resolve
 (not just asserted resolved); the Failed-state wording against the *current*
 `scene-world-management.md` text (SWM is a moving target — its own AC17b wording
 may have changed since 2026-07-10, don't assume it's static).
+
+## Round 2 (2026-07-10, same-day grep-verification pass, not a full adversarial round)
+
+Verified all 5 Tier-A decisions + 6 Tier-B mechanical clusters from round 1's
+post-review revision against the live file, with quoted line evidence. 9 of 10
+checklist areas VERIFIED clean: tier-axis scoping (Core Rule 3 + Interactions/
+Dependencies split + Rule 4 note + OQ3 narrowed), missing_item full inertness
+(Edge Case 1 all 7 fields + Core Rules 5/8 + AC10/AC27), Core Rule 9 immutability
++ AC19 provisional tag, voxel identifier mapping (block-type=id, material=
+material_family, no second namespace, Cross-Refs updated), field policy (OQ7–12
+all owned, no stub fields added to Rule 4 schema), SWM reciprocity (Upstream
+requirement-owned-by-SWM/mechanism-to-ADR wording, downstream row, Failed state
+TERMINAL boot-HALT-aligned, Cross-Refs row), validation checklist (5 new checks
++ structured-result contract + AC23–26 + AC17), staleness sweep (Building System/
+Building UI/Voxel World/Needs & Mood all refreshed), [assumption] labels (tier
+range, max_stack_size default+range, ~200 guidance).
+
+**1 residual mirror-defect found**: the fix edited AC3 (line ~411, now reads
+"naming both entries AND both source files") but did NOT edit Edge Case 4
+(line ~266-267, still reads only "naming both files", no "entries" language)
+— the review log's "AC3 entries+files harmonized" claim is only half-true; it
+harmonized the citing AC toward a superset, not the two locations toward
+matching text. Same class as the SWM 5-round pattern: fix touches the citing
+location, not the cited one. Not blocking (AC3's assertion is a superset, not
+a contradiction of Edge Case 4), but flagged as a genuine finding, not
+adjudicated-and-declined.
+
+Full mirror-defect hunt (Overview/Summary staleness, Quick Reference "Key deps:
+None" vs SWM, Edge Case 2/9 consistency, grep for "Session ends"/"gating
+scaffold"/"validation warning"/stale missing_item spec) came back clean — no
+other findings.
+
+**Verdict: DEFECTS FOUND (1 minor item)** — not CLEAN. Recommend a one-line
+patch to Edge Case 4 before final approval; everything else is ready.
+
+## Round 3 (2026-07-10, targeted spot re-verification of the Edge Case 4 patch)
+
+Coordinator reported Edge Case 4 patched to read "naming both entries AND both
+source files (harmonized with AC3 at the 2026-07-10 verification pass...)".
+Grep-confirmed: Edge Case 4 (line ~266-268) and AC3 (line ~414) now both read
+the identical substance — "naming both entries AND both source files" — closing
+the round-2 mirror-defect. Targeted grep of the Validating checks States-table
+row and AC7 (the only other places that touch duplicate-id language) found no
+third divergent restatement — Validating row only lists "id uniqueness" as a
+check name (no entries/files wording); AC7 asserts a different thing (naming
+ALL invalid entries in a heterogeneous 3-entry set, not the dual entries+files
+requirement specifically).
+
+**Verdict: CLEAN** — resource-item-database.md is ready for Approved status as
+far as this AC-review track is concerned. This closes out the round-1→round-2→
+round-3 patch cycle for this GDD.
