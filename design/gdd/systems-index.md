@@ -51,7 +51,7 @@ and Full Vision per the concept doc's own scope tiers.
 | 19 | Recipe/Blueprint Unlocks | Progression | Alpha | Not Started | — | Township Progression, Gathering & Production Chains |
 | 20 | Resource & Item Database | Economy | MVP | Approved (2026-07-10 — review + in-session revision + verification pass CLEAN) | design/gdd/resource-item-database.md | — |
 | 21 | Economy Balance (Sinks) | Economy | Alpha | Not Started | — | Gathering & Production Chains, Storage & Inventory, Building System |
-| 22 | Building UI | UI | MVP | Designed | design/gdd/building-ui.md | Building System, Build Validation & Navigability, Resource & Item Database, Time & Tick System |
+| 22 | Building UI | UI | MVP | In Review (2026-07-10 reviewed MAJOR REVISION NEEDED → toast model rebuilt in-session, re-review pending) | design/gdd/building-ui.md | Building System, Build Validation & Navigability, Resource & Item Database, Time & Tick System |
 | 23 | Villager Info UI | UI | MVP | Designed | design/gdd/villager-info-ui.md | Villager AI & Behavior, Needs & Mood System |
 | 24 | Economy UI | UI | Alpha | Not Started | — | Storage & Inventory, Trade System |
 | 25 | Combat/Wave UI | UI | Vertical Slice | Not Started | — | Squad & Combat System, Wave Defense |

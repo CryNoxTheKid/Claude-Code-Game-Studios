@@ -518,9 +518,13 @@ active-warnings inspection surface; (2) the dismissal re-show debounce
 (delay-before-show) for transient-seal flicker (Game Feel); (4)
 tier-swap reconciliation — retiring a stale Warning toast when the
 per-pass emissions shift to Info for the same item (Rule 10's
-no-cleared-signal model). Note: Building UI's current Rule 9
-(re-appear on every re-emit) contradicts item (2) as drafted — its
-review must resolve this.
+no-cleared-signal model). **RESOLVED 2026-07-10 by Building UI's
+review**: its rebuilt Rules 9–9c implement all four items
+(identity/dedup + grace + debounce + tier-swap reconcile + issues
+anchor), and the original Rule 9 contradiction with item (2) is
+retired. Building UI also rules that `room_recognized` has NO HUD
+surface (its Rule 9d) — the celebration is exclusively this system's
+in-world highlight + chime.
 
 ## Cross-References
 
