@@ -1,6 +1,6 @@
 # Building UI
 
-> **Status**: Draft
+> **Status**: Approved (2026-07-10 — MAJOR REVISION NEEDED → toast model rebuilt; re-review NEEDS REVISION (narrow) → grace-clock rewrite + patches; verification pass CLEAN)
 > **Author**: user + Claude Code Game Studios agents
 > **Last Updated**: 2026-07-10
 > **Last Verified**: 2026-07-10
@@ -84,13 +84,17 @@ dense RTS command card, nested ribbon menus, or modal dialog churn.
    *simulation-authoritative* state, ever. **UI-local presentation
    memory IS owned here by design and is exhaustively scoped**: the
    per-tool last-selected material (Rule 5), toast/anchor presentation
-   state (shown/dismissed flags, grace/debounce timers, focus — Rules
+   state (shown/dismissed flags, grace/debounce timers, focus, toast
+   display order/age, and the anchor's expanded/collapsed flag — Rules
    9–9c), and nothing else; none of it is serialized, none of it is
    consumed by any other system. *(Revised 2026-07-10 — the original
    "no UI-owned state, ever" claim contradicted Rules 5 and 9.)*
-   Mirroring uses each source's signals AND, where the API is a
-   synchronous call (time controls, Rule 10), the call's returned
-   state — the display always reflects the latest authoritative value.
+   Mirroring uses each source's signals — except the **time controls,
+   whose display is written EXCLUSIVELY from the pause/warp API's
+   returned state** (Rule 10, Edge Case 12); Time & Tick state signals
+   are consumed only for changes not initiated by this HUD, and a
+   signal never overwrites a newer returned state (no stale-writer
+   race — re-review fix, 2026-07-10).
    The HUD runs on raw delta (fully responsive during pause, same
    pattern as Camera & Input).
 
@@ -112,8 +116,9 @@ dense RTS command card, nested ribbon menus, or modal dialog churn.
    (Building AC 18); the last selection per tool is remembered within
    the session.
 6. The **wall-height stepper** shows 1–8 with +/− buttons (and
-   mousewheel over the stepper); it is the only player-facing tuning
-   knob (Building Tuning Knobs).
+   mousewheel over the stepper, and the `height_step_up/down` actions —
+   Rule 9b); it is the only player-facing tuning knob (Building Tuning
+   Knobs).
 7. **Undo/redo buttons** mirror stack state (disabled when empty —
    mirroring Building's stack exactly); click = one step; **Ctrl+Z /
    Ctrl+Y** bindings; a held key repeats at the OS key-repeat rate, one
@@ -142,11 +147,20 @@ dense RTS command card, nested ribbon menus, or modal dialog churn.
      place**: no new entry, no re-queue, no visual change. Build
      Validation's level-triggered per-pass re-emits are idempotent for
      presentation.
-   - **First-appearance grace** (seam item 3): a new key must persist
-     across `warning_grace_delay` of continued qualifying re-emissions
-     before anything (toast or anchor entry) first appears — a
-     transient seal the player fixes within the same build gesture
-     never surfaces at all.
+   - **First-appearance grace** (seam item 3): the grace timer is a
+     **UI-local wall-clock timer per SUBJECT, started on the subject's
+     first qualifying emission — NOT a count of re-emissions** (Build
+     Validation is event-driven, its Rule 7: a persisting cause may
+     emit exactly once; rewritten 2026-07-10 — the original re-emission
+     wording was unsatisfiable). When `warning_grace_delay` expires,
+     the UI checks Build Validation's queryable state: cause still
+     holds → the toast (or anchor entry) appears; cause resolved
+     meanwhile → nothing ever surfaces (a transient seal fixed within
+     the same build gesture never appears at all). These timers (grace
+     AND the debounce below) freeze only during Suspended (Edge Case
+     6), never during ordinary game pause — the expiry check reads
+     current queryable state, which stays correct while paused
+     (removal/undo still fire analysis in pause).
    - **Severity**: Warning outranks Info. A visible Warning is NEVER
      evicted by a lower-severity arrival; it leaves the screen only via
      player dismissal, tier-swap, cause resolution, or the overflow
@@ -159,28 +173,53 @@ dense RTS command card, nested ribbon menus, or modal dialog churn.
      is never invisible, so nothing starves). A new Info arriving when
      full goes directly to the anchor.
    - **Dismissal + re-show debounce** (seam item 2): dismissing a toast
-     hides it and starts `min_reshow_interval` for its key;
-     re-emissions inside the window do NOT re-show it (the issue stays
-     in the anchor list — dismissal hides a toast, never the record).
-     After the window, a still-persisting cause re-shows the toast.
+     hides it and starts `min_reshow_interval` for its key (same
+     wall-clock timer class as grace); re-emissions inside the window
+     do NOT re-show it (the issue stays in the anchor list — dismissal
+     hides a toast, never the record). At window expiry the queryable
+     state decides: cause still holds → the toast re-shows (no
+     re-emission required); cause gone → the entry was already retired
+     by reconciliation.
+   - **Promotion** *(2026-07-10 re-review ruling)*: when a visible slot
+     frees (dismissal, retirement, or tier-swap), the longest-waiting
+     anchor-only Warning is promoted into it as a toast — grace was
+     already served, so it surfaces immediately; a previously-dismissed
+     key still respects its remaining `min_reshow_interval` (the
+     next-longest-waiting eligible key promotes instead). Info promotes
+     only when no anchor-only Warning waits. The anchor is a true
+     overflow buffer, never a graveyard.
    - **Reconciliation — resolution and tier-swap** (seam item 4): the
      toast/anchor set reconciles against each analysis pass's emissions
      plus Build Validation's queryable state (its no-cleared-signal
-     model, its Rule 10). A key whose emissions cease is
-     **auto-retired** — toast and anchor entry removed within one
+     model, its Rule 10; all emissions of one pass arrive synchronously
+     in one frame — same-frame delivery IS the reconciliation unit, per
+     the reciprocal note in its Rule 10). A key whose emissions cease
+     is **auto-retired** — toast and anchor entry removed within one
      reconcile; solved problems never require a manual dismiss. A
      subject whose Warning ceases while an Info begins in the same pass
      swaps tiers: the Warning retires, the Info appears — never both
-     for one subject.
+     for one subject. **Tier-swap bookkeeping is per SUBJECT across
+     keys** *(added 2026-07-10 re-review)*: a swap of an already-Shown
+     Warning shows the Info immediately (grace was served by the
+     Warning); a swap during Grace transfers the elapsed grace credit
+     to the Info key — no restart, so a flickering cause can never
+     indefinitely suppress surfacing; an active dismissal-debounce
+     window on the retiring Warning does NOT carry to the Info (a tier
+     change is new information the player has not dismissed).
 9b. **Keyboard access** *(2026-07-10 decision — no persistent element
-   is mouse-only)*: `toast_focus_cycle` steps focus through visible
-   toasts; `toast_dismiss` dismisses the focused toast with semantics
-   identical to a click; `toggle_issues` opens/closes the anchor list
-   (Rule 9c); `palette_next`/`palette_prev` cycle the armed tool's
-   palette selection. Default bindings (Tab, Delete, I, and [ / ]
-   respectively) are `[assumption]` until the /ux-design pass — the
-   ACTIONS are the commitment, not the keys (Q/E are camera-owned and
-   avoided).
+   is mouse-only; completed at the re-review, which found the stepper
+   and roof picker still keyboard-less)*: `toast_focus_cycle` steps
+   focus through visible toasts; `toast_dismiss` dismisses the focused
+   toast with semantics identical to a click; `toggle_issues`
+   opens/closes the anchor list (Rule 9c); `palette_next`/`palette_prev`
+   cycle the armed tool's material/furniture palette selection;
+   `formation_next`/`formation_prev` cycle the roof-formation picker
+   (Roof armed); `height_step_up`/`height_step_down` drive the
+   wall-height stepper (Wall armed — +/− keys are time-owned and
+   unavailable). Default bindings are `[assumption]` until the
+   /ux-design pass — the ACTIONS are the commitment, not the keys
+   (Q/E are camera-owned and avoided; Tab collides with Godot's
+   built-in `ui_focus_next` and needs explicit resolution there).
 9c. **The issues anchor** *(seam item 1 — the on-demand inspection
    surface)*: a compact counter at the top of the notification zone
    ("N ⚠"), visible iff at least one active warning/info exists
@@ -197,7 +236,11 @@ dense RTS command card, nested ribbon menus, or modal dialog churn.
    one-celebration/anti-stacking rule). This HUD does not consume
    `room_recognized` and renders no confirmation toast *(2026-07-10
    decision — deletes the original auto-fading confirmation toast and
-   the `toast_confirm_fade` knob)*.
+   the `toast_confirm_fade` knob)*. **Accepted asymmetry** *(re-review
+   acknowledgment)*: warnings are durable (the anchor); a missed
+   in-world celebration is unrecoverable — deliberate,
+   cozy-over-completionist; revisit only if the MVP playtest shows
+   players missing their move-in moments.
 10. **Time controls**: pause toggle bound to **Space**; speed cycling on
     **+/−** (or clicking 1x/2x/3x directly); the control always shows
     the current state (paused state visually unmistakable). Calls Time &
@@ -220,8 +263,9 @@ dense RTS command card, nested ribbon menus, or modal dialog churn.
 12. New InputMap actions introduced by this GDD (`tool_select_1..5`,
     `time_pause`, `time_speed_up/down`, and — added 2026-07-10 —
     `toast_focus_cycle`, `toast_dismiss`, `toggle_issues`,
-    `palette_next`, `palette_prev` per Rule 9b) are registered under
-    Camera & Input's action ownership (its Core Rule 7 — it owns
+    `palette_next`, `palette_prev`, `formation_next`, `formation_prev`,
+    `height_step_up`, `height_step_down` per Rule 9b) are registered
+    under Camera & Input's action ownership (its Core Rule 7 — it owns
     definitions, consumers own meaning).
 
 ### States and Transitions
@@ -232,12 +276,15 @@ dense RTS command card, nested ribbon menus, or modal dialog churn.
 | ToolArmed(tool) | Tool selected (button or key 1–5) | Cancel / other tool / Suspended | Context panel for that tool; active button highlighted |
 | Suspended | Camera & Input enters Suspended (scene transition) | Reactivation | Entire HUD hidden; all input ignored (mirrors Building's tool state machine) |
 
-**Per-key toast lifecycle (Rule 9):** Grace(new key, hidden) → Shown |
-AnchorOnly(overflow) → Dismissed(debounce window — anchor entry stays)
-→ re-Shown(window elapsed + cause persists) — with two universal exits
-from any state: **Retired** (emissions cease → auto-removed within one
-reconcile) and **Tier-swapped** (Warning→Info for the same subject).
-Same-key re-emissions never create a second instance (Rule 9 identity).
+**Per-key toast lifecycle (Rule 9):** Grace(new key, hidden — wall-clock
+timer) → Shown | AnchorOnly(overflow) → Dismissed(debounce window —
+anchor entry stays) → re-Shown(window elapsed + cause persists in
+queryable state) — plus **AnchorOnly → Shown via promotion** (a visible
+slot frees, Rule 9) — with two universal exits from any state:
+**Retired** (cause gone → auto-removed within one reconcile) and
+**Tier-swapped** (Warning→Info for the same subject; per-subject grace
+credit transfers, debounce does not). Same-key re-emissions never
+create a second instance (Rule 9 identity).
 **Anchor:** Hidden(0 issues) ↔ Badge(N) ↔ Expanded — pure derivation
 from the live issue set plus one expanded/collapsed flag.
 
@@ -310,8 +357,12 @@ not as formulas.
    Suspended and resume with REMAINING time — never restart.
    *Implementation note: hiding a Control does not pause Godot
    Tweens/Timers — the pause is an explicit call tied to the Suspended
-   transition, not a visibility side effect.* (Issue records would
-   re-derive anyway — Build Validation re-emits.)
+   transition, not a visibility side effect; the SAME Suspended-entry
+   signal from Camera & Input drives both the HUD-hide and the
+   timer-pause, one trigger, no drift.* Ordinary game PAUSE never
+   freezes these timers (Rule 9's wall-clock semantics — analysis can
+   still run while paused, since removal/undo fire signals in pause).
+   (Issue records would re-derive anyway — Build Validation re-emits.)
 7. **Speed changed while paused.** Pressing +/− while paused updates the
    *stored* speed without unpausing (mirrors Time & Tick's independent
    pause/speed state); the control displays both facts (paused + pending
@@ -334,7 +385,17 @@ not as formulas.
     mirrored update: each press is a synchronous API call whose
     returned state updates the display (Rules 2/10) — the control shows
     Time & Tick's authoritative state after the second call; no
-    UI-local toggle exists to diverge.
+    UI-local toggle exists to diverge, and per Rule 2 a queued state
+    SIGNAL from press 1 can never overwrite press 2's newer returned
+    state (returned-state-only writer for time controls).
+13. **Focused toast retires mid-interaction.** When the toast holding
+    keyboard focus auto-retires, is promoted away, or tier-swaps, focus
+    moves to the next visible toast (or the anchor if none remains) —
+    never a dangling null focus. *(Godot does not auto-transfer focus
+    from a freed Control; the handoff is explicit. This is the first
+    feature requiring focus to survive dynamic Control add/remove —
+    OQ7's 4.6 dual-focus verification is BLOCKING for Rule 9b's
+    implementation specifically.)*
 
 ## Dependencies
 
@@ -344,10 +405,10 @@ not as formulas.
 |--------|-----------|---------------------------|
 | Building System | ✅ Approved | Tool/material/height/formation/undo state + the UI Requirements contract; triggered via shared InputMap actions |
 | Build Validation & Navigability | ✅ Approved | Warning/info events + why-strings + queryable state (its Rule 10); the four-item UI seam contract (its UI Requirements) — implemented by Rules 9–9c |
-| Resource & Item Database | ✅ Designed | Palette contents, `visual_asset` icons, `display_name` tooltips, tier-0 rule |
-| Time & Tick System | ✅ Designed | Pause/warp API + state display (resolves its Core Rule 2 UI-trigger question) |
-| Camera & Input | ✅ Designed | InputMap action ownership for new bindings (Rule 12); Suspended state; raw-delta pattern |
-| Scene/World Management | ✅ Designed | Hosting; Suspended during transitions |
+| Resource & Item Database | ✅ Approved | Palette contents, `visual_asset` icons, `display_name` tooltips, tier-0 rule |
+| Time & Tick System | ✅ Approved | Pause/warp API + state display (resolves its Core Rule 2 UI-trigger question) |
+| Camera & Input | ✅ Approved | InputMap action ownership for new bindings (Rule 12); Suspended state; raw-delta pattern |
+| Scene/World Management | ✅ Approved | Hosting; Suspended during transitions |
 
 ### Downstream (systems that depend on this one)
 
@@ -360,7 +421,7 @@ not as formulas.
 
 | Knob | Default | Safe Range | Affects |
 |------|---------|-----------|---------|
-| `toast_max_visible` | 3 | 2–5 | Simultaneous toasts — more = noisier (Pillar 4). **Minimum raised to 2 (2026-07-10)**: a single slot cannot honor the Warning-never-evicted rule alongside a rotating Info slot (Rule 9) |
+| `toast_max_visible` | 3 | 2–5 | Simultaneous toasts — more = noisier (Pillar 4). **Minimum 2**: keeps one slot rotating for Info in the common case; when every slot holds a Warning, Info is anchor-only until promotion frees a slot (Rule 9 — the rotating-Info slot is best-effort, not guaranteed; rationale corrected at the re-review) |
 | `min_reshow_interval` | 30s | 10–120s | Dismissal debounce (Rule 9, seam item 2): how long a dismissed toast stays hidden through re-emissions. `[assumption]` until playtest |
 | `warning_grace_delay` | 3s | 1–8s | First-appearance grace (Rule 9, seam item 3): how long a new issue must persist before surfacing at all. `[assumption]` until playtest |
 | `invalid_cue_fade` | 1s | 0.5–2s | Duration of the at-cursor invalid marker |
@@ -424,7 +485,9 @@ This GDD *is* the UI — this section points forward instead:
 mode. Review produced 5 rewrites and 6 missing criteria; all
 incorporated. The 2026-07-10 full design review rebuilt the toast model:
 AC11/12 rewritten (the originals validated the seam-contract violation)
-and AC27–36 added. Split per the project's test-evidence table: headless
+and AC27–36 added. The same-day re-review rewrote AC27 (wall-clock grace
+— the re-emission wording was unsatisfiable), extended AC31/36, and
+added AC37–41. Split per the project's test-evidence table: headless
 unit-testable mirror/event logic is BLOCKING; rendering/viewport/layout
 checks are ADVISORY (interaction test or walkthrough doc).)*
 
@@ -453,16 +516,23 @@ checks are ADVISORY (interaction test or walkthrough doc).)*
 22. **GIVEN** the InputMap at boot, **THEN** `tool_select_1..5`, `time_pause`, `time_speed_up/down` exist as registered actions (smoke check, Rule 12).
 
 **Added by design review (2026-07-10) — blocking headless (toast model rebuild + keyboard parity)**
-27. **GIVEN** a new warning key, **WHEN** it persists for less than `warning_grace_delay` and then ceases, **THEN** no toast and no anchor entry ever appeared; **WHEN** it persists past the delay, **THEN** the toast appears (Rule 9 grace).
+27. **GIVEN** exactly ONE qualifying emission for a new subject (no further emissions — Build Validation is event-driven), **WHEN** `warning_grace_delay` elapses and the mocked queryable state still holds the cause, **THEN** the toast appears (wall-clock grace + state check, no re-emission required); **GIVEN** the queryable state shows the cause resolved before expiry, **THEN** no toast and no anchor entry ever appeared (Rule 9 grace — rewritten at the re-review: the original re-emission-count wording was unsatisfiable).
 28. **GIVEN** a shown toast, **WHEN** its key re-emits on N successive passes, **THEN** exactly one toast instance exists throughout — no duplicate entries, no Shown→Queued cycling (Rule 9 identity/dedup).
 29. **GIVEN** a shown warning whose emissions cease (cause fixed), **WHEN** the next reconcile runs, **THEN** the toast and its anchor entry are removed with no player dismissal (Edge Case 11).
 30. **GIVEN** a subject whose Warning ceases while an Info begins in the same pass, **THEN** the Warning toast retires and the Info toast appears — at no point are both visible for that subject (Rule 9 tier-swap).
-31. **GIVEN** any set of active issues (shown, dismissed-in-window, and overflowed), **THEN** the anchor badge equals the live issue count and the expanded list matches Build Validation's queryable state exactly — mutating upstream state directly (bypassing signals) never leaves a stale list entry (Rule 9c — no cached copy).
+31. **GIVEN** any set of active issues (shown, dismissed-in-window, and overflowed), **THEN** the anchor badge equals the live issue count and the expanded list matches Build Validation's queryable state exactly — mutating upstream state directly (bypassing signals) never leaves a stale list entry (Rule 9c — no cached copy; the queryable-state schema itself is `[assumption]` until the technical spec pass).
 32. **GIVEN** zero active issues, **THEN** the anchor is fully hidden — no badge, no dead chrome (Rule 9c).
 33. **GIVEN** visible toasts, **WHEN** `toast_focus_cycle` then `toast_dismiss` fire, **THEN** the focused toast is dismissed with semantics identical to a click dismissal, including the debounce window (Rule 9b keyboard parity).
 34. **GIVEN** a placement tool armed, **WHEN** `palette_next`/`palette_prev` fire, **THEN** the selection cycles through exactly the palette's entries, identically to clicking them (Rule 9b).
 35. **GIVEN** a `room_recognized` event (mocked), **THEN** zero toast entries and zero anchor entries are created — confirmations have no HUD surface (Rule 9d).
-36. **GIVEN** the InputMap at boot, **THEN** `toast_focus_cycle`, `toast_dismiss`, `toggle_issues`, `palette_next`, `palette_prev` exist as registered actions (extends AC 22; Rules 9b/12).
+36. **GIVEN** the InputMap at boot, **THEN** `toast_focus_cycle`, `toast_dismiss`, `toggle_issues`, `palette_next`, `palette_prev`, `formation_next`, `formation_prev`, `height_step_up`, `height_step_down` exist as registered actions (extends AC 22; Rules 9b/12).
+
+**Added by re-review (2026-07-10) — blocking headless**
+37. **GIVEN** `toast_max_visible` Warnings shown and one anchor-only Warning, **WHEN** a visible Warning retires or is dismissed, **THEN** the longest-waiting anchor-only Warning is promoted into the freed slot immediately (Rule 9 promotion); **GIVEN** the promoted candidate was previously dismissed with `min_reshow_interval` remaining, **THEN** it is skipped and the next-longest eligible key promotes instead.
+38. **GIVEN** a Warning in Grace with 2s elapsed of a 3s `warning_grace_delay`, **WHEN** it tier-swaps to Info, **THEN** the Info key inherits the elapsed credit and surfaces after 1s more if the cause holds — no grace restart (Rule 9 per-subject bookkeeping; a flickering cause cannot indefinitely suppress surfacing).
+39. **GIVEN** Wall armed, **WHEN** `height_step_up`/`height_step_down` fire, **THEN** the stepper changes identically to +/− button clicks within 1–8; **GIVEN** Roof armed, **WHEN** `formation_next`/`formation_prev` fire, **THEN** the formation selection cycles identically to clicking the icons (Rule 9b keyboard completion).
+40. **GIVEN** a subject in Grace, **WHEN** the game is PAUSED past the remaining delay, **THEN** the expiry still fires and the queryable-state check decides surfacing — grace/debounce timers are wall-clock, frozen only by Suspended (Rule 9, Edge Case 6).
+41. **GIVEN** the focused toast auto-retires or is promoted away, **THEN** keyboard focus transfers to the next visible toast, or the anchor if none — never null while any focusable notification element exists (Edge Case 13).
 
 **Advisory — interaction test / manual walkthrough (UI evidence gate)**
 23. **GIVEN** a drag begun in the world, **WHEN** the cursor enters HUD space, **THEN** the drag is NOT canceled (UI half); **WHEN** released over the HUD, **THEN** the commit uses the last valid world preview (integration with Camera & Input/Building — Edge Case 5, Rule 11's event-routing requirement).
@@ -473,9 +543,12 @@ checks are ADVISORY (interaction test or walkthrough doc).)*
 ## Open Questions
 
 1. **UX spec details** (exact layout metrics, icon design, arrangement,
-   and the default key bindings for the Rule 9b actions — currently
-   `[assumption]`) → */ux-design build-hud in Pre-Production (see the
-   UX Flag in UI Requirements)*
+   the default key bindings for the Rule 9b actions — currently
+   `[assumption]`, including the Tab/`ui_focus_next` collision — and
+   two onboarding beats the re-review flagged: first-time issues-anchor
+   discoverability and badge-only-warning comprehension) →
+   */ux-design build-hud in Pre-Production (see the UX Flag in UI
+   Requirements)*
 2. **Shortcut suppression when text input arrives** (Edge Case 10)
    → *Vertical Slice, with the first text field*
 3. **Gamepad menu navigation** (technical-preferences: "partial, later")
@@ -489,6 +562,15 @@ checks are ADVISORY (interaction test or walkthrough doc).)*
    runaway repeat on aggressive OS settings → *MVP playtest*
 7. **Godot 4.5–4.7 Control/input verification** — `mouse_filter`
    consumption semantics (Rule 11's event-routing requirement), the 4.6
-   dual-focus system, and 4.5's AccessKit accessibility APIs postdate
-   the model's training data; verify against the pinned 4.7 docs before
-   implementing the HUD input layer → *Technical Setup / building ADR*
+   dual-focus system (**BLOCKING for Rule 9b's focus-cycling
+   implementation** — Edge Case 13's explicit focus handoff depends on
+   it), `InputEventKey.echo` key-repeat semantics (Rule 7/AC9), and
+   4.5's AccessKit accessibility APIs postdate the model's training
+   data; verify against the pinned 4.7 docs before implementing the
+   HUD input layer → *Technical Setup / building ADR*
+8. **Timer architecture** — per-key wall-clock grace/debounce timers
+   (potentially one per active issue subject) argue for a single
+   centralized expiry-timestamp manager over N Godot `Timer` nodes
+   (pause/resume-with-remaining is one recorded offset instead of N
+   fragile `time_left` reconstructions) → *implementation choice,
+   building ADR / lead-programmer*

@@ -204,7 +204,13 @@ meaningful without policing it.
     of one signal. `shelter_status_changed` is the only signal Needs
     consumes; the other three are presentational. All current statuses
     are additionally queryable at any time (state + events model — the
-    same consumption contract Needs & Mood established).
+    same consumption contract Needs & Mood established). **All
+    emissions of one analysis pass are delivered synchronously within
+    one frame; consumers may treat same-frame delivery as one pass —
+    the reconciliation unit** *(added 2026-07-10, Building UI review:
+    grounds its tier-swap detection; the warning/info signals carry no
+    explicit pass id — `room_recognized`'s `pass_group_id` exists for
+    celebration grouping only)*.
     **There is deliberately NO "cleared" signal**: Warning/Info are
     level-triggered re-emissions, and their clearing mechanism IS the
     cessation of re-emission plus the queryable current state — the UI
@@ -434,16 +440,16 @@ registering as rooms.
 
 | System | GDD Status | What this system consumes |
 |--------|-----------|---------------------------|
-| Building System | ✅ Designed (In Review) | Construction-completed/removed signals (batched) as the analysis trigger; combined planned-occupancy view (unused in MVP, reserved) |
-| Villager AI & Behavior | ✅ Designed | The walkability definition, consumed verbatim (`villager_clearance`=3, `max_step_height`=1, corner-cutting rule) — never redefined |
-| Voxel World | ✅ Designed | Physical occupancy reads for region analysis (read-only) |
+| Building System | ✅ Approved | Construction-completed/removed signals (batched) as the analysis trigger; combined planned-occupancy view (unused in MVP, reserved) |
+| Villager AI & Behavior | ✅ Approved | The walkability definition, consumed verbatim (`villager_clearance`=3, `max_step_height`=1, corner-cutting rule) — never redefined |
+| Voxel World | ✅ Approved | Physical occupancy reads for region analysis (read-only) |
 
 ### Downstream (systems that depend on this one)
 
 | System | Tier | GDD Status | What it consumes |
 |--------|------|-----------|------------------|
-| Needs & Mood System | MVP | ✅ Designed | The sheltered/unsheltered flag per bed — extends its source→rate table to the 3-tier ladder *(patch pending)* |
-| Villager Info UI / Building UI | MVP | Designed (not yet reviewed) | Warnings, info hints, room confirmations + why-strings *(provisional until their reviews confirm — see the UI seam flag, UI Requirements)* |
+| Needs & Mood System | MVP | ✅ Approved | The sheltered/unsheltered flag per bed — its source→rate table carries the 3-tier ladder *(patch applied and approved with that GDD)* |
+| Villager Info UI / Building UI | MVP | Building UI: ✅ Approved · Villager Info UI: Designed (not yet reviewed) | Warnings, info hints + why-strings (Building UI Rules 9–9c implement the seam contract — confirmed); room status for the villager panel *(Villager Info UI half provisional until its review)* |
 | Township Progression | Alpha | Undesigned | "Housed villagers" (owned + sheltered bed) as a prosperity input *(provisional)* |
 | Save/Load & World Persistence | Vertical Slice | Undesigned | Nothing — all statuses re-derive on load (deliberate; Edge Case 11) |
 
