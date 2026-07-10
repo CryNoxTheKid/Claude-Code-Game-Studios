@@ -220,8 +220,11 @@ finished stat-box (the building IS the stats, Pillar 1).
     cancels its blueprint cells; if some cells were already constructed,
     those blocks are removed instantly. Redo replays the command as new
     blueprint cells. The stack is bounded (default 50 commands); it is
-    cleared on scene transition (Scene/World Management) and never
-    persists into save files.
+    cleared when a scene transition **completes** (the transition-COMPLETE
+    signal, never transition-begin — an aborted/failed transition must
+    leave the stack untouched; per Scene/World Management's side-effect
+    discipline rule, REVISED 2026-07-10 re-review) and never persists
+    into save files.
 
 ### States and Transitions
 
@@ -285,7 +288,8 @@ finished stat-box (the building IS the stats, Pillar 1).
   selection, wall-height stepper, roof-formation picker, and undo/redo
   buttons; displays validity feedback. All state it shows lives here.
 - **Scene/World Management** (Foundation, upstream): hosting; the undo
-  stack clears on transition (Core Rule 17); tool state machine suspends
+  stack clears on transition-COMPLETE (Core Rule 17 — never on begin, so
+  a load-failure abort leaves undo intact); tool state machine suspends
   via Camera & Input's Suspended state.
 - **Save/Load & World Persistence** (Vertical Slice, downstream,
   provisional): must serialize open blueprint cells and construction
@@ -435,8 +439,9 @@ furniture (`bed`).
 10. **Scene transition with pending blueprints.** Blueprints persist and
     the Valley keeps simulating during dungeon excursions (Scene/World
     Management Core Rule 4): the villager keeps building while the player
-    is away. The undo stack, however, clears on transition (Core Rule 17)
-    — returning players cannot undo pre-transition commands.
+    is away. The undo stack, however, clears on transition-complete
+    (Core Rule 17) — returning players cannot undo pre-transition
+    commands.
 11. **Furniture removed while in use** (bed removed while the villager
     sleeps in it). Allowed — removal is never blocked by usage; the
     villager is interrupted and re-plans *(interruption semantics —
@@ -646,6 +651,7 @@ batch atomicity.)*
 30. **GIVEN** the stack holds `undo_stack_depth` commands, **WHEN** a new command commits, **THEN** the oldest is discarded silently (Edge Case 9).
 31. **GIVEN** any undo has occurred, **WHEN** a new command commits, **THEN** the redo branch is cleared.
 32. **GIVEN** a scene transition, **WHEN** it completes, **THEN** the undo stack is empty (Core Rule 17).
+32b. **GIVEN** a 3-command undo stack, **WHEN** a transition is triggered but ABORTS (target scene fails to load), **THEN** all 3 commands remain undoable — no begin-signal side effect touched the stack *(added 2026-07-10 re-review: the undo-abort trap fix)*.
 33. **GIVEN** a command's built cell was modified by another system, **WHEN** that command is undone, **THEN** the stale entry is skipped without error or double-removal (undo bookkeeping, Interactions).
 
 **Lifecycle and edge behavior**
