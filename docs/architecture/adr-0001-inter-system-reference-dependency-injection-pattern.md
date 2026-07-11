@@ -1,7 +1,7 @@
 # ADR-0001: Inter-System Reference & Dependency-Injection Pattern
 
 ## Status
-Proposed
+Accepted (2026-07-11 — per architecture-review-2026-07-11 recommendation; user-delegated decision. Not spike-gated and no dependency on a spike-gated ADR.)
 
 ## Date
 2026-07-11

@@ -58,12 +58,26 @@
 ## Allowed Libraries / Addons
 
 <!-- Add approved third-party dependencies here -->
-- [None configured yet — add as dependencies are approved]
+- **GdUnit4 v6.1.3** (`neues-spiel/addons/gdUnit4/`) — test framework, approved 2026-07-11
 
 ## Architecture Decisions Log
 
 <!-- Quick reference linking to full ADRs in docs/architecture/ -->
-- [No ADRs yet — use /architecture-decision to create one]
+- ADR-0001 Inter-System Reference & DI Pattern — **Accepted**
+- ADR-0002 Tuning/Config Data Strategy — **Accepted**
+- ADR-0003 Voxel World Rendering Approach — Proposed (PROVISIONAL, spike-gated QQ3)
+- ADR-0004 Physics Backend & Picking Strategy — **Accepted**
+- ADR-0005 Boot Sequencing & Initialization Gate — **Accepted**
+- ADR-0006 Data Definition Immutability & Reference Format — **Accepted**
+- ADR-0007 AI Pathfinding, Navigation & Room Analysis — Proposed (PROVISIONAL, spike-gated QQ3)
+- ADR-0008 Villager AI Execution & Threading — Proposed (PROVISIONAL, spike-gated QQ3)
+- ADR-0009 Deterministic Movement & Occupancy Ordering — Proposed (depends on ADR-0007)
+- ADR-0010 Cross-System UI/World Input Arbitration — **Accepted**
+- ADR-0011 UI Timer & Expiry Management — **Accepted**
+- ADR-0012 Save/Load Serialization Strategy — **Accepted**
+- ADR-0013 Multi-Scene Concurrency Model — Proposed (depends on ADR-0003/0004/0007)
+
+Status source of truth: each ADR's `## Status` section in `docs/architecture/`.
 
 ## Engine Specialists
 
