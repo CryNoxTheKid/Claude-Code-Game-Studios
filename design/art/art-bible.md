@@ -1,6 +1,6 @@
 # Art Bible — The Last Seal (Voxel)
 
-> **Status**: Sections 1–4 COMPLETE (2026-07-11, art-director draft — taste-level choices pending user check, see Taste-Check notes); 5–9 to follow in Pre-Production
+> **Status**: Sections 1–4 APPROVED (2026-07-11 — all four taste-level choices confirmed by user: distance-keyed fog + silhouettes, flat sharp HUD, amber/gold palette, 3 launch biomes); 5–9 to follow in Pre-Production
 > **Author**: art-director agent + user (autonomous draft 2026-07-11, taste-level choices flagged for user check)
 > **Last Updated**: 2026-07-11
 > **Foundation**: `design/art/visual-direction-note.md` (2026-07-09 interim anchor — this bible supersedes it as the production reference; the note's rules carry forward unless explicitly revised here)
@@ -97,7 +97,7 @@ The addition of "to the horizon" is deliberate: at 2000×2000 scale the player's
 - Past expedition range, falloff shifts to the **cool State-Blue-keyed fog** used in 2.4 — signaling "you are now away from home" before any UI does.
 - **Silhouetted landmarks** (dungeon spires, distinctive peaks) are placed to poke through the fog band at the streamed view-radius edge as low-detail silhouette proxies, giving the player a next-goal read before that chunk streams in at full detail (this also gives the ~2.6s initial-window-build a visual anchor to hold onto, per ADR-0014's measured load time).
 
-> **Taste check:** recommended — warm-to-cool distance-keyed fog + silhouette landmarks, because it does double duty (depth cue *and* narrative "leaving home" signal) at no extra render cost beyond a color ramp. **Alternative:** a single flat neutral-grey fog color regardless of distance (simpler, cheaper to implement, but loses the "leaving home" read and does nothing for Principle 4's Horizon Test).
+> **CONFIRMED (user decision 2026-07-11):** the recommended option below is now the committed rule. Original note: recommended — warm-to-cool distance-keyed fog + silhouette landmarks, because it does double duty (depth cue *and* narrative "leaving home" signal) at no extra render cost beyond a color ramp. **Alternative:** a single flat neutral-grey fog color regardless of distance (simpler, cheaper to implement, but loses the "leaving home" read and does nothing for Principle 4's Horizon Test).
 
 ---
 
@@ -135,7 +135,7 @@ The HUD borrows exactly one thing from the voxel world's shape language: **hard,
 - **Macro level** (panels, toasts, chips): sharp square corners, flat fills — matches the world's edge language and serves the existing "speed over ornament" / instant-swap HUD feel (`building-ui.md` Game Feel, `interaction-patterns.md`).
 - **Micro level** (status/state icons): deliberately *varied* shapes (triangle, circle, diamond) — this is where colorblind differentiation lives (Section 4.6, A1), and variety here is required, not decorative.
 
-> **Taste check:** recommended — flat/sharp HUD with world-echoing corners only. **Alternative:** a fully skeuomorphic blocky HUD (chunky pixel-art inventory slots, Minecraft-inventory-style). Rejected as primary because it fights the already-committed "speed over ornament" feel and adds asset/render cost with no gameplay payoff — but it's a viable alternate identity if the team wants a stronger retro-voxel HUD signature later.
+> **CONFIRMED (user decision 2026-07-11):** the recommended option below is now the committed rule. Original note: recommended — flat/sharp HUD with world-echoing corners only. **Alternative:** a fully skeuomorphic blocky HUD (chunky pixel-art inventory slots, Minecraft-inventory-style). Rejected as primary because it fights the already-committed "speed over ornament" feel and adds asset/render cost with no gameplay payoff — but it's a viable alternate identity if the team wants a stronger retro-voxel HUD signature later.
 
 ---
 
@@ -155,7 +155,7 @@ The HUD borrows exactly one thing from the voxel world's shape language: **hard,
 
 **Deliberate separation note:** Hearth Gold (Function) and State Orange (State) are both warm hues by necessity — the note's own philosophy makes warmth the reward signal, and orange is the safer danger-hue for colorblind accessibility. They stay distinguishable *structurally*, not just by eye: Hearth Gold **only ever appears on static geometry** (fixtures), State Orange **only ever appears in the UI/overlay layer** (Section 4 rule from `visual-direction-note.md` §3, carried forward verbatim) — they are never candidates for confusion in the same visual channel, and both still carry mandatory shape/label pairing regardless (§4.6).
 
-> **Taste check:** recommended — amber/gold-leaning warm family (as above), cooler slate-blue state axis. **Alternative:** lean the warm family more toward true orange-red (e.g., Hearth Gold → `#E8873A`-adjacent) for a punchier "campfire" read — rejected as primary because it narrows the gap to State Orange further; worth a swatch-comparison pass once real assets exist.
+> **CONFIRMED (user decision 2026-07-11):** the recommended option below is now the committed rule. Original note: recommended — amber/gold-leaning warm family (as above), cooler slate-blue state axis. **Alternative:** lean the warm family more toward true orange-red (e.g., Hearth Gold → `#E8873A`-adjacent) for a punchier "campfire" read — rejected as primary because it narrows the gap to State Orange further; worth a swatch-comparison pass once real assets exist.
 
 ### 4.2 Semantic Color Vocabulary
 
@@ -184,7 +184,7 @@ Bands ramp from warm-neutral (low) to cool-pale (high) — this does double duty
 2. **Expedition Highlands** (mid-distance, seal-dungeon approach terrain) — cooler, more desaturated, rockier; literalizes Principle 3 (Stakes as Weather) at the terrain level, not just the encounter level.
 3. **Deep Threshold** (distant, dungeon-adjacent) — coldest, near-monochrome blue-grey; maximum contrast against any warm light the player carries, so the beacon-in-the-dark read (§2.4) starts working the moment this biome comes into view.
 
-> **Taste check:** recommended — the 3 biomes above, chosen because each one maps to an existing narrative/gameplay distance ring (home / expedition / dungeon-threshold) rather than adding new geography for its own sake. **Alternative:** a 2-biome launch (merge Expedition Highlands + Deep Threshold into one "Wilds" biome) — simpler to build/texture for Vertical Slice, at the cost of a less gradual cool-down curve toward dungeons.
+> **CONFIRMED (user decision 2026-07-11):** the recommended option below is now the committed rule. Original note: recommended — the 3 biomes above, chosen because each one maps to an existing narrative/gameplay distance ring (home / expedition / dungeon-threshold) rather than adding new geography for its own sake. **Alternative:** a 2-biome launch (merge Expedition Highlands + Deep Threshold into one "Wilds" biome) — simpler to build/texture for Vertical Slice, at the cost of a less gradual cool-down curve toward dungeons.
 
 ### 4.5 UI Palette Divergence
 
