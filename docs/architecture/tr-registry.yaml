@@ -123,7 +123,6 @@ requirements:
     requirement: "The voxel rendering representation is an architecture decision (resolved by ADR-0014: chunked mesher; formerly open per ADR-0003)."
     created: 2026-07-11
     revised: 2026-07-11
-    revised: ""
     status: active
 
   # ── Camera & Input ──────────────────────────────────────────────────────
