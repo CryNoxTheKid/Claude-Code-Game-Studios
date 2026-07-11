@@ -35,7 +35,7 @@ Accepted (2026-07-11 — per architecture-review-2026-07-11 recommendation; user
 - RID is Autoload-tier (ADR-0001) — never `@export`-injected, called by global name
 - Every other MVP module (Voxel World, Camera & Input, Building System, Villager AI, Build Validation, Needs & Mood, Building UI, Villager Info UI) is injected-tier, wired via `GameWorld.tscn` and given an explicit `setup()` call (ADR-0001) — no module may assume a dependency is ready inside its own `_ready()`
 - RID's `Failed` state requires a full-screen boot-halt error, no in-game recovery
-- Terrain generation (Voxel World) must run "synchronously/near-instantly... no loading screen exists at MVP" (TR-voxel-world-026) — the gate must not introduce a perceptible delay for MVP's small tier-0 dataset
+- *(Revised 2026-07-11, ADR-0014: initial view-window build is ~2.6 s behind the existing transition overlay — "near-instant" no longer holds; the gate must not ADD perceptible delay beyond that build.)* Original constraint: Terrain generation (Voxel World) must run "synchronously/near-instantly... no loading screen exists at MVP" (TR-voxel-world-026) — the gate must not introduce a perceptible delay for MVP's small tier-0 dataset
 
 ### Requirements
 - A concrete, code-reviewable mechanism (not just a documented convention) that prevents any injected-tier module's `setup()` from running before RID reports `Ready`
@@ -167,7 +167,7 @@ func _show_boot_halt_screen(issues: Array) -> void: ...
 ## Performance Implications
 - **CPU**: RID validation for MVP's tier-0 dataset (3 materials + bed) is expected to complete in low single-digit milliseconds — imperceptible against boot time.
 - **Memory**: Negligible — one new signal, one new enum on `GameWorld`.
-- **Load Time**: The gate adds, at most, the time RID validation takes — expected sub-frame for MVP; TR-voxel-world-026's "near-instant, no loading screen" requirement is expected to hold, but not yet measured.
+- **Load Time**: The gate adds, at most, the time RID validation takes — expected sub-frame for MVP; TR-voxel-world-026's original "near-instant" requirement is superseded by ADR-0014's measured ~2.6 s initial window build (shown behind the transition overlay); the boot gate itself remains low-single-digit ms.
 - **Network**: N/A — single-player project.
 
 ## Migration Plan

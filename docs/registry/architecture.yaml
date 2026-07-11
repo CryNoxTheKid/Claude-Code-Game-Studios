@@ -164,7 +164,7 @@ interfaces:
     api: "No chunking (single monolithic save file); no threading (synchronous save/load) for MVP/VS"
     not: "Spatial chunk partitioning; WorkerThreadPool-based async save"
     adr: docs/architecture/adr-0012-save-load-serialization-strategy.md
-    reason: "World is explicitly bounded ('tens of MB' stated ceiling, no streaming requirement); saves are transition-triggered so any brief synchronous cost hides behind the already-visible loading overlay. Both named as escape hatches if Full Vision scale later proves otherwise, matching ADR-0003/0008's identical reasoning pattern."
+    reason: "World is bounded (ADR-0014 large world: packed-chunk payload ~150-250 MB worst case, re-measure at VS; chunked/async saves remain the named escape hatch); saves are transition-triggered so any brief synchronous cost hides behind the already-visible loading overlay. Both named as escape hatches if Full Vision scale later proves otherwise, matching ADR-0003/0008's identical reasoning pattern."
     referenced_by:
       - docs/architecture/adr-0012-save-load-serialization-strategy.md
     added: 2026-07-11

@@ -71,7 +71,7 @@ manually before production.)*
    during placement) *(made explicit 2026-07-10 review; revisit at
    playtest if players ask for it)*.
 6. The orbit target is clamped to the Voxel World's horizontal bounds (plus
-   a small margin) so panning cannot drift into the void beyond the valley.
+   a small margin) so panning cannot drift into the void beyond the world edge. *(Clarified 2026-07-11, large-world decision: the clamp is the WORLD edge - free camera roaming across the whole 2000x2000 world is intended, exploration pillar; the camera is not restricted to the settlement core.)*
 7. This system owns the InputMap action definitions (e.g., `build_place`,
    `build_remove`, `camera_rotate_left`) but does NOT interpret what an
    action means — it only reports "this action fired" via signal; the

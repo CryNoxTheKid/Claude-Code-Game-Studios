@@ -33,7 +33,7 @@ Every MVP GDD already commits to a serialization contract (`architecture.md`'s D
 
 ### Constraints
 - World is explicitly bounded, not infinite/streaming (`game-concept.md`'s Anti-Pillars: "NOT a free voxel-editor... will NOT support unbounded terraforming/mining outside the settlement's buildable footprint") — a genuinely large, streaming-scale save architecture is solving a problem this project doesn't have
-- Voxel World's own GDD already targets "tens of MB" for the in-memory sparse cell dictionary at full world extent (TR-voxel-world-016) — a stated scale ceiling, not an open question
+- *(Premise revised 2026-07-11, ADR-0014)*: Voxel World now stores packed chunk arrays (~172 MB full world measured); the save payload grows to ~150–250 MB worst case at high density. The no-chunking DECISION below still stands — `store_var` on packed arrays is a fast bulk write behind the loading overlay — but must be re-measured at VS; the chunked/async escape hatch is unchanged
 - "Each system serializes itself" (carry-forward directive) — the Save/Load module must not need to understand Voxel World's cell format vs. Villager AI's record format vs. any other system's internal representation
 - Population ceiling 20-30 villagers (Full Vision) — modest data volume even at scale
 - Save data is never designer-authored, never Inspector-edited, and (unlike config/item data, ADR-0002/ADR-0006) never git-tracked — the format choice is not bound by ADR-0002's diff-friendliness or Inspector-editability rationale
@@ -67,7 +67,7 @@ func deserialize(data: Dictionary) -> void
 ```
 The Save/Load orchestrator (a new, injected-tier module, wired per ADR-0001) calls `serialize()` on each owning system, stores the results under that system's key, and — on load — calls `deserialize(data)` back on each system with its own previously-stored dictionary. The orchestrator has zero knowledge of what's inside any system's dictionary — it is purely a collector/distributor, honoring the "each system serializes itself" carry-forward directive structurally, not by convention.
 
-**3. No chunking.** The world's bounded scale ("tens of MB" already-stated ceiling, no streaming/infinite-world requirement) doesn't justify chunked/partial save files — a single monolithic dictionary, written and read in one pass, is simple and, at this scale, fast. Chunking is named as an explicit escape hatch if a future measured need (e.g., a much larger Full Vision world scale than currently planned) proves otherwise — not adopted now.
+**3. No chunking.** The world is still bounded and saves hide behind the transition overlay; ADR-0014's larger payload (~150–250 MB worst case) weakens but does not break this — re-measure at VS, escape hatch ready — a single monolithic dictionary, written and read in one pass, is simple and, at this scale, fast. Chunking is named as an explicit escape hatch if a future measured need (e.g., a much larger Full Vision world scale than currently planned) proves otherwise — not adopted now.
 
 **4. No threading — synchronous save/load for MVP/VS.** At MVP/VS data volumes (a handful of villagers, a small built structure), a synchronous save/load is expected to complete in low single-digit milliseconds — well under a frame budget. Because saves are exclusively triggered on `transition_ended(success=true)` (Scene/World Management's existing contract, TR-scene-world-management-013/024), any save-time cost occurs while the scene transition's loading overlay is already visible (TR-scene-world-management-032) — the existing UI treatment naturally covers a brief synchronous save, with no new UI needed. `WorkerThreadPool`/background-thread saving is named as an explicit escape hatch if Full-Vision-scale saves are later measured to cause a visible hitch — not adopted now, consistent with ADR-0008's identical reasoning for AI threading.
 
@@ -139,7 +139,7 @@ func load(path: String) -> bool     # checks FileAccess.open()'s null (get_var()
 ### Alternative C: Chunked save files (spatial regions) + async/threaded save
 - **Description**: partition the world into fixed-size chunks, each independently saved/loaded; use `WorkerThreadPool` for save operations.
 - **Pros**: would scale to a much larger or streaming-scale world than this project has.
-- **Cons**: solves a scale problem this project's own design constraints (bounded world, "tens of MB" stated ceiling, no streaming) explicitly don't have — real, avoidable implementation complexity for MVP/VS.
+- **Cons**: solves a scale problem not yet measured to exist (bounded world, overlay-hidden save window); ADR-0014's larger payload makes this the FIRST escape hatch to re-evaluate at VS — real, avoidable implementation complexity for MVP/VS.
 - **Rejection Reason**: premature at this project's stated scale; named as the explicit escape hatch (both chunking and threading) if Full Vision scale later proves the simple approach insufficient — matching ADR-0003's and ADR-0008's identical reasoning pattern for their own scale-related decisions.
 
 ## Consequences
@@ -170,7 +170,7 @@ func load(path: String) -> bool     # checks FileAccess.open()'s null (get_var()
 
 ## Performance Implications
 - **CPU**: A single synchronous `store_var`/`get_var` call per save/load — expected low single-digit milliseconds at MVP/VS data volumes, occurring during an already-visible loading overlay.
-- **Memory**: One assembled top-level `Dictionary` momentarily held during save/load — proportional to total world+villager state, expected to stay within the already-stated "tens of MB" ceiling.
+- **Memory** *(revised 2026-07-11, ADR-0014)*: One assembled top-level `Dictionary` momentarily held during save/load — proportional to total world+villager state, now up to ~150–250 MB worst case (was "tens of MB"); re-measure at VS.
 - **Load Time**: Adds to the existing boot/transition sequence at the point Save/Load reads the file — not yet measured, a candidate check if Full Vision scale is later revisited.
 - **Network**: N/A — single-player project.
 

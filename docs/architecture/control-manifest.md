@@ -46,7 +46,7 @@ rule, see the referenced ADR.
 
 ### Performance Guardrails
 - Wiring resolves once at scene load; revisit service-locator only if `@export` assignments exceed ~30 (MVP: 9 modules) — source: ADR-0001
-- Config loads once at boot; RID tier-0 validation must stay low-single-digit ms; terrain gen stays "near-instant, no loading screen" — source: ADR-0002/0005
+- Config loads once at boot; RID tier-0 validation must stay low-single-digit ms; initial world build ~2.6 s behind the transition overlay (ADR-0014); the boot GATE itself stays low-single-digit ms — source: ADR-0002/0005
 - Save/load synchronous at MVP/VS; Voxel World packed-chunk payload grows with the large world (~150–250 MB worst case at density — revisit compression when measured); population ceiling 20–30 villagers — source: ADR-0012 + ADR-0014
 
 ---

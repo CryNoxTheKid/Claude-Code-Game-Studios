@@ -34,7 +34,7 @@ Accepted (2026-07-11 — pre-VS performance spike QQ3 PASSED at ADR-ceiling scal
 ### Constraints
 - Movement rules are a custom tile/grid model (clearance, step-height, flanked-diagonal-only), not a generic navmesh-agent-radius problem
 - Villagers move cell-to-cell with discrete tick-boundary arrival (F1's "no partial credit" rule) — not continuous navmesh-agent movement
-- Population ceiling 20-30 villagers; world bound ~320k cells (likely far smaller in practice for MVP/VS)
+- Population ceiling 20-30 villagers. *(Revised 2026-07-11, ADR-0014 large world)*: the world bound is now ~128M cells — the nav graph therefore covers a bounded settlement-core region (where villager life happens), NOT the whole world; region sizing spike tracked as architecture.md QQ5
 - Build Validation's analysis must be event-driven and incremental (TR-build-validation-navigability-006: "only entries touched by a pass's affected region are updated"), not a full-world recompute per edit
 - The two systems must share the RULES verbatim (TR-build-validation-navigability-010: "no independently duplicated copies") without necessarily sharing internal data structures — Build Validation is a read-only consumer of Villager AI's walkability, never a caller into its pathfinding internals
 
@@ -182,7 +182,7 @@ func _trace_reachability(region_interior: Vector3i) -> bool:
 
 ## Performance Implications
 - **CPU**: `AStar3D` shortest-path queries are O(edges explored) via its internal priority queue — efficient for the graph sizes this project's world scale implies, but unmeasured at Township scale; folds into the pre-VS spike. Build Validation's BFS is O(region size) per analysis pass, already the accepted cost model per its own GDD (TR-build-validation-navigability-020's "unbounded, no caching" is a documented, accepted risk, not new here).
-- **Memory**: One `AStar3D` instance holding up to ~320k points at the world's absolute ceiling (unlikely in practice) — unmeasured, folds into the spike.
+- **Memory**: One `AStar3D` instance holding the settlement-core region's standable cells (spike QQ3 measured 11k points / 278 ms build at the old bound; region bound to be set by the QQ5 spike — never the full ~128M-cell world, per ADR-0014).
 - **Load Time**: Initial graph construction at boot is proportional to standable-cell count — expected fast for MVP's small starting structure, unmeasured at scale.
 - **Network**: N/A — single-player project.
 

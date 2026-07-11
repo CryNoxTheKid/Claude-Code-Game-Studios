@@ -272,8 +272,11 @@ feedback about blocks (placement, textures, sounds) belongs to the Building
 System and the still-open rendering ADR — Voxel World only provides data and
 signals, never presentation. The one near-exception would be a loading
 indicator during terrain generation, but Scene/World Management already
-establishes there is no loading screen at MVP — terrain generation must
-therefore run synchronously/near-instantly before the first visible scene.
+established there was no loading screen at the old world bound — terrain generation must
+therefore run synchronously before the first visible scene. *(Revised
+2026-07-11, ADR-0014 large world: the initial view-window mesh build is
+~2.6 s and runs behind Scene/World Management's transition overlay - the
+"near-instant, no indicator" expectation is superseded at this scale.)*
 
 ## Game Feel
 
