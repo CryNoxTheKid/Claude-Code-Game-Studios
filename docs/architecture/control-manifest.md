@@ -3,8 +3,7 @@
 > **Engine**: Godot 4.7-stable
 > **Last Updated**: 2026-07-11
 > **Manifest Version**: 2026-07-11
-> **ADRs Covered**: ADR-0001, ADR-0002, ADR-0004, ADR-0005, ADR-0006, ADR-0010, ADR-0011, ADR-0012 (all Accepted)
-> **NOT Covered (still Proposed)**: ADR-0003/0007/0008 (spike-gated), ADR-0009/0013 (depend on 0007) — rerun `/create-control-manifest` when they are accepted
+> **ADRs Covered**: ADR-0001 … ADR-0013 (ALL 13 Accepted — 0003/0007/0008 accepted after spike QQ3 PASS, see `prototypes/perf-spike-qq3/REPORT.md`)
 > **Status**: Active — regenerate with `/create-control-manifest update` when ADRs change
 > **Provenance**: TD-MANIFEST gate skipped — Lean mode (no `production/review-mode.txt`); generated during the user-delegated autonomous run 2026-07-11
 
@@ -58,6 +57,11 @@ rule, see the referenced ADR.
 
 ### Required Patterns
 - **Jolt Physics 3D (4.6+ default), no override**; villagers carry a child `Area3D` + `CollisionShape3D`, `collision_layer = 1`, `collision_mask = 0` — source: ADR-0004
+- **Block picking = manual DDA grid-walk** against Voxel World's occupancy `Dictionary[Vector3i, CellData]`, driven by Camera & Input's `get_world_ray()` — no collider of any kind involved — source: ADR-0003
+- **Occupancy two-layer model**: `current_cell: Vector3i` is the SOLE authoritative value for all logic (occupancy, F4 targeting, walled-in checks, `get_current_cell()`); it changes ONLY in `_on_tick()`, atomically at tick-boundary arrival. `_visual_position` is render-only — source: ADR-0009
+- **Visual lerp**: `_visual_position = _from_cell.lerp(_to_cell, _intra_tick_progress)` each frame; `_intra_tick_progress` advances via `game_delta` ticks only — frozen during pause, no glide — source: ADR-0009
+- **Villager visual node sets `physics_interpolation_mode = OFF` explicitly** (defends against project-wide setting flips causing double-interpolation) — source: ADR-0009
+- **Race closure relies on synchronous signals**: Voxel World's `cell_changed` fires synchronously; the re-path filter redirects in the same call stack — source: ADR-0009
 - **Collision-layer convention**: Layer 1 = villagers; 2–8 reserved for future gameplay; 9–20 untouched. Future ADRs extend, never redefine — source: ADR-0004
 - **Building System placement pick calls ONLY the DDA step** (`raycast_cells()`) — structurally incapable of hitting villagers — source: ADR-0004
 - **Drag ownership**: a drag validly begun via `_unhandled_input()` switches release-listening to `_input()` (`set_process_input(true)`) for the drag's duration; on release, immediately `get_viewport().set_input_as_handled()`, then revert to `_unhandled_input()` — source: ADR-0010
@@ -70,6 +74,8 @@ rule, see the referenced ADR.
 - **Never `MOUSE_MODE_CAPTURED` during placement drags** (cursor must stay visible and free) — source: ADR-0010
 - **Camera & Input never interprets action names** and never emits a world action for a UI-consumed click (exactly-one-owner) — source: ADR-0010
 - **Never silently swallow save/write failures** — detect, `push_error`, return false — source: ADR-0012
+- **`_visual_position` is never read outside the movement/rendering path** (grep-verifiable); never integrate raw `_delta` into `_intra_tick_progress`; never flip `current_cell` at interpolation midpoint — source: ADR-0009
+- **Zero `PhysicsServer3D`/`RayCast3D` in any picking path** (Voxel World AND Building System, grep-verifiable) — source: ADR-0003
 
 ### Performance Guardrails
 - Villager-hit query runs once per click (event-driven, never per-frame) — source: ADR-0004
@@ -81,17 +87,24 @@ rule, see the referenced ADR.
 
 *Applies to: AI systems, pathfinding, villager behavior*
 
-> **Mostly not yet governed**: the AI keystones (ADR-0007 pathfinding, ADR-0008
-> execution/threading, ADR-0009 movement/occupancy) are still Proposed pending
-> the pre-VS performance spike. **Stories referencing them are auto-blocked**
-> (docs/CLAUDE.md). Rules below are the accepted spillovers only.
-
 ### Required Patterns
+- **Walkability = two shared pure functions** owned by Villager AI: `is_standable(cell) -> bool` (solid below + 3-cell clearance) and `is_step_legal(from, to) -> bool` (|dy| ≤ 1; diagonal only if both flanking orthogonals passable). EVERY consumer (pathfinder, Build Validation) calls these — single source of truth — source: ADR-0007
+- **Travel pathfinding via `AStar3D`**: graph built once at boot, incrementally patched on `cell_changed` (never rebuilt); point IDs are deterministic bit-packed `Vector3i → int64` (`x&0x1FFFFF | y<<21 | z<<42`), never an incrementing counter — source: ADR-0007
+- **Build Validation runs its own independent BFS** calling the shared predicates; it never touches Villager AI's `AStar3D` instance — source: ADR-0007
+- **AI is a plain explicit FSM**: 6-state enum + `match`, strict discrete priority (Urgent need > Work > Idle/Wander); tick-driven via Time & Tick's signal, never raw delta in `_physics_process` — source: ADR-0008
+- **Deciding staggering**: FIFO `Array[int]` queue + `max_deciding_per_tick` budget (config knob per ADR-0002; **spike-tuned initial value: 1**); budget caps new passes STARTED per tick, never interrupts an in-progress pass; dequeue in stable villager order — source: ADR-0008
 - Villager AI exposes `serialize()/deserialize()`; `deserialize()` owns stale claim/bed-id revalidation — source: ADR-0012
-- Villager selection hit-testing contract (Area3D, layer 1) as specified in Core rules — source: ADR-0004
 
 ### Forbidden Approaches
-- No AI threading (`WorkerThreadPool`) adoption without a measured need — escape-hatch pattern (referenced by ADR-0012's reasoning; owning ADR-0008 still Proposed)
+- **Zero `NavigationServer3D`/`NavigationAgent3D`/`NavigationRegion3D`** anywhere in Villager AI or Build Validation (grep-verifiable) — navmesh cannot express the exact cell rules — source: ADR-0007
+- **Zero `Thread`/`WorkerThreadPool` in Villager AI** for MVP/VS (grep-verifiable) — occupancy dict, AStar3D graph, Needs state are not thread-safe; threading is the escape hatch only on measured need — source: ADR-0008
+- **Never duplicate walkability rules or constants** — no plain 4/8-neighbor flood-fill in Build Validation, no second copy of clearance/step values — source: ADR-0007
+- **Never a behavior tree or utility-AI addon** (would breach the empty Allowed-Libraries list; priorities are discrete, not scored) — source: ADR-0008
+
+### Performance Guardrails
+- Population ceiling 20–30; frame budget must hold at 1x AND 3x warp (spike-verified: p95 16.7 ms at 3x with `max_deciding_per_tick = 1`) — source: ADR-0008 + spike report
+- **Watch-item**: one Deciding pass measured avg 11 ms p95 35 ms (GDScript stand-in) — mitigations before threading: cheaper pre-filter, smaller BFS bound, pass slicing — source: spike report
+- `max_selection_candidates = 15` per-villager F2 budget; Build Validation BFS exceeds one frame above ~12k connected cells (documented accepted-risk boundary) — source: ADR-0007 + spike report
 
 ---
 
@@ -100,6 +113,9 @@ rule, see the referenced ADR.
 *Applies to: UI, HUD, input arbitration surface, UI timers*
 
 ### Required Patterns
+- **Committed blocks render via `GridMap`** (`set_cell_item`/`INVALID_CELL_ITEM`, one call per cell change); MeshLibrary populated once at boot from RID's `list_all_ids()`; **`use_collision = false`** — source: ADR-0003
+- **Blueprint ghosts = pooled `MeshInstance3D` nodes** (separate from GridMap), MeshLibrary meshes + `material_override` tint; bounded by `max_cells_per_command = 512`, outline-degrade above `preview_degradation_threshold` — source: ADR-0003
+- **Multi-scene (Valley+Dungeon, VS+): ONE shared `World3D`**, Dungeon at fixed spatial offset (100_000 units, documented at definition site); exactly ONE `WorldEnvironment` node with swapped `.environment` resource; per-scene toggles for `Camera3D.current`, `AudioListener3D`, `DirectionalLight3D.visible` — ALL centralized in one `_activate_scene`/`_deactivate_scene` pair — source: ADR-0013
 - **New-click ownership via native propagation**: HUD Controls keep default `mouse_filter = STOP`; world systems listen in `_unhandled_input()`; Camera & Input needs zero new code — source: ADR-0010
 - **Hover-suppression flag**: Building UI ORs hover across its three HUD zones via `mouse_entered`/`mouse_exited` (event-driven, NEVER per-frame polling), exposed as `is_hover_suppressing_world_pick() -> bool`; consumers check it before starting any new pick/drag/selection; it also gates ghost-preview updates — source: ADR-0010
 - **Villager click pick** (Idle only): DDA block distance + `intersect_ray()` with `collision_mask = 1`, **`collide_with_areas = true`, `collide_with_bodies = false`**; nearest wins, villager wins within `pick_tie_epsilon` — source: ADR-0004
@@ -109,6 +125,8 @@ rule, see the referenced ADR.
 - **Every visual `Tween` pauses/resumes explicitly** (`tween.pause()/play()`) tied to the same Suspended signal — source: ADR-0011
 
 ### Forbidden Approaches
+- **Never a chunked/greedy mesher or manual MultiMesh scheme for committed blocks** (escape hatch only, on measured need past the ~20% draw-call margin); never per-instance custom-data plumbing for ghost tint — source: ADR-0003
+- **Never separate SubViewports with own `World3D`s** for scene concurrency; never a second `WorldEnvironment` node (grep-verifiable); never assume SubViewports isolate `_input()` (they don't); no GI system under ADR-0013 — source: ADR-0013
 - **Never restructure `mouse_filter` geometry to solve drag-release** (brittle; releases legitimately land on widgets) — source: ADR-0010
 - **Never N per-issue `Timer` nodes** for toast/grace/debounce timing (node churn + still needs the dictionary + violates the no-per-consumer-timers precedent) — source: ADR-0011
 - **Never rely on Control visibility to pause timers/tweens** — hiding a Control pauses nothing — source: ADR-0011
@@ -165,6 +183,10 @@ Use the replacement, never the deprecated form:
 - Input routing order: `_input()` → `_gui_input()` → `_unhandled_input()`; `set_input_as_handled()` from `_input()` stops later stages — source: ADR-0010
 - `Timer`/`Tween` are NOT paused by hiding their Control — source: ADR-0011
 - Godot 4.6 dual-focus system separates mouse focus from keyboard/gamepad focus (hover signals unaffected) — flagged BLOCKING for HUD focus-cycling implementation (building-ui OQ7)
+- **`AStarGrid3D` does NOT exist in Godot 4.7** (only `AStarGrid2D`) — manual `AStar3D` graph management is the only built-in option; `AStar3D` IDs are never auto-recycled on `remove_point()` — source: ADR-0007
+- GridMap collision is **octant-batched** (one shape per 8×8×8 chunk), NOT per-cell; GridMap draw calls scale with distinct mesh types in view, not cell count — source: ADR-0003
+- Default signal connections are **synchronous** (in the `emit()` call stack, connection order) — load-bearing for the ADR-0009 race closure — source: ADR-0009
+- `_input()`/`_unhandled_input()` are dispatched **SceneTree-global, not per-Viewport**; `DirectionalLight3D` affects the whole `World3D` regardless of distance (hence the explicit visibility toggle); `Camera3D.current`/listener exclusivity is per-Viewport — source: ADR-0013
 
 ### Tooling
 - **ripgrep has no `gdscript` type** — `rg --type gdscript` errors. Always `rg --glob "*.gd"`. All grep-verifiable ADR checks above depend on this.
