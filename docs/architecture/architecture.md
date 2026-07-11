@@ -493,5 +493,6 @@ stricter 1:1 TR-to-ADR mapping was offered and explicitly declined.
 | QQ2 | Township "prosperity" — the core progression-gating variable — is unnamed even as a candidate | Medium | Must be defined as an explicit function of measurable state in the Township Progression GDD before that system gets its own architecture pass |
 | QQ3 | ~~Rendering/Pathfinding/AI-execution ADRs provisional pending the pre-VS performance spike~~ **RESOLVED 2026-07-11**: spike PASSED at ADR-ceiling scale (`prototypes/perf-spike-qq3/REPORT.md`) — ADR-0003/0007/0008 Accepted. Deliverable: `max_deciding_per_tick = 1`. Watch-items: draw-call density margin ~20%, Deciding-pass cost (mitigations named in report), BFS boundary ~12k connected cells | ~~High~~ Closed | Done |
 | QQ4 | Villager identity/handle stability across Suspended transitions is `[assumption]` in villager-info-ui.md | Low | Resolve when Villager AI's identity system is implemented |
+| QQ5 | Large-world decision (2026-07-11, ADR-0014): `AStar3D` nav graph at ~4M standable cells is unmeasured. Intended shape per creative intent: graph covers a bounded settlement-core region (villager life), NOT the whole world; far-world traversal is a later player/squad concern | High | Region-bounded nav-graph spike before Villager AI implementation; revisit ADR-0007 scope note then |
 
 **Approved 2026-07-11.**

@@ -3,7 +3,7 @@
 > **Engine**: Godot 4.7-stable
 > **Last Updated**: 2026-07-11
 > **Manifest Version**: 2026-07-11
-> **ADRs Covered**: ADR-0001 … ADR-0013 (ALL 13 Accepted — 0003/0007/0008 accepted after spike QQ3 PASS, see `prototypes/perf-spike-qq3/REPORT.md`)
+> **ADRs Covered**: ADR-0001 … ADR-0014 (0003 Superseded by 0014 — large-world decision 2026-07-11, `prototypes/chunked-mesher/`; the rest Accepted)
 > **Status**: Active — regenerate with `/create-control-manifest update` when ADRs change
 > **Provenance**: TD-MANIFEST gate skipped — Lean mode (no `production/review-mode.txt`); generated during the user-delegated autonomous run 2026-07-11
 
@@ -47,7 +47,7 @@ rule, see the referenced ADR.
 ### Performance Guardrails
 - Wiring resolves once at scene load; revisit service-locator only if `@export` assignments exceed ~30 (MVP: 9 modules) — source: ADR-0001
 - Config loads once at boot; RID tier-0 validation must stay low-single-digit ms; terrain gen stays "near-instant, no loading screen" — source: ADR-0002/0005
-- Save/load synchronous, expected low-single-digit ms at MVP/VS; Voxel World sparse dict target "tens of MB"; population ceiling 20–30 villagers — source: ADR-0012
+- Save/load synchronous at MVP/VS; Voxel World packed-chunk payload grows with the large world (~150–250 MB worst case at density — revisit compression when measured); population ceiling 20–30 villagers — source: ADR-0012 + ADR-0014
 
 ---
 
@@ -57,7 +57,7 @@ rule, see the referenced ADR.
 
 ### Required Patterns
 - **Jolt Physics 3D (4.6+ default), no override**; villagers carry a child `Area3D` + `CollisionShape3D`, `collision_layer = 1`, `collision_mask = 0` — source: ADR-0004
-- **Block picking = manual DDA grid-walk** against Voxel World's occupancy `Dictionary[Vector3i, CellData]`, driven by Camera & Input's `get_world_ray()` — no collider of any kind involved — source: ADR-0003
+- **Block picking = manual DDA grid-walk** against Voxel World's cell data (chunked accessor), driven by Camera & Input's `get_world_ray()` — no collider of any kind involved — source: ADR-0014 (carried from ADR-0003 §3)
 - **Occupancy two-layer model**: `current_cell: Vector3i` is the SOLE authoritative value for all logic (occupancy, F4 targeting, walled-in checks, `get_current_cell()`); it changes ONLY in `_on_tick()`, atomically at tick-boundary arrival. `_visual_position` is render-only — source: ADR-0009
 - **Visual lerp**: `_visual_position = _from_cell.lerp(_to_cell, _intra_tick_progress)` each frame; `_intra_tick_progress` advances via `game_delta` ticks only — frozen during pause, no glide — source: ADR-0009
 - **Villager visual node sets `physics_interpolation_mode = OFF` explicitly** (defends against project-wide setting flips causing double-interpolation) — source: ADR-0009
@@ -75,7 +75,7 @@ rule, see the referenced ADR.
 - **Camera & Input never interprets action names** and never emits a world action for a UI-consumed click (exactly-one-owner) — source: ADR-0010
 - **Never silently swallow save/write failures** — detect, `push_error`, return false — source: ADR-0012
 - **`_visual_position` is never read outside the movement/rendering path** (grep-verifiable); never integrate raw `_delta` into `_intra_tick_progress`; never flip `current_cell` at interpolation midpoint — source: ADR-0009
-- **Zero `PhysicsServer3D`/`RayCast3D` in any picking path** (Voxel World AND Building System, grep-verifiable) — source: ADR-0003
+- **Zero `PhysicsServer3D`/`RayCast3D` in any picking path** (Voxel World AND Building System, grep-verifiable) — source: ADR-0014 (carried from ADR-0003)
 
 ### Performance Guardrails
 - Villager-hit query runs once per click (event-driven, never per-frame) — source: ADR-0004
@@ -113,8 +113,9 @@ rule, see the referenced ADR.
 *Applies to: UI, HUD, input arbitration surface, UI timers*
 
 ### Required Patterns
-- **Committed blocks render via `GridMap`** (`set_cell_item`/`INVALID_CELL_ITEM`, one call per cell change); MeshLibrary populated once at boot from RID's `list_all_ids()`; **`use_collision = false`** — source: ADR-0003
-- **Blueprint ghosts = pooled `MeshInstance3D` nodes** (separate from GridMap), MeshLibrary meshes + `material_override` tint; bounded by `max_cells_per_command = 512`, outline-degrade above `preview_degradation_threshold` — source: ADR-0003
+- **Committed blocks render via the chunked mesher**: 16×16-column chunks, one `ArrayMesh` per chunk, faces emitted only where a cell borders air; whole-chunk rebuild on any cell change (~1.1 ms measured); view-window streaming with per-frame budgets for BOTH chunk builds AND unloads (`queue_free` bursts caused the prototype's only hitch); `visibility_range_end` on chunk instances — source: ADR-0014
+- **World storage = packed chunk arrays** (~1–4 B/cell) behind the UNCHANGED Voxel World accessor API (O(1) get/set by `Vector3i`, `cell_changed`, `raycast_cells`); `Dictionary` remains fine for small lookup tables, never for bulk cells — source: ADR-0014
+- **Blueprint ghosts = pooled `MeshInstance3D` nodes** with `material_override` tint; bounded by `max_cells_per_command = 512`, outline-degrade above `preview_degradation_threshold` — source: ADR-0014 (carried from ADR-0003 §4)
 - **Multi-scene (Valley+Dungeon, VS+): ONE shared `World3D`**, Dungeon at fixed spatial offset (100_000 units, documented at definition site); exactly ONE `WorldEnvironment` node with swapped `.environment` resource; per-scene toggles for `Camera3D.current`, `AudioListener3D`, `DirectionalLight3D.visible` — ALL centralized in one `_activate_scene`/`_deactivate_scene` pair — source: ADR-0013
 - **New-click ownership via native propagation**: HUD Controls keep default `mouse_filter = STOP`; world systems listen in `_unhandled_input()`; Camera & Input needs zero new code — source: ADR-0010
 - **Hover-suppression flag**: Building UI ORs hover across its three HUD zones via `mouse_entered`/`mouse_exited` (event-driven, NEVER per-frame polling), exposed as `is_hover_suppressing_world_pick() -> bool`; consumers check it before starting any new pick/drag/selection; it also gates ghost-preview updates — source: ADR-0010
@@ -125,7 +126,7 @@ rule, see the referenced ADR.
 - **Every visual `Tween` pauses/resumes explicitly** (`tween.pause()/play()`) tied to the same Suspended signal — source: ADR-0011
 
 ### Forbidden Approaches
-- **Never a chunked/greedy mesher or manual MultiMesh scheme for committed blocks** (escape hatch only, on measured need past the ~20% draw-call margin); never per-instance custom-data plumbing for ghost tint — source: ADR-0003
+- **Never `GridMap` for committed-block rendering** (fails measurably at the large-world bound: >16 GB at 2000², 65k draw calls at 1000²); never full greedy meshing or a GDExtension mesher until measurement demands them (named reserves); never per-instance custom-data plumbing for ghost tint — source: ADR-0014
 - **Never separate SubViewports with own `World3D`s** for scene concurrency; never a second `WorldEnvironment` node (grep-verifiable); never assume SubViewports isolate `_input()` (they don't); no GI system under ADR-0013 — source: ADR-0013
 - **Never restructure `mouse_filter` geometry to solve drag-release** (brittle; releases legitimately land on widgets) — source: ADR-0010
 - **Never N per-issue `Timer` nodes** for toast/grace/debounce timing (node churn + still needs the dictionary + violates the no-per-consumer-timers precedent) — source: ADR-0011
@@ -184,7 +185,7 @@ Use the replacement, never the deprecated form:
 - `Timer`/`Tween` are NOT paused by hiding their Control — source: ADR-0011
 - Godot 4.6 dual-focus system separates mouse focus from keyboard/gamepad focus (hover signals unaffected) — flagged BLOCKING for HUD focus-cycling implementation (building-ui OQ7)
 - **`AStarGrid3D` does NOT exist in Godot 4.7** (only `AStarGrid2D`) — manual `AStar3D` graph management is the only built-in option; `AStar3D` IDs are never auto-recycled on `remove_point()` — source: ADR-0007
-- GridMap collision is **octant-batched** (one shape per 8×8×8 chunk), NOT per-cell; GridMap draw calls scale with distinct mesh types in view, not cell count — source: ADR-0003
+- (Historical, GridMap now forbidden for blocks:) GridMap collision is octant-batched, NOT per-cell — source: ADR-0003 (Superseded)
 - Default signal connections are **synchronous** (in the `emit()` call stack, connection order) — load-bearing for the ADR-0009 race closure — source: ADR-0009
 - `_input()`/`_unhandled_input()` are dispatched **SceneTree-global, not per-Viewport**; `DirectionalLight3D` affects the whole `World3D` regardless of distance (hence the explicit visibility toggle); `Camera3D.current`/listener exclusivity is per-Viewport — source: ADR-0013
 
@@ -195,5 +196,5 @@ Use the replacement, never the deprecated form:
 ### Cross-Cutting Constraints
 - **Event-driven, not polled** — boot gate (ADR-0005), hover flag (ADR-0010), timer expiry (ADR-0011): no per-frame polling for state that has a signal
 - **One terminal-halt severity model** (RID Failed pattern) — reused by config blocking-invariants (ADR-0002) and data-definition validation (ADR-0006); never invent a new severity scheme
-- **Escape hatches are named, not preemptively built**: chunked mesher (ADR-0003), AI threading (ADR-0008), chunked/async saves (ADR-0012) — adopt only on measured need
+- **Escape hatches are named, not preemptively built**: greedy meshing / GDExtension mesher (ADR-0014), AI threading (ADR-0008), chunked/async saves (ADR-0012) — adopt only on measured need
 - **Raw delta vs `game_delta`**: camera/UI/overlays run on raw engine delta; simulation runs on Time & Tick's `game_delta`; never blend the two clocks for one piece of state

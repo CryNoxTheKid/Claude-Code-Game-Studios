@@ -205,11 +205,14 @@ against memory/draw-call budget. See Tuning Knobs.
   bounds checks are exact comparisons, not epsilon-tolerant ones. Godot 4.4+
   typed Dictionaries (`Dictionary[Vector3i, ...]`) give static-type safety
   at negligible cost — use them *(2026-07-10 review note)*.
-- Memory back-of-envelope *(2026-07-10 review note)*: a sparse Dictionary
-  storing only occupied cells keeps a ~100×32×100 world in the tens of MB
-  even at high occupancy — comfortably inside the 4 GB ceiling; the real
-  memory/perf risk lives in the RENDERING representation (rendering ADR),
-  not this data layer.
+- Memory back-of-envelope *(revised 2026-07-11, large-world decision)*: the
+  original sparse-Dictionary note assumed the old ~100×32×100 bound. At the
+  new 2000×2000×32 target, Dictionary storage (~500 B/cell measured) is
+  infeasible (>16 GB); storage is **chunked packed arrays** (~1–4 B/cell,
+  full world ~172 MB measured in `prototypes/chunked-mesher/`) behind the
+  UNCHANGED public accessor API (O(1) `get`/`set` by `Vector3i`,
+  `cell_changed`, `raycast_cells`). See ADR-0014. The `Dictionary[Vector3i]`
+  guidance above remains valid for small lookup tables, not bulk cell storage.
 - Collider strategy is a rendering-ADR concern *(2026-07-10 review note)*:
   if raycast picking is implemented via physics (rather than manual DDA),
   per-cell colliders for tens of thousands of terrain cells are a known
@@ -250,8 +253,8 @@ against memory/draw-call budget. See Tuning Knobs.
 
 | Parameter | Current Value | Safe Range | Effect of Increase | Effect of Decrease |
 |-----------|---------------|------------|---------------------|---------------------|
-| `world_width_cells` | 64 | 32–256 | Larger valley, more room to build/explore; more cells to manage | Smaller valley, faster to fully populate; risk of feeling cramped |
-| `world_depth_cells` | 64 | 32–256 | Same as width | Same as width |
+| `world_width_cells` | 2000 *(large-world decision 2026-07-11; prototype-validated)* | 256–2048 | Larger world, more room to explore; longer initial window build | Smaller world, faster full mesh; loses the expedition feel |
+| `world_depth_cells` | 2000 *(same)* | 256–2048 | Same as width | Same as width |
 | `min_y` | 0 | fixed at 0 (recommended) | Shifts all coordinates, rarely useful | — |
 | `max_y` | 16 | 8–32 | Taller hills/multi-story buildings possible; more vertical cells to store | Flatter valley, less room for tall structures |
 | `base_height` | 4 | 0 to max_y−1 | Higher valley floor overall | Lower valley floor, deeper basin feel |

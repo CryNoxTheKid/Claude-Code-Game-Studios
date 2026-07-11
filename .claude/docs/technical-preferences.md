@@ -7,8 +7,8 @@
 
 - **Engine**: Godot 4.7-stable
 - **Language**: GDScript
-- **Rendering**: [TO BE CONFIGURED — pending voxel rendering approach prototype: GridMap vs MultiMesh vs baked meshes, see game-concept.md Open Questions]
-- **Physics**: [TO BE CONFIGURED]
+- **Rendering**: Chunked face-culled voxel mesher + packed chunk storage + streamed view window (ADR-0014, prototype-validated at 2000×2000×32); ghost previews via pooled MeshInstance3D; picking via DDA on the data layer
+- **Physics**: Jolt Physics 3D (4.6+ default, no override; ADR-0004) — villagers are Area3D-only, blocks have no physics colliders
 
 ## Input & Platform
 
@@ -65,7 +65,7 @@
 <!-- Quick reference linking to full ADRs in docs/architecture/ -->
 - ADR-0001 Inter-System Reference & DI Pattern — **Accepted**
 - ADR-0002 Tuning/Config Data Strategy — **Accepted**
-- ADR-0003 Voxel World Rendering Approach — **Accepted** (spike QQ3 PASS)
+- ADR-0003 Voxel World Rendering Approach — Superseded by ADR-0014 (large-world decision)
 - ADR-0004 Physics Backend & Picking Strategy — **Accepted**
 - ADR-0005 Boot Sequencing & Initialization Gate — **Accepted**
 - ADR-0006 Data Definition Immutability & Reference Format — **Accepted**
@@ -76,6 +76,7 @@
 - ADR-0011 UI Timer & Expiry Management — **Accepted**
 - ADR-0012 Save/Load Serialization Strategy — **Accepted**
 - ADR-0013 Multi-Scene Concurrency Model — **Accepted**
+- ADR-0014 Chunked Voxel Rendering & Large-World Storage — **Accepted** (prototype-validated; supersedes ADR-0003)
 
 Status source of truth: each ADR's `## Status` section in `docs/architecture/`.
 

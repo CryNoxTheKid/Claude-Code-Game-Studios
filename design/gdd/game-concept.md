@@ -37,14 +37,25 @@ its own, then fight to protect it." ✅
 
 ## Core Fantasy
 
-You are the unseen steward of a small band of settlers in a blocky, hand-shaped
-valley. You don't control them like puppets — you **shape their world**, and
+You are the unseen steward of a small band of settlers in a blocky **wide
+land** — your settlement starts as a clearing in a vast, explorable world.
+You don't control them like puppets — you **shape their world**, and
 they live in what you build: they move into the houses you lay out, take up
 trades, eat and sleep in the rooms you furnished. When the old seals weaken and
 monsters come, you rally the able ones into a squad and stand in the gap. The
 fantasy is **stewardship of a place that feels alive** — pride when a plain
 plot becomes a warm, furnished home, and a village that visibly lives because
-of what you built.
+of what you built — plus the pull of **the horizon**: distant seal-dungeons
+and unexplored terrain that make leaving the settlement an expedition.
+
+> **World-scale decision (2026-07-11, creative director)**: the world is
+> LARGE — target **2000×2000×32 cells** (minimum 1000×1000), motivated by
+> exploration and distant dungeons; density grows over the game's life. The
+> settlement core stays compact (villager life happens there); the far world
+> is expedition space. Feasibility proven in `prototypes/chunked-mesher/`;
+> architecture in ADR-0014 (supersedes ADR-0003). This replaces the earlier
+> "small hand-shaped valley (~100×100)" framing throughout older documents —
+> where an older doc says "valley bound", read "settlement core region".
 
 ---
 

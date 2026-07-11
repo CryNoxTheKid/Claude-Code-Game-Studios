@@ -1,7 +1,7 @@
 # ADR-0003: Voxel World Rendering Approach
 
 ## Status
-Accepted (2026-07-11 — pre-VS performance spike QQ3 PASSED at ADR-ceiling scale; see prototypes/perf-spike-qq3/REPORT.md. User-delegated decision.)
+Superseded by ADR-0014 (2026-07-11 — the large-world scope change, user/creative-director decision, moved the world bound from ~100×32×100 to 2000×2000×32; GridMap fails measurably at that scale. This ADR remains the correct record for the old bound; its spike PASS stands for that scope. Picking (§3) and ghost previews (§4) carry over into ADR-0014 unchanged.)
 
 ## Date
 2026-07-11
