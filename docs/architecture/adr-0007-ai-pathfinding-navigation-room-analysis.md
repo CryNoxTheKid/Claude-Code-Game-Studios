@@ -21,7 +21,7 @@ Accepted (2026-07-11 — pre-VS performance spike QQ3 PASSED at ADR-ceiling scal
 
 | Field | Value |
 |-------|-------|
-| **Depends On** | ADR-0003 (Voxel World Rendering Approach) — this ADR's graph is built from Voxel World's own occupancy data, the same data layer ADR-0003 established as authoritative |
+| **Depends On** | ADR-0014 (Chunked Voxel Rendering; formerly ADR-0014 (formerly ADR-0003) — same authoritative data layer, unchanged public accessor API) — this ADR's graph is built from Voxel World's own occupancy data, the same data layer ADR-0014 (formerly ADR-0003) established as authoritative |
 | **Enables** | Villager AI and Build Validation & Navigability `/dev-story` implementation |
 | **Blocks** | Both of the above — neither can implement its movement/analysis logic without this decision |
 | **Ordering Note** | Was provisional pending the pre-VS performance spike — spike PASSED 2026-07-11 (patch avg 0.46 ms, query p95 1.9 ms; see prototypes/perf-spike-qq3/REPORT.md) |
@@ -63,7 +63,7 @@ Both consult Voxel World's occupancy data directly and the shared movement const
 
 ### Architecture Diagram
 ```
-Voxel World (occupancy data, ADR-0003)
+Voxel World (occupancy data, ADR-0014 (formerly ADR-0003))
         │
         ▼
 Villager AI — shared predicates (single source of truth):
@@ -153,7 +153,7 @@ func _trace_reachability(region_interior: Vector3i) -> bool:
 
 ### Positive
 - One shared, canonical rule implementation (`is_standable`/`is_step_legal`) — the exact "no independently duplicated copies" requirement (TR-build-validation-navigability-010) is satisfied structurally, not by discipline.
-- Sidesteps the `NavigationServer3D` rebake-cost risk entirely rather than mitigating it, by not using navmesh baking at all — consistent with ADR-0003's pattern of resolving a flagged risk by removing its precondition rather than working around it.
+- Sidesteps the `NavigationServer3D` rebake-cost risk entirely rather than mitigating it, by not using navmesh baking at all — consistent with ADR-0014 (formerly ADR-0003)'s pattern of resolving a flagged risk by removing its precondition rather than working around it.
 - `AStar3D`'s incremental point/connection patching matches both systems' already-specified incremental-update requirements (Villager AI's re-path filtering, Build Validation's incremental snapshot patching) without needing new mechanism design.
 
 ### Negative
@@ -195,5 +195,5 @@ N/A — no existing code.
 - Grep-verifiable: zero `NavigationServer3D`/`NavigationAgent3D`/`NavigationRegion3D` usage anywhere in Villager AI's or Build Validation's implementation.
 
 ## Related Decisions
-- Depends on ADR-0003 for Voxel World's occupancy data as the graph's data source.
-- Both this ADR and ADR-0003 share the same pending pre-VS performance spike as their empirical validation step — `architecture.md` QQ3 covers both.
+- Depends on ADR-0014 (formerly ADR-0003) for Voxel World's occupancy data as the graph's data source.
+- Both this ADR and ADR-0014 (formerly ADR-0003) share the same pending pre-VS performance spike as their empirical validation step — `architecture.md` QQ3 covers both.

@@ -8,8 +8,9 @@
   time-tick-system, resource-item-database, building-system,
   villager-ai-behavior, build-validation-navigability, needs-mood-system,
   building-ui, villager-info-ui (all 11 approved MVP GDDs)
-- ADRs Referenced: none yet exist — 13 Required ADRs identified this session
-  (see Required ADRs section), none authored
+- ADRs Referenced: ADR-0001..0014 all authored and resolved (13 Accepted,
+  ADR-0003 Superseded by ADR-0014) — status as of 2026-07-11; original
+  authoring session identified them as the 13 Required ADRs below
 - Technical Director Sign-Off: 2026-07-11 — APPROVED WITH CONDITIONS (all 6
   Foundation/Core "must have" ADRs must be authored + Accepted before
   implementation begins; architecture is otherwise internally coherent, every
@@ -25,16 +26,16 @@ to ~4.3; versions 4.4–4.7 are post-cutoff and require cross-referencing
 `docs/engine-reference/godot/` before any API call is finalized.
 
 **HIGH RISK domains** (verify before deciding):
-- **Rendering** — GridMap vs MultiMeshInstance3D vs chunked mesher is still
-  genuinely undecided (Voxel World, Building System blueprint ghosts).
-- **Physics** — Jolt is now the *default* 3D engine (since 4.6); raycast/
-  cell-picking mechanism and collider-scalability strategy for tens of
-  thousands of terrain cells is unresolved (Voxel World, Building System,
-  Villager Info UI's villager-hit query).
-- **Navigation/AI-Pathfinding** — NavigationServer3D vs custom AStar3D/
-  AStarGrid3D is an open choice; NavigationServer3D rebake cost changed
-  significantly 4.4→4.7 and gates Build Validation & Navigability's
-  flood-fill/room-detection design directly.
+- **Rendering** — RESOLVED 2026-07-11: chunked face-culled mesher + packed
+  chunk storage (ADR-0014, prototype-validated at 2000x2000x32; supersedes
+  the GridMap decision of ADR-0003). Ghosts: pooled MeshInstance3D.
+- **Physics** — Jolt is now the *default* 3D engine (since 4.6); RESOLVED 2026-07-11: Jolt confirmed (ADR-0004);
+  picking is DDA on the data layer, zero block colliders (ADR-0014/0004);
+  villager-hit via Area3D intersect_ray with collide_with_areas=true.
+- **Navigation/AI-Pathfinding** — RESOLVED 2026-07-11: AStar3D +
+  shared walkability predicates, NO NavigationServer3D (ADR-0007;
+  AStarGrid3D does not exist in 4.7). Region scope under the large world:
+  settlement-core graph, spike tracked as QQ5.
 - **Input** — 4.7 changed mouse/keyboard device IDs from hardcoded `0` to
   `DEVICE_ID_MOUSE`/`DEVICE_ID_KEYBOARD` (Camera & Input).
 - **UI** — 4.6's dual-focus system (mouse/touch focus separate from keyboard/
@@ -129,7 +130,7 @@ the raycast/picking mechanism shared by Building System and Villager Info UI
 | Module | Owns | Exposes | Consumes | Engine APIs (risk) |
 |---|---|---|---|---|
 | Scene/World Management | World Root node; transition state machine (Booting/Active/Transitioning) | `transition_begun()`, `transition_ended(success: bool)` signals; transition-trigger API | Resource & Item Database's Ready state (boot gate only) | `add_child`/`remove_child`/`queue_free` — **never** `change_scene_to_file`/`change_scene_to_packed`/`reload_current_scene`/direct `current_scene` assignment (explicit ban) |
-| Voxel World / Grid Data ⚠️ | `Vector3i`-keyed cell dictionary; terrain generation | `get_cell`, `raycast_cells`, `get_neighbors`, `set_cell`/`clear_cell` (Building-only), `bulk_write` (1 batched signal), `cell_changed`/`cells_changed_batch` signals, `iterate_occupied` | Resource & Item Database ids (opaque, stored not resolved) | Typed `Dictionary[Vector3i,...]` (4.4+ ⚠️ verify syntax); raycast vs. manual DDA picking (⚠️ open ADR); `FastNoiseLite` for terrain |
+| Voxel World / Grid Data ⚠️ | chunked packed cell arrays (ADR-0014; was Vector3i-keyed dictionary); terrain generation; view-window mesh streaming | `get_cell`, `raycast_cells`, `get_neighbors`, `set_cell`/`clear_cell` (Building-only), `bulk_write` (1 batched signal), `cell_changed`/`cells_changed_batch` signals, `iterate_occupied` | Resource & Item Database ids (opaque, stored not resolved) | Typed `Dictionary[Vector3i,...]` (4.4+ ⚠️ verify syntax); raycast vs. manual DDA picking (⚠️ open ADR); `FastNoiseLite` for terrain |
 | Camera & Input ⚠️ | Spherical camera params; InputMap action registrations; Active/Suspended state | `action_fired(name)` (opaque passthrough — never interprets it); `world_ray()`; ground-plane intersection | Scene/World Management's transition signals (drives Suspended) | `Camera3D.project_ray_origin/project_ray_normal` (⚠️ re-verify vs 4.7); must never branch on `DEVICE_ID_MOUSE/KEYBOARD` (design already avoids the 4.7 risk) |
 | Time & Tick System | `game_delta`; pause/warp state; tick accumulator | `tick()` global signal; `game_delta` getter; `pause()`/`resume()`/`set_warp()` (synchronous return) | *Nothing* — explicit non-dependency contract, not even Scene/World Management | `_physics_process` fixed-step (default 60Hz, ⚠️ confirm unchanged); **forbidden**: `Engine.time_scale`, `SceneTree.paused` |
 | Resource & Item Database | Item/material definitions; validation results; `missing_item` fallback; retired-ids ledger | `get_by_id`, `list_ids_by_category/material_family/tier`, `list_all_ids` (read-only) | *Nothing* — boot-time file load only | `FileAccess`/`Resource` loading (⚠️ 4.4 return-type change); `duplicate_deep()` (⚠️ 4.5+, if chosen as the immutability mechanism) |
@@ -138,7 +139,7 @@ the raycast/picking mechanism shared by Building System and Villager Info UI
 
 | Module | Owns | Exposes | Consumes | Engine APIs (risk) |
 |---|---|---|---|---|
-| Building System ⚠️ | Blueprint 4-state lifecycle; construction job queue; undo/redo stack; placement-validity engine; tool state machine | `commit_command`, `claim_job`/`release_job`/`on_site_check`, combined occupancy query, `undo()`/`redo()`, `construction_completed_batch` signal, `furniture_revoked` signal, tool-state query | Voxel World (read + `bulk_write`); Resource & Item Database (palette query); Time & Tick (`tick`); Camera & Input (`world_ray`, `action_fired`); Scene/World Management (`transition_ended` → clear undo stack) | Raycast pick (⚠️ shared ADR with Voxel World); GridMap/MultiMesh ghost rendering (⚠️); `InputEventKey.echo` for undo/redo repeat |
+| Building System ⚠️ | Blueprint 4-state lifecycle; construction job queue; undo/redo stack; placement-validity engine; tool state machine | `commit_command`, `claim_job`/`release_job`/`on_site_check`, combined occupancy query, `undo()`/`redo()`, `construction_completed_batch` signal, `furniture_revoked` signal, tool-state query | Voxel World (read + `bulk_write`); Resource & Item Database (palette query); Time & Tick (`tick`); Camera & Input (`world_ray`, `action_fired`); Scene/World Management (`transition_ended` → clear undo stack) | Raycast pick (⚠️ shared ADR with Voxel World); pooled MeshInstance3D ghost rendering (ADR-0014); `InputEventKey.echo` for undo/redo repeat |
 | Villager AI & Behavior ⚠️ | Per-villager state machine; walkability predicates (**canonical ground truth**); bed ownership; F1–F4 formulas; injected RNG | State/position/activity query (read by UI); `start_recovery`/`stop_recovery` calls (into Needs); walkability query (consumed by Build Validation) | Voxel World (occupancy read + write-signal subscribe); Time & Tick (`tick`); Building System (`claim_job`/`release`/`on_site`); Needs & Mood (poll need state); Building System's `furniture_revoked` | `NavigationServer3D`/`NavigationAgent3D` vs. custom `AStar3D`/`AStarGrid3D` (⚠️ open ADR); typed `Dictionary` (⚠️) |
 
 **Feature Layer**

@@ -21,25 +21,25 @@ Accepted (2026-07-11 — per architecture-review-2026-07-11 recommendation; user
 
 | Field | Value |
 |-------|-------|
-| **Depends On** | ADR-0003 (Voxel World Rendering Approach) — settled that block picking uses manual DDA, not physics, which narrows this ADR's scope to villager-hit testing only |
+| **Depends On** | ADR-0014 (Chunked Voxel Rendering; formerly ADR-0014 (formerly ADR-0003), whose DDA-picking conclusion ADR-0014 carries over unchanged) — settled that block picking uses manual DDA, not physics, which narrows this ADR's scope to villager-hit testing only |
 | **Enables** | Villager Info UI `/dev-story` implementation; any future physics usage (Squad & Combat hitboxes, VS+) inherits this ADR's backend choice and layer-numbering convention |
 | **Blocks** | Villager Info UI's villager-hit query implementation |
-| **Ordering Note** | None beyond depending on ADR-0003 |
+| **Ordering Note** | None beyond depending on ADR-0014 (formerly ADR-0003) |
 
 ## Context
 
 ### Problem Statement
-Villager Info UI requires "a dedicated physics query on a dedicated villager collision layer, fully separate from and never consulted by the block-picking query" (TR-villager-info-ui-014), with nearest-wins tie-break resolution against block picks (TR-villager-info-ui-015/016). This is, after ADR-0003, the *only* physics usage anywhere in the 11 MVP GDDs — Voxel World blocks carry no collision at all, Camera & Input's ground-plane intersection is pure math, and Villager AI's movement/walkability is cell-data-driven, not physics-simulated. Two things still need deciding: which 3D physics backend the project uses (Godot 4.6+ defaults new projects to Jolt, a change from pre-cutoff knowledge), and the concrete mechanism + collision-layer numbering for villager hit-testing, since no layer convention exists yet.
+Villager Info UI requires "a dedicated physics query on a dedicated villager collision layer, fully separate from and never consulted by the block-picking query" (TR-villager-info-ui-014), with nearest-wins tie-break resolution against block picks (TR-villager-info-ui-015/016). This is, after ADR-0014 (formerly ADR-0003), the *only* physics usage anywhere in the 11 MVP GDDs — Voxel World blocks carry no collision at all, Camera & Input's ground-plane intersection is pure math, and Villager AI's movement/walkability is cell-data-driven, not physics-simulated. Two things still need deciding: which 3D physics backend the project uses (Godot 4.6+ defaults new projects to Jolt, a change from pre-cutoff knowledge), and the concrete mechanism + collision-layer numbering for villager hit-testing, since no layer convention exists yet.
 
 ### Constraints
 - Godot 4.7-stable; Jolt Physics 3D is the engine's own default for new projects since 4.6
 - Villagers do not need physical collision response (they don't fall, get pushed, or collide with terrain via Godot physics) — only ray-detectability for click-to-select
 - Population ceiling 20-30 villagers (villager-ai-behavior.md) — the hit-test query must stay cheap at that scale, once per click, not per frame
-- Must be structurally separate from block picking (ADR-0003's DDA mechanism has no collision layer at all, so "separate" is automatic, not just conventional)
+- Must be structurally separate from block picking (ADR-0014 (formerly ADR-0003)'s DDA mechanism has no collision layer at all, so "separate" is automatic, not just conventional)
 
 ### Requirements
 - A villager must be detectable by a single ray query, returning hit distance for tie-break comparison against a block-pick distance
-- Building System's placement raycast (DDA, ADR-0003) must be structurally incapable of hitting a villager — not just configured to ignore them
+- Building System's placement raycast (DDA, ADR-0014 (formerly ADR-0003)) must be structurally incapable of hitting a villager — not just configured to ignore them
 - A project-wide collision-layer numbering scheme must exist so future systems (Squad & Combat hitboxes, VS+) don't collide (pun intended) with this ADR's layer assignment
 
 ## Decision
@@ -51,7 +51,7 @@ Villager Info UI requires "a dedicated physics query on a dedicated villager col
 **2. Villager hit-testing: `Area3D` + dedicated layer + `intersect_ray`.** Each villager instance carries a child `Area3D` with a `CollisionShape3D` (a simple capsule or cylinder approximating the villager's bounding volume), `collision_layer = 1` (the villagers bit), `collision_mask = 0` (villagers don't need to detect anything themselves — only to be detected). `Area3D` is chosen over `StaticBody3D`/`CharacterBody3D` because no physical collision *response* is ever needed — villagers never push or get pushed by anything through Godot physics; the shape exists purely so a ray query can find it.
 
 Villager Info UI's click handler, when Building UI reports no armed tool (per TR-villager-info-ui-001's gate), runs a combined pick on click:
-1. Manual DDA against Voxel World's data (ADR-0003's `raycast_cells()`) → block hit distance, or none
+1. Manual DDA against Voxel World's data (ADR-0014 (formerly ADR-0003)'s `raycast_cells()`) → block hit distance, or none
 2. `get_world_3d().direct_space_state.intersect_ray()` with `collision_mask = 1` (villagers only), **`collide_with_areas = true`, `collide_with_bodies = false`** (villagers are `Area3D`-only; `PhysicsRayQueryParameters3D` defaults to bodies-only detection, so this must be set explicitly or the query silently returns no hit, every time — confirmed via engine specialist validation, see Consequences) → villager hit distance, or none
 3. Nearest wins by ray-parametric distance; if both hits exist within `pick_tie_epsilon` of each other, the villager wins (per TR-villager-info-ui-015's stated tie-break rule)
 
@@ -65,7 +65,7 @@ Building System's own placement pick (ToolArmed/Dragging) calls only step 1 (DDA
 | 2–8 | *(reserved)* | Future gameplay physics (Squad & Combat hitboxes, VS+; any future system needing a distinct layer) | Future ADRs, on demand |
 | 9–20 | *(reserved)* | Godot editor/engine internal use conventions, left untouched | N/A |
 
-No other MVP system claims a layer, since blocks have none (ADR-0003) and nothing else uses physics.
+No other MVP system claims a layer, since blocks have none (ADR-0014 (formerly ADR-0003)) and nothing else uses physics.
 
 ### Architecture Diagram
 ```
@@ -169,5 +169,5 @@ N/A — no existing code.
 - Building System's placement-pick code path contains zero physics API calls — grep-verifiable (`grep -rn "intersect_ray\|PhysicsDirectSpaceState3D" src/building_system/` should return zero matches once implementation exists).
 
 ## Related Decisions
-- Depends on ADR-0003 (Voxel World Rendering Approach) for the block-picking mechanism this ADR's tie-break logic compares against.
+- Depends on ADR-0014 (formerly ADR-0003) (Voxel World Rendering Approach) for the block-picking mechanism this ADR's tie-break logic compares against.
 - Establishes the collision-layer numbering convention future ADRs (Squad & Combat, VS+) must extend, not redefine.

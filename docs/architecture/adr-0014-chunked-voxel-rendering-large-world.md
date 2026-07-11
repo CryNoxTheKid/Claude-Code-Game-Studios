@@ -112,7 +112,7 @@ streamed view window.**
 
 ## GDD Requirements Addressed
 
-Same set as ADR-0003 (TR-voxel-world-016/017/018/025, TR-building-system-003/035/039/041)
+The full set ADR-0003 covered: TR-voxel-world-017/018/025, TR-building-system-002/026/003/035/039/041, TR-villager-info-ui-014/015 (picking + villager-hit separation carry over via section 4)
 under the revised world-scale constraint (game-concept.md 2026-07-11 update),
 plus the new exploration/distant-dungeon intent.
 

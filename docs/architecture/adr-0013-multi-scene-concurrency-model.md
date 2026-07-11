@@ -21,7 +21,7 @@ Accepted (2026-07-11 — dependency ADR-0007 accepted after spike QQ3 PASS; see 
 
 | Field | Value |
 |-------|-------|
-| **Depends On** | ADR-0003 (Voxel World Rendering — no GridMap physics collision), ADR-0004 (collision-layer convention), ADR-0007 (zero `NavigationServer3D` usage) — all three substantially narrow this ADR's actual scope |
+| **Depends On** | ADR-0014 (Chunked Voxel Rendering; formerly ADR-0003 — no block physics collision either way — no GridMap physics collision), ADR-0004 (collision-layer convention), ADR-0007 (zero `NavigationServer3D` usage) — all three substantially narrow this ADR's actual scope |
 | **Enables** | Dungeon System, Squad & Combat System, and any future Scene/World Management VS+ work depending on a settled multi-scene model |
 | **Blocks** | Any Dungeon-scene implementation work |
 | **Ordering Note** | Not MVP-blocking — no Dungeon scene exists yet; deferred until that work actually begins |
@@ -117,7 +117,7 @@ func _deactivate_scene(camera: Camera3D, listener: AudioListener3D,
 
 ### Alternative A: Shared `World3D` + spatial offset + explicit global-state toggling — CHOSEN
 - **Description**: as detailed in Decision above.
-- **Pros**: no extra Viewport/render-target overhead; the only genuinely global concerns (environment, camera-current, audio-listener, directional light) are handled by explicit, unambiguous toggles rather than relying on engine stacking-priority rules; this project's already-minimal physics/navigation footprint (ADR-0003, ADR-0004, ADR-0007) means the isolation gap versus separate SubViewports is small.
+- **Pros**: no extra Viewport/render-target overhead; the only genuinely global concerns (environment, camera-current, audio-listener, directional light) are handled by explicit, unambiguous toggles rather than relying on engine stacking-priority rules; this project's already-minimal physics/navigation footprint (ADR-0014 (formerly ADR-0003), ADR-0004, ADR-0007) means the isolation gap versus separate SubViewports is small.
 - **Cons**: relies on discipline (every global-state toggle must actually happen on every scene switch) rather than structural isolation — a missed toggle is a real bug class, mitigated by centralizing all toggles in one `_activate_scene`/`_deactivate_scene` pair rather than scattering them.
 - **Rejection Reason**: N/A — chosen.
 
@@ -125,7 +125,7 @@ func _deactivate_scene(camera: Camera3D, listener: AudioListener3D,
 - **Description**: Valley and Dungeon each render into their own `SubViewport`, each with an independent `World3D`, `Camera3D`-current, and `WorldEnvironment` — genuinely structurally isolated, no shared coordinate space at all.
 - **Pros**: no spatial-offset trick needed; no risk of a missed global-state toggle causing crosstalk, since the two `World3D`s are entirely separate.
 - **Cons**: an inactive `SubViewport` still exists as a render target (memory cost) even if not continuously updated; extra node/Viewport management overhead for isolation this project's minimal physics/navigation footprint doesn't clearly need; **does NOT provide the "free" input isolation the source GDD's Open Question assumed** — confirmed during this ADR's validation that plain `_input`/`_unhandled_input` callbacks are dispatched SceneTree-wide regardless of SubViewport boundaries, so this alternative would require the identical manual input-routing discipline as Alternative A, with none of the assumed benefit.
-- **Rejection Reason**: solves a crosstalk problem that, for this project specifically (near-zero `NavigationServer3D`/physics usage per ADR-0003/0004/0007), is already narrow — and its one input-routing advantage, as originally assumed in `scene-world-management.md`'s own Open Question, turned out not to exist. The added Viewport-management complexity isn't justified by the isolation actually gained.
+- **Rejection Reason**: solves a crosstalk problem that, for this project specifically (near-zero `NavigationServer3D`/physics usage per ADR-0014 (formerly ADR-0003)/0004/0007), is already narrow — and its one input-routing advantage, as originally assumed in `scene-world-management.md`'s own Open Question, turned out not to exist. The added Viewport-management complexity isn't justified by the isolation actually gained.
 
 ## Consequences
 
@@ -167,5 +167,5 @@ N/A — no existing code, no Dungeon scene exists yet.
 - Grep-verifiable: no second `WorldEnvironment` node exists anywhere in the project (the shared-node-with-swapped-resource pattern is the only one used).
 
 ## Related Decisions
-- Depends on ADR-0003, ADR-0004, and ADR-0007, all of which narrow this ADR's actual scope by having already minimized this project's physics/navigation footprint.
+- Depends on ADR-0014 (formerly ADR-0003), ADR-0004, and ADR-0007, all of which narrow this ADR's actual scope by having already minimized this project's physics/navigation footprint.
 - Reuses the Suspended-signal input-routing pattern already established across ADR-0001/ADR-0005.
