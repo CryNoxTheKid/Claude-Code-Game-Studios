@@ -45,3 +45,17 @@ must resolve, not just restate the note. The note's philosophy (warmth
 contrast, blocky shapes, 3-hue-family system, colorblind pairing) remains
 directionally sound and should carry forward, extended rather than rewritten.
 See [[gate-verdict-history]] for the 2026-07-11 AD-PHASE-GATE verdict.
+
+**Update 2026-07-11 (re-review):** `design/art/art-bible.md` Sections 1-4
+now exist, are APPROVED, and close all four gaps above (hex table in §4.1,
+per-height-band table §4.3, biome list §4.4, fog/horizon plan §2.6, Horizon
+Test principle §1.4). Verdict was CONCERNS not READY/NOT-READY — one
+open defect: §2.4/§2.6 fog color reuses the "State Blue" hue (§4.1's
+"safe/positive" UI signal) for world-space dungeon-approach/leaving-home
+fog, which is semantically backwards and contradicts §4.6's own colorblind
+backup-mechanism claim ("State color never appears on world terrain").
+Needs a rename (distinct "Threshold Cool" hue) before Deep Threshold /
+dungeon-approach assets are built. Sections 5-9 (Character Design,
+Environment Language, UI/HUD Visual Direction, Asset Standards, Style
+Prohibitions) remain deferred to Pre-Production — this was accepted as
+in-scope for this gate. Full detail in [[gate-verdict-history]].

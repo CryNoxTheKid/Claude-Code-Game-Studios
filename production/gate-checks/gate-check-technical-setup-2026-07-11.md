@@ -66,3 +66,23 @@ Escalation rule: one NOT READY → verdict minimum FAIL.
 
 `production/stage.txt` remains **Technical Setup** (gate not passed).
 Re-run `/gate-check technical-setup` after the two blockers land.
+
+---
+
+## RE-RUN (same day, after blockers resolved) — Verdict: **CONCERNS → ADVANCED**
+
+- Blocker 1 RESOLVED: art-bible.md Sections 1-4 authored (art-director draft, all 4
+  taste-level decisions user-confirmed: distance-keyed fog + silhouettes, flat sharp
+  HUD, amber/gold palette, 3 biomes) — commit 4658269+
+- Blocker 2 RESOLVED: requirements-traceability.md generated from registry (46b0f80)
+- AD re-review (fresh adversarial instance, not the author): NOT READY → **CONCERNS** —
+  all four large-world gaps verified closed with quotes; WCAG contrast independently
+  computed (12.8:1 text, 8.0:1 gold, 5.1:1 orange, 4.6:1 blue — all clear A3);
+  1 defect found & FIXED same session (fog hue renamed Threshold Cool #6B8593,
+  State Blue stays UI-only)
+- Panel now: CD CONCERNS / TD READY / PR CONCERNS / AD CONCERNS → verdict CONCERNS
+  (minor gaps addressable during Pre-Production, per gate definition) — ADVANCED,
+  matching the Systems-Design gate precedent ("CONCERNS, advanced")
+- stage.txt → **Pre-Production**
+- Carried conditions unchanged (QQ5 hard gate, un-vsync re-measure, TR back-annotation,
+  cozy-at-scale VS criterion, far-world content question, UX specs, valley prose sweep)

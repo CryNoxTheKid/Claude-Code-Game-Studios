@@ -77,7 +77,7 @@ The addition of "to the horizon" is deliberate: at 2000×2000 scale the player's
 | **Lighting** | This is where `visual-direction-note.md` §2c ("stakes as weather") begins literally: cool rim-light and desaturated fog creep in from the approach vector; any light the player carries (torch, lantern) becomes locally brighter — the beacon-in-the-dark read starts at the threshold, not inside the dungeon. |
 | **Adjectives** | hushed, cooling, narrowing, charged |
 | **Energy level** | Mid, rising — the one state allowed a deliberate pacing shift (existing transition overlay, `scene-world-management.md`), but still obeys A5 (no screen shake, no >3Hz flicker). |
-| **Carrying element** | The fog gradient itself, keyed to the cool end of the State-Blue hue (Section 4) — repurposed here as atmospheric cold, never confused with material palette because it's an overlay effect, not a geometry recolor. |
+| **Carrying element** | The fog gradient itself, keyed to **Threshold Cool** `#6B8593` (a desaturated slate distinct from State Blue — AD re-review fix 2026-07-11: fog is world-space atmosphere and must never borrow a UI state hue; State Blue means SAFE and only lives in UI chrome). |
 
 ### 2.5 Menus / Pause
 
@@ -94,7 +94,7 @@ The addition of "to the horizon" is deliberate: at 2000×2000 scale the player's
 **Proposal:** fog color is a function of *distance from the settlement core*, not only distance from camera.
 
 - Near the settlement core, atmospheric falloff stays **warm-neutral** (an extension of Valley Ochre, §4.3) — the world doesn't visually go cold right at the edge of home turf.
-- Past expedition range, falloff shifts to the **cool State-Blue-keyed fog** used in 2.4 — signaling "you are now away from home" before any UI does.
+- Past expedition range, falloff shifts to the **Threshold Cool fog** (`#6B8593`, see 2.4) — signaling "you are now away from home" before any UI does.
 - **Silhouetted landmarks** (dungeon spires, distinctive peaks) are placed to poke through the fog band at the streamed view-radius edge as low-detail silhouette proxies, giving the player a next-goal read before that chunk streams in at full detail (this also gives the ~2.6s initial-window-build a visual anchor to hold onto, per ADR-0014's measured load time).
 
 > **CONFIRMED (user decision 2026-07-11):** the recommended option below is now the committed rule. Original note: recommended — warm-to-cool distance-keyed fog + silhouette landmarks, because it does double duty (depth cue *and* narrative "leaving home" signal) at no extra render cost beyond a color ramp. **Alternative:** a single flat neutral-grey fog color regardless of distance (simpler, cheaper to implement, but loses the "leaving home" read and does nothing for Principle 4's Horizon Test).
@@ -152,6 +152,7 @@ The HUD borrows exactly one thing from the voxel world's shape language: **hard,
 | 🟨 | Valley Ochre | `#C2AD7C` | Ambient | Terrain/sky base neutral — muted, warm-leaning, recedes near the settlement core |
 | 🔵 | State Blue | `#4A90C4` | State | Safe / positive / calm signal — UI and overlay only |
 | 🟠 | State Orange | `#E1752E` | State | Danger / alert / warning signal — UI and overlay only |
+| 🔲 | Threshold Cool | `#6B8593` | Atmosphere | Distance/dungeon-approach fog ONLY — world-space atmosphere, deliberately distinct from State Blue (which means SAFE and never leaves UI chrome) |
 
 **Deliberate separation note:** Hearth Gold (Function) and State Orange (State) are both warm hues by necessity — the note's own philosophy makes warmth the reward signal, and orange is the safer danger-hue for colorblind accessibility. They stay distinguishable *structurally*, not just by eye: Hearth Gold **only ever appears on static geometry** (fixtures), State Orange **only ever appears in the UI/overlay layer** (Section 4 rule from `visual-direction-note.md` §3, carried forward verbatim) — they are never candidates for confusion in the same visual channel, and both still carry mandatory shape/label pairing regardless (§4.6).
 
