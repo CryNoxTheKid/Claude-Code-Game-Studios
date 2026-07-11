@@ -93,7 +93,7 @@ ever "one of thousands").
    travel → perform → re-evaluate**. Decisions and work progress happen on
    game tick events; visible movement interpolates continuously using game
    delta (so motion is smooth but stops dead while paused — consistent
-   with Time & Tick's rules).
+   with Time & Tick's rules). [TR-villager-ai-behavior-048]
 2. **Activity selection is a strict priority list** (MVP):
    1. Urgent need — a need below its urgency threshold (threshold values
       owned by the Needs & Mood GDD; MVP: sleep only)
@@ -101,12 +101,12 @@ ever "one of thousands").
    3. Idle — wander near the settlement (never leaves the world bounds)
    The list is re-evaluated when an activity completes, when interrupted,
    and periodically every `decision_interval` ticks so an urgent need can
-   preempt long work.
+   preempt long work. [TR-villager-ai-behavior-049]
 3. **Preemption is graceful, never abrupt**: when an urgent need preempts
    work, the villager finishes the current cell's in-progress tick, then
    releases its job claim back to the queue and pursues the need. This
    defines the "graceful abandon" the Building System's Edge Case 7
-   references — from this side of the contract.
+   references — from this side of the contract. [TR-villager-ai-behavior-050]
 
 **Job claiming (confirms the Building System's Core Rule 12 contract)**
 
@@ -114,30 +114,30 @@ ever "one of thousands").
    selects the **nearest reachable available job** by path distance (the
    Building System's queue order is availability/tie-breaking only —
    proximity choice is explicitly allowed by that contract). Claiming
-   locks the job; no other villager may claim it until released.
+   locks the job; no other villager may claim it until released. [TR-villager-ai-behavior-051]
    **Claims are sticky**: the periodic re-evaluation (Rule 2) never
    re-runs job selection against a held claim — a claimed job is
    abandoned ONLY via need-preemption (Rule 3), revocation (Edge Case 4),
    or pathing failure (Rule 6). There is no job-vs-job re-selection
    mid-travel *(added by the 2026-07-10 review — without this clause, a
    traveling villager could oscillate between similar-distance jobs as
-   the argmin flips)*. "Available" for the priority list (Rule 2) means
+   the argmin flips)*. [TR-villager-ai-behavior-052] "Available" for the priority list (Rule 2) means
    queue-non-empty — reachability is discovered lazily at selection time
-   (F2), never as a gate on the ranking itself.
+   (F2), never as a gate on the ranking itself. [TR-villager-ai-behavior-053]
 5. **On site** = the villager occupies the job's target cell or an
    orthogonally adjacent cell (including directly above/below), exactly as
-   the Building System defines. Work progress accrues only while on site.
+   the Building System defines. Work progress accrues only while on site. [TR-villager-ai-behavior-054]
 6. **Unreachable jobs**: if pathing to a job fails, the villager reports
    the failure to the Building System (which turns the ghost orange, its
    Edge Case 5), releases the claim, and tries the next-nearest job. All
    villagers retry unreachable jobs every `unreachable_retry_ticks` (this
-   GDD owns the cadence the Building System listed as provisional).
+   GDD owns the cadence the Building System listed as provisional). [TR-villager-ai-behavior-055]
 7. **Nudge-aside** (Building System Edge Case 6): when a builder's target
    cell is occupied by another character, the builder requests a vacate.
    An idle or wandering occupant steps to the nearest walkable adjacent
    cell within one tick; an occupant mid-activity (working, sleeping) is
    NOT interrupted — the builder's cell stays deferred until free. A
-   villager never nudges another builder off a claimed job.
+   villager never nudges another builder off a claimed job. [TR-villager-ai-behavior-056]
 
 **Movement and walkability**
 
@@ -145,7 +145,7 @@ ever "one of thousands").
    **standable** iff: the cell below is solid (terrain or Built block —
    blueprints are non-solid per the Building System's Core Rule 14b), and
    the cell itself plus the two cells above are empty
-   (`villager_clearance` = 3 cells, registered constant). *Consequence:
+   (`villager_clearance` = 3 cells, registered constant). [TR-villager-ai-behavior-009] *Consequence:
    the Building System's default `wall_height` of 3 yields exactly the
    minimum walkable interior height — a standard room is walkable with no
    headroom to spare; lowering wall height below 3 makes the interior
@@ -154,10 +154,10 @@ ever "one of thousands").
    difference is at most 1 cell (natural block staircases work; 2+ cliffs
    don't). Orthogonal steps only; a diagonal is legal only when both
    flanking orthogonal cells are also passable (no corner-cutting through
-   walls). No jumping, swimming, or climbing in MVP.
+   walls). No jumping, swimming, or climbing in MVP. [TR-villager-ai-behavior-010]
 10. These walkability rules are THE definition Build Validation &
     Navigability later checks against — that system asks "can a villager
-    (per these rules) reach X?", it does not define its own movement.
+    (per these rules) reach X?", it does not define its own movement. [TR-villager-ai-behavior-011]
 10b. **Re-path filtering is a behavioral contract** *(added by the
     2026-07-10 review; scope widened by the re-review)*: a Voxel World
     write triggers a re-path/re-validation evaluation for **any moving
@@ -170,7 +170,7 @@ ever "one of thousands").
     are ignored by design. This filter is part of the design (AC18's
     correctness depends on it), independent of whatever throttling
     strategy the AI ADR adds on top — without it, the synchronous
-    signal fan-out cost at 30 villagers would be baked in structurally.
+    signal fan-out cost at 30 villagers would be baked in structurally. [TR-villager-ai-behavior-012]
 10c. **Deciding-pass staggering directive** *(added by the re-review)*:
     when many villagers enter Deciding in the same frame (e.g., a large
     command's completion frees many jobs at once), their F2 selection
@@ -179,7 +179,7 @@ ever "one of thousands").
     16.6ms frame budget. The stagger mechanism and per-tick selection
     budget are owned by the performance/AI ADR; this rule only mandates
     THAT staggering exists. Villager order within the stagger follows
-    the stable processing order (Edge Case 3) for determinism.
+    the stable processing order (Edge Case 3) for determinism. [TR-villager-ai-behavior-013]
 
 **Life texture (MVP — added by the 2026-07-10 review)**
 
@@ -191,14 +191,14 @@ ever "one of thousands").
     with the just-finished cell as "requester" — reusing the existing
     deterministic rule; the target must be standable per Rule 8), sits
     or stands and looks around. Work-claiming is suppressed for the
-    duration; urgent needs still preempt normally. **Integration
+    duration; urgent needs still preempt normally. [TR-villager-ai-behavior-057] **Integration
     precisions** *(re-review)*: the Breather check slots into Deciding
     between "job completed" and re-running priority tier 2 — it can
     only ever begin BETWEEN jobs, never mid-claim; its duration runs on
     a dedicated ticks-since-entry counter, independent of
     `decision_interval`; environmental interruptions behave like
     Wandering's (walled-in → Edge Case 2 distress; the block it sits
-    on being removed → stand up in place, continue the Breather).
+    on being removed → stand up in place, continue the Breather). [TR-villager-ai-behavior-058]
     *(Rationale: the review found the strict priority list produces a
     tireless machine; the breather is the minimal rhythm that reads as
     "a person working," directly serving Pillar 2's design test. It is
@@ -211,8 +211,8 @@ ever "one of thousands").
     the bed WITHIN `wander_radius`; if the bed lies beyond the radius,
     the villager drifts to the radius edge, never pathing outside F3's
     bounded set** *(re-review: unbounded drift would have been an
-    uncounted goal-directed pathfind)*. Selection among micro-behaviors
-    uses the same injected RNG as F3 (deterministic in tests). Pure
+    uncounted goal-directed pathfind)*. [TR-villager-ai-behavior-059] [TR-villager-ai-behavior-060] Selection among micro-behaviors
+    uses the same injected RNG as F3 (deterministic in tests). [TR-villager-ai-behavior-016] Pure
     flavor, no gameplay effect — but load-bearing for the "settlement
     has a pulse" fantasy the MVP playtest measures.
 
@@ -220,25 +220,25 @@ ever "one of thousands").
 
 11. Beds have owners: the first villager to need sleep claims an unowned,
     reachable bed permanently (one bed = one owner). Claiming a bed IS the
-    "move-in" moment — the MVP hypothesis's payoff.
+    "move-in" moment — the MVP hypothesis's payoff. [TR-villager-ai-behavior-061]
 12. A villager whose sleep need is urgent goes to its owned bed (or claims
     one, Rule 11). If no reachable bed exists, the villager sleeps on the
     ground where it stands at reduced recovery (values owned by the Needs
     GDD) — visibly worse off, telling the player exactly what's missing
-    (Player Fantasy Beat 3: being needed).
+    (Player Fantasy Beat 3: being needed). [TR-villager-ai-behavior-062]
 13. Sleeping ends when the need is restored above its wake threshold
-    (Needs GDD's value); the villager then re-enters the decision loop.
+    (Needs GDD's value); the villager then re-enters the decision loop. [TR-villager-ai-behavior-063]
 
 **Population**
 
 14. The population ceiling is 20–30 concurrent villagers at Full Vision
     (MVP: exactly 1; Vertical Slice: ~5 per the concept). This ceiling is
     a design commitment (individual legibility, Pillar 2), and the
-    performance budget assumes it.
+    performance budget assumes it. [TR-villager-ai-behavior-064]
 14b. **Starting roster** *(added by the 2026-07-10 review — resolves the
     VS tier mismatch)*: at world generation, this system places
     `starting_villager_count` villagers (config: MVP = 1, Vertical
-    Slice = 5) at valid standable cells near the world center. This GDD
+    Slice = 5) at valid standable cells near the world center. [TR-villager-ai-behavior-065] This GDD
     owns the STARTING population; Township Progression (Alpha) owns all
     GROWTH beyond it (arrivals, recruitment). This reconciles the
     concept's "~5 villagers at VS" with Rule 14's tiering — without it,
@@ -250,16 +250,16 @@ ever "one of thousands").
 
 | State | Entry | Exit | Behavior |
 |-------|-------|------|----------|
-| Deciding | Loop start, activity end, interruption, preemption | Activity chosen (same tick) | Runs the priority list (Rule 2); instantaneous — never a visible "stand and think" pause |
+| Deciding | Loop start, activity end, interruption, preemption | Activity chosen (same tick) | Runs the priority list (Rule 2); instantaneous — never a visible "stand and think" pause [TR-villager-ai-behavior-066] |
 | Traveling | Activity chosen with a distant target | Arrival on site / target invalidated / preemption | Follows the computed path cell-by-cell; re-paths if a Voxel World write blocks the path |
 | Working | Arrived at claimed job, on site | Cell Built / job revoked / preemption | Applies tick progress to the claimed cell (Building System F3); plays work animation/sound |
 | Sleeping | Arrived at owned bed (or ground fallback) with urgent sleep need | Wake threshold reached / bed removed under them | Restores sleep need per tick (rates owned by Needs GDD) |
 | Breather | `jobs_before_break` consecutive jobs completed | `breather_duration_ticks` elapse / urgent need preempts | Non-productive rest beat near the work site (sit/look around); work-claiming suppressed; needs still decay and preempt (Rule 7b) |
-| Wandering | Decided Idle | Any higher-priority activity appears (checked every `decision_interval` ticks); interruption takes effect at the end of the current 1-cell step | Varies among micro-behaviors (walk, pause-and-look, sit, drift toward owned bed's area — Rule 7c); pure flavor, no gameplay effect |
+| Wandering | Decided Idle | Any higher-priority activity appears (checked every `decision_interval` ticks); interruption takes effect at the end of the current 1-cell step | Varies among micro-behaviors (walk, pause-and-look, sit, drift toward owned bed's area — Rule 7c); pure flavor, no gameplay effect [TR-villager-ai-behavior-067] |
 
 *(No "Suspended" state: villagers live in the Valley and keep simulating
 during scene transitions and dungeon excursions — Scene/World Management's
-Core Rule 4. Villagers pause only when game time pauses.)*
+Core Rule 4. Villagers pause only when game time pauses.)* [TR-villager-ai-behavior-068]
 
 ### Interactions with Other Systems
 
@@ -276,7 +276,7 @@ Core Rule 4. Villagers pause only when game time pauses.)*
 - **Voxel World** (upstream, MVP): reads physical occupancy for
   walkability (Rules 8–9) and listens to write signals to re-path when
   the world changes mid-travel. Never mutates the grid (construction
-  writes go through the Building System).
+  writes go through the Building System). [TR-villager-ai-behavior-069]
 - **Needs & Mood System** (MVP sibling, ✅ Designed — CONFIRMED; stale
   PROVISIONAL marker patched 2026-07-10, this time verified in the file):
   defines which needs exist, decay rates, urgency/wake thresholds, and
@@ -284,14 +284,14 @@ Core Rule 4. Villagers pause only when game time pauses.)*
   2026-07-10): this GDD reads the QUERYABLE per-need state at its
   decision points (`decision_interval` — Rules 2/13's level checks are
   the intended reading); the urgent/satisfied events are latency HINTS,
-  never the source of truth — a missed event is harmless. **Recovery
+  never the source of truth — a missed event is harmless. [TR-villager-ai-behavior-070] **Recovery
   reporting** (its Core Rule 10): discrete `start_recovery(need,
   source_enum)` / `stop_recovery(need, reason)` calls; the source enum is
   `bed_sheltered` / `bed_unsheltered` / `ground_no_bed_owned` /
   `ground_bed_unreachable` / `ground_trapped` (widened 2026-07-10 from
   binary bed/ground — Rules 11–12 supply reachability/trapped, Build
   Validation supplies the shelter split; the ground_* distinction feeds
-  the why-string, not the rates).
+  the why-string, not the rates). [TR-villager-ai-behavior-071]
 - **Build Validation & Navigability** (MVP, downstream): consumes the
   walkability definition (Rules 8–10) as its ground truth for
   reachability/livability checks.
@@ -302,7 +302,7 @@ Core Rule 4. Villagers pause only when game time pauses.)*
   Valley scene.
 - **Save/Load & World Persistence** (Vertical Slice, downstream,
   provisional): serializes per-villager state (position, current activity,
-  claimed job id, owned bed, need levels via Needs GDD).
+  claimed job id, owned bed, need levels via Needs GDD). [TR-villager-ai-behavior-027]
 - **Squad & Combat / Wave Defense** (Vertical Slice, downstream,
   provisional): recruits able villagers into squads — out of scope here;
   flagged so the seam isn't forgotten.
@@ -315,12 +315,12 @@ incorporated.)*
 
 ### F1 — Travel time
 
-`travel_time_game_seconds = path_length_cells / move_speed`
+`travel_time_game_seconds = path_length_cells / move_speed` [TR-villager-ai-behavior-072]
 
 | Variable | Type | Range | Description |
 |----------|------|-------|-------------|
 | `path_length_cells` | float | ≥ 0 | Steps in the computed cell path; orthogonal step = 1.0, diagonal = 1.4. `0` is valid (target is the current/adjacent cell, Rule 5) → immediate arrival |
-| `move_speed` | float | 1.5–6.0, default 3.0 | Cells per game-second. Game-time invariant: warp accelerates wall-clock travel proportionally, never the game-time cost |
+| `move_speed` | float | 1.5–6.0, default 3.0 | Cells per game-second. Game-time invariant: warp accelerates wall-clock travel proportionally, never the game-time cost [TR-villager-ai-behavior-073] |
 
 Example: a 12-step path at 3.0 → 4.0 game-seconds; at 2x warp = 2.0
 wall-clock seconds.
@@ -330,10 +330,10 @@ arrival routinely happens between ticks. Working state is entered
 immediately on arrival (visually), but the first work-progress increment
 is credited at the NEXT tick boundary — no partial-tick credit, ever.
 **This applies to EVERY Traveling→Working transition, including the
-1-cell step between adjacent cells of the same command.** **Clock
+1-cell step between adjacent cells of the same command.** [TR-villager-ai-behavior-029] **Clock
 model (pinned by the 2026-07-10 re-review): ticks are a GLOBAL
 fixed-cadence heartbeat, never a per-villager countdown that resets on
-travel.** A step shorter than one tick period (e.g., 1 cell at default
+travel.** [TR-villager-ai-behavior-074] A step shorter than one tick period (e.g., 1 cell at default
 `move_speed` 3.0 = 0.667 ticks) is absorbed between global ticks — the
 villager arrives before the next scheduled tick and that tick credits
 the new cell with zero waste, so a 9-cell adjacent chain costs exactly
@@ -342,7 +342,7 @@ a `max_ticks_per_frame` discard event** *(caveat added 2026-07-10: Time
 & Tick's stall cap discards excess simulated time permanently, so
 "exactly N ticks" invariants hold only in the no-discard case; consumers
 must count observed ticks, never derive durations from clock arithmetic
-— see the Consumer caveat in time-tick-system.md)*. Only when
+— see the Consumer caveat in time-tick-system.md)*. [TR-villager-ai-behavior-075] Only when
 a step exceeds one tick period (slow `move_speed` tuning, longer travel)
 do skipped global ticks become real overhead. Integration test AC40
 measures the true total at any tuning. (Cross-reference: Building
@@ -360,7 +360,7 @@ Building-System-independent, trivially deterministic secondary key
 the command" cited a rasterization-order artifact Building System only
 actually defines for walls, not floors/roofs — coordinates exist for
 every cell unconditionally)*. The coding standard requires same-result
-every run.
+every run. [TR-villager-ai-behavior-076]
 
 **Approximation contract** (required for implementations to converge):
 candidates are pre-filtered to the nearest `job_candidate_count` (default
@@ -372,7 +372,7 @@ falls through the priority list (Edge Case 7) for this pass;
 `unreachable_retry_ticks` governs later re-attempts. Worst-case pathfind
 attempts per pass are therefore bounded at 15 per villager — never a
 full-queue pathfind (cap added by the 2026-07-10 review; uncapped, a
-512-job queue × 30 villagers permitted ~15,000 attempts in one pass).
+512-job queue × 30 villagers permitted ~15,000 attempts in one pass). [TR-villager-ai-behavior-077]
 
 ### F3 — Wander target selection
 
@@ -380,12 +380,12 @@ full-queue pathfind (cap added by the 2026-07-10 review; uncapped, a
 **bounded flood-fill** of standable, reachable cells within
 `wander_radius` (default 8) of the current position; re-picked every
 `wander_interval` ticks (default 6). Flood-fill guarantees reachability
-by construction (no island targets, no post-hoc path validation).
+by construction (no island targets, no post-hoc path validation). [TR-villager-ai-behavior-078]
 
 **Determinism contract**: the random source is injected (dependency
 injection per coding standards) — production uses the live RNG;
 tests inject a fixed-sequence instance through the same interface, so
-wander tests are deterministic without seeding globals.
+wander tests are deterministic without seeding globals. [TR-villager-ai-behavior-016]
 
 ### F4 — Nudge-aside target selection
 
@@ -401,13 +401,13 @@ re-verified in the re-review — the diametrically opposite cell uniquely
 wins in standard orthogonal geometry)*. Deterministic — the
 same situation always produces the same step. If no adjacent standable
 cell exists, the vacate request fails and the builder's cell stays
-deferred (Building System Edge Case 6).
+deferred (Building System Edge Case 6). [TR-villager-ai-behavior-079]
 
 **Step semantics**: the vacate is a normal walking step at `move_speed`
 (F1 interpolation — never a teleport); the builder's target cell simply
 remains deferred until the step completes and the cell is clear. There
 is no timing promise tied to tick length *(replaces the original "within
-one tick", which broke at `move_speed` < 2.0)*.
+one tick", which broke at `move_speed` < 2.0)*. [TR-villager-ai-behavior-034]
 
 ### Deliberately NOT formulas (and why)
 
@@ -418,7 +418,7 @@ one tick", which broke at `move_speed` < 2.0)*.
   `NavigationServer3D`/navmesh baking; no `AStarGrid3D` class exists in
   Godot 4.7 to use instead). This GDD's walkability rules (Core Rules
   8–9) remain the canonical predicates the graph is built from — see
-  ADR-0007 for the graph-construction mechanism.
+  ADR-0007 for the graph-construction mechanism. [TR-villager-ai-behavior-035]
 - **Need decay/recovery rates, thresholds, ground-sleep penalty** — owned
   by the Needs & Mood GDD (Core Rules 12–13 reference, never define).
 - **Construction progress per tick** — Building System F3.
@@ -431,12 +431,12 @@ one tick", which broke at `move_speed` < 2.0)*.
    re-paths from its current cell. If the target is now unreachable: for a
    job — report to the Building System (orange ghost), release the claim,
    pick the next job (F2); for a bed — fall back to ground sleep (Rule 12);
-   for a wander target — pick a new one (F3).
+   for a wander target — pick a new one (F3). [TR-villager-ai-behavior-036]
 2. **Villager completely walled in** (no legal step from its cell). The
    villager stays put — **villagers never teleport, clip, or despawn to
    escape**. It idles in place with a visible distress cue (treatment via
    Villager Info UI / art bible); urgent sleep falls back to ground sleep
-   in place. The player resolves it by removing blocks. *(A trapped
+   in place. The player resolves it by removing blocks. [TR-villager-ai-behavior-080] *(A trapped
    villager is always the player's own construction — consistent with the
    unreachable-blueprint philosophy: visible, patient, player-fixable.)*
 3. **Two villagers race for the same job.** Claims are atomic: exactly one
@@ -444,7 +444,7 @@ one tick", which broke at `move_speed` < 2.0)*.
    candidate. No error state, no double-work. **Winner determinism**:
    same-tick claim contention resolves in villager processing order
    (stable villager index) — deterministic across runs, matching the
-   F2/F3/F4 determinism contracts *(added 2026-07-10)*.
+   F2/F3/F4 determinism contracts *(added 2026-07-10)*. [TR-villager-ai-behavior-081]
 3b. **Urgent need fires while already Traveling to satisfy that same
    need.** No-op — the villager continues; re-evaluation confirms the
    current activity is already the top priority *(made explicit
@@ -452,11 +452,11 @@ one tick", which broke at `move_speed` < 2.0)*.
    becomes more urgent (lower value) than the one being pursued, the
    standard preemption applies; ties break by a fixed need-priority
    order defined in the Needs GDD when multiple needs land (its schema
-   note).
+   note). [TR-villager-ai-behavior-082]
 4. **Job revoked mid-work** (player undo/removal — Building Edge Case 7).
    The villager stops at the current tick boundary, plays no failure
    reaction (the world simply changed), and re-enters Deciding. Its claim
-   bookkeeping is cleared by the revocation itself.
+   bookkeeping is cleared by the revocation itself. [TR-villager-ai-behavior-083]
 5. **Bed removed while the villager sleeps in it** (Building Edge Case
    11). **Trigger channel** *(pinned 2026-07-10 — "wakes immediately" was
    previously mechanism-free: Rule 10b covers only MOVING villagers and
@@ -467,34 +467,34 @@ one tick", which broke at `move_speed` < 2.0)*.
    `stop_recovery` toward Needs (which credits zero recovery for the
    removal tick, Needs Core Rule 10), and it re-enters Deciding —
    typically resuming sleep on the ground (reduced recovery) or claiming
-   another free bed if one is reachable.
+   another free bed if one is reachable. [TR-villager-ai-behavior-084]
 6. **Bed removed while owned but unoccupied.** Ownership dissolves
    silently; the villager claims a new bed the next time sleep becomes
-   urgent (Rule 11).
+   urgent (Rule 11). [TR-villager-ai-behavior-085]
 7. **All available jobs unreachable.** Every job gets reported (Building
    System shows orange on each); the villager falls through the priority
-   list to Wandering. Retries continue every `unreachable_retry_ticks`.
+   list to Wandering. Retries continue every `unreachable_retry_ticks`. [TR-villager-ai-behavior-086]
 8. **No standable wander cell in radius** (flood-fill returns only the
    current cell). The villager stays in place until the next
-   `wander_interval` re-pick — visually a calm pause, not an error.
+   `wander_interval` re-pick — visually a calm pause, not an error. [TR-villager-ai-behavior-087]
 9. **Tick burst (up to `max_ticks_per_frame = 10`).** Per villager: at
    most one decision re-evaluation per processed tick, work progress per
    the Building System's per-villager burst rule, need recovery per tick.
    A burst never lets a villager make 10 contradictory decisions in one
-   frame — decisions consider state as of each processed tick in order.
+   frame — decisions consider state as of each processed tick in order. [TR-villager-ai-behavior-088]
 10. **Player is in a dungeon (scene transition).** Villagers keep
     simulating in the Valley in real time — building, sleeping, wandering
     (Scene/World Management Core Rule 4). The player returns to visible
-    progress, not a freeze-frame.
+    progress, not a freeze-frame. [TR-villager-ai-behavior-068]
 11. **Save/Load mid-activity** (Vertical Slice, provisional). Serialized
     claimed-job ids and bed ownership are re-validated on load; a claim
     whose job no longer exists dissolves and the villager re-enters
-    Deciding. Never crash on a stale reference.
+    Deciding. Never crash on a stale reference. [TR-villager-ai-behavior-027]
 12. **MVP degenerate case: zero jobs, zero urgent needs.** The single
     villager idles indefinitely, cycling the Rule 7c micro-behaviors —
     an acceptable MVP baseline (revisit at VS with more villagers and
     the day rhythm): varied idling should read as "waiting for a home,"
-    not aimlessness. The MVP playtest verifies this reading (Game Feel
+    not aimlessness. [TR-villager-ai-behavior-089] The MVP playtest verifies this reading (Game Feel
     criteria) — softened from "correct baseline" per the 2026-07-10
     review; the claim is a hypothesis until tested.
 
@@ -539,7 +539,7 @@ one tick", which broke at `move_speed` < 2.0)*.
 | `starting_villager_count` | 1 (MVP) / 5 (VS config) | 1–8 | The world-generation starting roster (Rule 14b). Growth beyond it is Township Progression's (Alpha) |
 | Population ceiling | 20–30 (Full Vision) | design commitment, not a slider | MVP: 1, Vertical Slice: ~5. Raising it beyond 30 invalidates the per-agent AI assumption AND the Pillar-2 individual-legibility promise — treat as a design change, not a tune |
 
-All values data-driven per the coding standard; none are player-facing.
+All values data-driven per the coding standard; none are player-facing. [TR-villager-ai-behavior-090]
 
 ## Visual/Audio Requirements
 
@@ -552,7 +552,7 @@ All values data-driven per the coding standard; none are player-facing.
   and Rule 12's ground sleep) — visible but gentle, cozy-not-alarming
   (Pillar 3); exact treatment to the art bible.
 - **Movement smoothness**: continuous interpolation between cells (F1) —
-  a villager must never visibly teleport or snap cell-to-cell.
+  a villager must never visibly teleport or snap cell-to-cell. [TR-villager-ai-behavior-042]
 - **New assets required** (MVP): one villager model + walk, work, sleep,
   idle animation sets — the largest single asset dependency of the MVP.
 
@@ -601,7 +601,7 @@ distress flags (**trapped, ground-sleeping** — *"no-bed" folded into
 ground-sleeping 2026-07-11, user decision: Rule 12 has no awake-no-bed
 limbo state, so bedlessness becomes visible exactly as ground-sleeping;
 the "no bed" CAUSE still reaches the player verbatim via Needs' why-string
-templates*). The UI renders and never owns.
+templates*). The UI renders and never owns. [TR-villager-ai-behavior-091]
 
 ## Cross-References
 
@@ -625,83 +625,83 @@ Needs & Mood values are mocked at the "need is urgent" boundary per the
 testing standards — those ACs do NOT wait for that GDD.)*
 
 **Decision loop**
-1. **GIVEN** an urgent need and an available job, **WHEN** deciding, **THEN** the need is chosen (Rule 2 priority).
-2. **GIVEN** an available job and no urgent need, **WHEN** deciding, **THEN** the job is chosen over wandering.
-3. **GIVEN** no jobs and no urgent needs, **WHEN** deciding, **THEN** the villager wanders — indefinitely and without error (Rule 2, Edge Case 12).
-4. **GIVEN** a Working villager whose need becomes urgent, **WHEN** the `decision_interval` re-check fires, **THEN** the current tick's work completes, the claim is released, and the need is pursued (Rule 3 graceful preemption).
-5. **GIVEN** any activity ends, **WHEN** Deciding runs, **THEN** the next state is assigned before any further tick is processed — assert the tick counter does not increment between activity-end and state assignment within a single decide() invocation.
+1. **GIVEN** an urgent need and an available job, **WHEN** deciding, **THEN** the need is chosen (Rule 2 priority). [TR-villager-ai-behavior-049]
+2. **GIVEN** an available job and no urgent need, **WHEN** deciding, **THEN** the job is chosen over wandering. [TR-villager-ai-behavior-049]
+3. **GIVEN** no jobs and no urgent needs, **WHEN** deciding, **THEN** the villager wanders — indefinitely and without error (Rule 2, Edge Case 12). [TR-villager-ai-behavior-089]
+4. **GIVEN** a Working villager whose need becomes urgent, **WHEN** the `decision_interval` re-check fires, **THEN** the current tick's work completes, the claim is released, and the need is pursued (Rule 3 graceful preemption). [TR-villager-ai-behavior-050]
+5. **GIVEN** any activity ends, **WHEN** Deciding runs, **THEN** the next state is assigned before any further tick is processed — assert the tick counter does not increment between activity-end and state assignment within a single decide() invocation. [TR-villager-ai-behavior-066]
 
 **Jobs and construction**
-6. **GIVEN** multiple available jobs, **WHEN** selecting, **THEN** the nearest-by-true-path among the straight-line-nearest `job_candidate_count` candidates is chosen; ties break by older commit, then by lexicographic cell coordinates (y, x, z) for same-command ties — deterministic every run (F2, updated wording 2026-07-10 re-review).
-7. **GIVEN** all `job_candidate_count` nearest candidates fail the true-path check, **WHEN** selecting, **THEN** the next `job_candidate_count` candidates are evaluated in turn, deterministically — never a full-queue pathfind (F2 fallback).
-8. **GIVEN** a claimed job, **WHEN** another villager attempts to claim it, **THEN** the claim fails atomically and the loser selects its next candidate (Edge Case 3).
-9. **GIVEN** pathing to a claimed job fails, **WHEN** the failure registers, **THEN** it is reported to the Building System, the claim is released, and the next candidate is tried (Rule 6).
-10. **GIVEN** an unreachable job, **WHEN** `unreachable_retry_ticks` elapse, **THEN** a retry attempt occurs (Rule 6).
-11. **GIVEN** every available job reports unreachable in the same Deciding pass, **WHEN** the priority list completes, **THEN** the villager falls through to Wandering — never stuck in Deciding — and retries resume on cadence (Edge Case 7).
-12. **GIVEN** a villager not in the target or an orthogonally adjacent cell, **WHEN** ticks fire, **THEN** no work progress accrues; **GIVEN** on-site, **THEN** it accrues (Rule 5).
-13. **GIVEN** arrival between two ticks, **WHEN** Working begins, **THEN** the first progress increment is credited at the next tick boundary — never partially (F1 arrival rule).
+6. **GIVEN** multiple available jobs, **WHEN** selecting, **THEN** the nearest-by-true-path among the straight-line-nearest `job_candidate_count` candidates is chosen; ties break by older commit, then by lexicographic cell coordinates (y, x, z) for same-command ties — deterministic every run (F2, updated wording 2026-07-10 re-review). [TR-villager-ai-behavior-076]
+7. **GIVEN** all `job_candidate_count` nearest candidates fail the true-path check, **WHEN** selecting, **THEN** the next `job_candidate_count` candidates are evaluated in turn, deterministically — never a full-queue pathfind (F2 fallback). [TR-villager-ai-behavior-077]
+8. **GIVEN** a claimed job, **WHEN** another villager attempts to claim it, **THEN** the claim fails atomically and the loser selects its next candidate (Edge Case 3). [TR-villager-ai-behavior-081]
+9. **GIVEN** pathing to a claimed job fails, **WHEN** the failure registers, **THEN** it is reported to the Building System, the claim is released, and the next candidate is tried (Rule 6). [TR-villager-ai-behavior-055]
+10. **GIVEN** an unreachable job, **WHEN** `unreachable_retry_ticks` elapse, **THEN** a retry attempt occurs (Rule 6). [TR-villager-ai-behavior-055]
+11. **GIVEN** every available job reports unreachable in the same Deciding pass, **WHEN** the priority list completes, **THEN** the villager falls through to Wandering — never stuck in Deciding — and retries resume on cadence (Edge Case 7). [TR-villager-ai-behavior-086]
+12. **GIVEN** a villager not in the target or an orthogonally adjacent cell, **WHEN** ticks fire, **THEN** no work progress accrues; **GIVEN** on-site, **THEN** it accrues (Rule 5). [TR-villager-ai-behavior-054]
+13. **GIVEN** arrival between two ticks, **WHEN** Working begins, **THEN** the first progress increment is credited at the next tick boundary — never partially (F1 arrival rule). [TR-villager-ai-behavior-029]
 
 **Movement and walkability**
-14. **GIVEN** a cell without 3-cell vertical clearance (`villager_clearance`), **WHEN** standability is evaluated, **THEN** it is not standable (Rule 8).
-15. **GIVEN** two adjacent standable cells with height difference 1, **WHEN** stepping, **THEN** the step is legal; **GIVEN** difference ≥ 2, **THEN** illegal (Rule 9).
-16. **GIVEN** a diagonal step whose flanking orthogonal cells are blocked, **WHEN** pathing, **THEN** the diagonal is not used (Rule 9).
-17. **GIVEN** a Planned blueprint cell in the path, **WHEN** pathing, **THEN** the cell is treated as passable (Building Core Rule 14b).
-18. **GIVEN** a Voxel World write blocks the current path mid-travel, **WHEN** the write signal fires, **THEN** the villager re-paths from its current cell (Edge Case 1).
-19. **GIVEN** a Traveling villager whose target becomes invalid before arrival (bed destroyed, job voided) with no re-path possible, **WHEN** detected, **THEN** it exits to Deciding and re-selects — never keeps traveling toward a dead target (state table).
-20. **GIVEN** a sequence of injected `game_delta` values during Traveling (including a warped value), **WHEN** position is sampled after each simulated movement update, **THEN** per-step displacement never exceeds `move_speed × game_delta` — property-based check over ≥5 delta samples, driven against the movement-update function directly (no real engine frames needed).
-21. **GIVEN** pause, **WHEN** real time passes, **THEN** position is unchanged; **GIVEN** 2x warp, **THEN** wall-clock travel halves while game-time cost is constant (F1 invariance).
+14. **GIVEN** a cell without 3-cell vertical clearance (`villager_clearance`), **WHEN** standability is evaluated, **THEN** it is not standable (Rule 8). [TR-villager-ai-behavior-009]
+15. **GIVEN** two adjacent standable cells with height difference 1, **WHEN** stepping, **THEN** the step is legal; **GIVEN** difference ≥ 2, **THEN** illegal (Rule 9). [TR-villager-ai-behavior-010]
+16. **GIVEN** a diagonal step whose flanking orthogonal cells are blocked, **WHEN** pathing, **THEN** the diagonal is not used (Rule 9). [TR-villager-ai-behavior-010]
+17. **GIVEN** a Planned blueprint cell in the path, **WHEN** pathing, **THEN** the cell is treated as passable (Building Core Rule 14b). [TR-villager-ai-behavior-009]
+18. **GIVEN** a Voxel World write blocks the current path mid-travel, **WHEN** the write signal fires, **THEN** the villager re-paths from its current cell (Edge Case 1). [TR-villager-ai-behavior-036]
+19. **GIVEN** a Traveling villager whose target becomes invalid before arrival (bed destroyed, job voided) with no re-path possible, **WHEN** detected, **THEN** it exits to Deciding and re-selects — never keeps traveling toward a dead target (state table). [TR-villager-ai-behavior-092]
+20. **GIVEN** a sequence of injected `game_delta` values during Traveling (including a warped value), **WHEN** position is sampled after each simulated movement update, **THEN** per-step displacement never exceeds `move_speed × game_delta` — property-based check over ≥5 delta samples, driven against the movement-update function directly (no real engine frames needed). [TR-villager-ai-behavior-093]
+21. **GIVEN** pause, **WHEN** real time passes, **THEN** position is unchanged; **GIVEN** 2x warp, **THEN** wall-clock travel halves while game-time cost is constant (F1 invariance). [TR-villager-ai-behavior-073]
 
 **Sleep and home**
-22. **GIVEN** a first urgent sleep need and an unowned reachable bed, **WHEN** deciding, **THEN** the villager claims that bed permanently (move-in, Rule 11).
-23. **GIVEN** an owned reachable bed and urgent sleep, **WHEN** deciding, **THEN** the villager sleeps in its own bed.
-24. **GIVEN** no reachable bed and urgent sleep, **WHEN** deciding, **THEN** the villager sleeps on the ground at its current cell and reports the correct ground source enum — `ground_no_bed_owned` if it owns no bed, `ground_bed_unreachable` if it owns one it cannot reach (Rule 12; enum per needs-mood Core Rules 4/10, updated at the 2026-07-10 verification pass from the pre-widening "reduced-recovery flag"; rates mocked).
-25. **GIVEN** the sleep need restored above the wake threshold (mocked), **WHEN** the tick fires, **THEN** the villager wakes and re-enters Deciding (Rule 13).
-26. **GIVEN** a bed removed while the villager sleeps in it, **WHEN** the removal registers, **THEN** the villager wakes immediately and ownership dissolves (Edge Case 5).
-27. **GIVEN** an owned but unoccupied bed removed, **WHEN** the removal registers, **THEN** ownership dissolves and a new bed is claimed at the next urgent sleep (Edge Case 6).
+22. **GIVEN** a first urgent sleep need and an unowned reachable bed, **WHEN** deciding, **THEN** the villager claims that bed permanently (move-in, Rule 11). [TR-villager-ai-behavior-061]
+23. **GIVEN** an owned reachable bed and urgent sleep, **WHEN** deciding, **THEN** the villager sleeps in its own bed. [TR-villager-ai-behavior-062]
+24. **GIVEN** no reachable bed and urgent sleep, **WHEN** deciding, **THEN** the villager sleeps on the ground at its current cell and reports the correct ground source enum — `ground_no_bed_owned` if it owns no bed, `ground_bed_unreachable` if it owns one it cannot reach (Rule 12; enum per needs-mood Core Rules 4/10, updated at the 2026-07-10 verification pass from the pre-widening "reduced-recovery flag"; rates mocked). [TR-villager-ai-behavior-062]
+25. **GIVEN** the sleep need restored above the wake threshold (mocked), **WHEN** the tick fires, **THEN** the villager wakes and re-enters Deciding (Rule 13). [TR-villager-ai-behavior-063]
+26. **GIVEN** a bed removed while the villager sleeps in it, **WHEN** the removal registers, **THEN** the villager wakes immediately and ownership dissolves (Edge Case 5). [TR-villager-ai-behavior-084]
+27. **GIVEN** an owned but unoccupied bed removed, **WHEN** the removal registers, **THEN** ownership dissolves and a new bed is claimed at the next urgent sleep (Edge Case 6). [TR-villager-ai-behavior-085]
 
 **Wandering**
-28. **GIVEN** any wander target selection, **WHEN** evaluated, **THEN** the target is reachable by construction — never an island cell (F3 flood-fill).
-29. **GIVEN** wander targets over time, **WHEN** sampled, **THEN** all lie within `wander_radius` and world bounds (F3).
-30. **GIVEN** an injected fixed-sequence random source, **WHEN** wandering runs twice from the same state, **THEN** the wander paths are identical (F3 determinism).
-31. **GIVEN** a flood-fill wander search returning only the current cell, **WHEN** `wander_interval` elapses, **THEN** the villager stays in place without error and re-attempts at the next interval (Edge Case 8).
+28. **GIVEN** any wander target selection, **WHEN** evaluated, **THEN** the target is reachable by construction — never an island cell (F3 flood-fill). [TR-villager-ai-behavior-078]
+29. **GIVEN** wander targets over time, **WHEN** sampled, **THEN** all lie within `wander_radius` and world bounds (F3). [TR-villager-ai-behavior-078]
+30. **GIVEN** an injected fixed-sequence random source, **WHEN** wandering runs twice from the same state, **THEN** the wander paths are identical (F3 determinism). [TR-villager-ai-behavior-016]
+31. **GIVEN** a flood-fill wander search returning only the current cell, **WHEN** `wander_interval` elapses, **THEN** the villager stays in place without error and re-attempts at the next interval (Edge Case 8). [TR-villager-ai-behavior-087]
 
 **Lifecycle and edge behavior**
-32. **GIVEN** a villager with no legal step from its cell, **WHEN** any game time passes, **THEN** it remains in place with the distress flag set and never teleports (Edge Case 2).
-33. **GIVEN** a job revoked mid-work, **WHEN** the revocation registers, **THEN** the villager stops at the tick boundary and re-enters Deciding without error (Edge Case 4).
-34. **GIVEN** an idle occupant in a builder's target cell, **WHEN** the vacate request fires, **THEN** the occupant steps to the F4 target within one tick; **GIVEN** a Working/Sleeping occupant, **THEN** it is not interrupted (Rule 7).
-35. **GIVEN** a vacate-target tie on height difference and distance, **WHEN** resolved, **THEN** the fixed N/E/S/W scan order breaks the tie identically every run (F4 determinism).
-36. **GIVEN** a tick burst of `max_ticks_per_frame`, **WHEN** processed, **THEN** at most one decision re-evaluation occurs per processed tick, in order (Edge Case 9).
-37. **GIVEN** a scene-transition integration test (`tests/integration/scene_transition/`) driving mocked Scene/World Management transition signals, **WHEN** the transition completes, **THEN** villager tick-driven activities have advanced exactly as many ticks as elapsed Valley game time — continuity verified numerically, not by observation (Edge Case 10).
-38. **[PROVISIONAL — Save/Load undesigned, VS tier]** **GIVEN** a deserialized claimed-job or bed-owner id that no longer exists, **WHEN** load completes, **THEN** the stale claim dissolves and the villager enters Deciding — never crashes (Edge Case 11; testable now against a mocked serializer contract).
-39. **[PROVISIONAL — milestone-gated]** **GIVEN** the Vertical Slice population (~5) and the Full Vision ceiling (30), **WHEN** simulating at 1x and 3x warp, **THEN** the 16.6ms frame budget is maintained — enforced at those milestones, never a blocker for MVP Done (population ceiling).
+32. **GIVEN** a villager with no legal step from its cell, **WHEN** any game time passes, **THEN** it remains in place with the distress flag set and never teleports (Edge Case 2). [TR-villager-ai-behavior-080]
+33. **GIVEN** a job revoked mid-work, **WHEN** the revocation registers, **THEN** the villager stops at the tick boundary and re-enters Deciding without error (Edge Case 4). [TR-villager-ai-behavior-083]
+34. **GIVEN** an idle occupant in a builder's target cell, **WHEN** the vacate request fires, **THEN** the occupant steps to the F4 target within one tick; **GIVEN** a Working/Sleeping occupant, **THEN** it is not interrupted (Rule 7). [TR-villager-ai-behavior-056]
+35. **GIVEN** a vacate-target tie on height difference and distance, **WHEN** resolved, **THEN** the fixed N/E/S/W scan order breaks the tie identically every run (F4 determinism). [TR-villager-ai-behavior-079]
+36. **GIVEN** a tick burst of `max_ticks_per_frame`, **WHEN** processed, **THEN** at most one decision re-evaluation occurs per processed tick, in order (Edge Case 9). [TR-villager-ai-behavior-088]
+37. **GIVEN** a scene-transition integration test (`tests/integration/scene_transition/`) driving mocked Scene/World Management transition signals, **WHEN** the transition completes, **THEN** villager tick-driven activities have advanced exactly as many ticks as elapsed Valley game time — continuity verified numerically, not by observation (Edge Case 10). [TR-villager-ai-behavior-068]
+38. **[PROVISIONAL — Save/Load undesigned, VS tier]** **GIVEN** a deserialized claimed-job or bed-owner id that no longer exists, **WHEN** load completes, **THEN** the stale claim dissolves and the villager enters Deciding — never crashes (Edge Case 11; testable now against a mocked serializer contract). [TR-villager-ai-behavior-027]
+39. **[PROVISIONAL — milestone-gated]** **GIVEN** the Vertical Slice population (~5) and the Full Vision ceiling (30), **WHEN** simulating at 1x and 3x warp, **THEN** the 16.6ms frame budget is maintained — enforced at those milestones, never a blocker for MVP Done (population ceiling). [TR-villager-ai-behavior-041]
 
 **Added by the Building System re-review (2026-07-10) — these fulfill Building AC21/36b's promised integration coverage**
-40. **GIVEN** a real villager and one real queued blueprint cell, **WHEN** it claims the job, travels to site, and accumulates ticks to completion, **THEN** the cell transitions to Built via the Building System's write, the job is removed from the queue, and the villager re-enters Deciding — the full claim→build→report cycle (integration test; closes Building System AC21).
-40b. **GIVEN** a builder on-site with its target cell occupied and construction deferred, **WHEN** the occupant vacates via F4, **THEN** the target cell becomes free and construction progress resumes on the next tick without re-claiming the job (occupied→deferred→resumed transition; complements Building AC36 and this GDD's AC34).
+40. **GIVEN** a real villager and one real queued blueprint cell, **WHEN** it claims the job, travels to site, and accumulates ticks to completion, **THEN** the cell transitions to Built via the Building System's write, the job is removed from the queue, and the villager re-enters Deciding — the full claim→build→report cycle (integration test; closes Building System AC21). [TR-villager-ai-behavior-094]
+40b. **GIVEN** a builder on-site with its target cell occupied and construction deferred, **WHEN** the occupant vacates via F4, **THEN** the target cell becomes free and construction progress resumes on the next tick without re-claiming the job (occupied→deferred→resumed transition; complements Building AC36 and this GDD's AC34). [TR-villager-ai-behavior-095]
 *(Harness note for AC40/40b: `tests/integration/villager_ai/build_job_cycle_test.gd`, using real Building System components — both GDDs are Designed; no playtest-doc fallback.)*
 
 **Added by the 2026-07-10 design review**
-41. **GIVEN** a Working villager with no urgent need, **WHEN** the `decision_interval` re-check fires, **THEN** it remains Working with no state change and no job re-selection — the periodic re-check is a preemption check, never an implicit interruption (Rule 2 + Rule 4 claim-stickiness).
-42. **GIVEN** a builder requests a vacate on a cell occupied by a villager mid-work on its own claimed job, **WHEN** the request resolves, **THEN** it is deferred and the occupant's claim is never revoked (Rule 7 negative guarantee).
-43. **GIVEN** two villagers with simultaneous urgent sleep targeting the same unowned reachable bed, **WHEN** claims resolve, **THEN** exactly one succeeds atomically (winner by stable villager processing order — Edge Case 3) and the loser falls back per Rule 12.
-44. **GIVEN** a villager with an owned reachable bed AND a closer unowned free bed, **WHEN** urgent sleep triggers Deciding, **THEN** it goes to its owned bed — never the closer unowned one (Rule 12 owned-bed preference).
-45. **GIVEN** a standable cell exactly at `wander_radius` distance, **WHEN** the flood-fill runs, **THEN** it is included; one cell beyond, excluded — inclusive boundary, deterministic (F3).
-46a. **GIVEN** `jobs_before_break` consecutive completed jobs, **WHEN** the last completes, **THEN** the villager enters Breather (Rule 7b entry).
-46b. **GIVEN** an active Breather and available jobs, **WHEN** ticks fire, **THEN** no job is claimed for the full `breather_duration_ticks` (claim suppression).
-46c. **GIVEN** an active Breather and a mocked urgent need, **WHEN** the need registers, **THEN** the Breather is preempted normally (needs win).
-47. **GIVEN** `starting_villager_count` = N (mocked config), **WHEN** world generation completes, **THEN** exactly N villagers exist at valid standable cells (Rule 14b).
+41. **GIVEN** a Working villager with no urgent need, **WHEN** the `decision_interval` re-check fires, **THEN** it remains Working with no state change and no job re-selection — the periodic re-check is a preemption check, never an implicit interruption (Rule 2 + Rule 4 claim-stickiness). [TR-villager-ai-behavior-052]
+42. **GIVEN** a builder requests a vacate on a cell occupied by a villager mid-work on its own claimed job, **WHEN** the request resolves, **THEN** it is deferred and the occupant's claim is never revoked (Rule 7 negative guarantee). [TR-villager-ai-behavior-056]
+43. **GIVEN** two villagers with simultaneous urgent sleep targeting the same unowned reachable bed, **WHEN** claims resolve, **THEN** exactly one succeeds atomically (winner by stable villager processing order — Edge Case 3) and the loser falls back per Rule 12. [TR-villager-ai-behavior-081]
+44. **GIVEN** a villager with an owned reachable bed AND a closer unowned free bed, **WHEN** urgent sleep triggers Deciding, **THEN** it goes to its owned bed — never the closer unowned one (Rule 12 owned-bed preference). [TR-villager-ai-behavior-062]
+45. **GIVEN** a standable cell exactly at `wander_radius` distance, **WHEN** the flood-fill runs, **THEN** it is included; one cell beyond, excluded — inclusive boundary, deterministic (F3). [TR-villager-ai-behavior-078]
+46a. **GIVEN** `jobs_before_break` consecutive completed jobs, **WHEN** the last completes, **THEN** the villager enters Breather (Rule 7b entry). [TR-villager-ai-behavior-057]
+46b. **GIVEN** an active Breather and available jobs, **WHEN** ticks fire, **THEN** no job is claimed for the full `breather_duration_ticks` (claim suppression). [TR-villager-ai-behavior-057]
+46c. **GIVEN** an active Breather and a mocked urgent need, **WHEN** the need registers, **THEN** the Breather is preempted normally (needs win). [TR-villager-ai-behavior-057]
+47. **GIVEN** `starting_villager_count` = N (mocked config), **WHEN** world generation completes, **THEN** exactly N villagers exist at valid standable cells (Rule 14b). [TR-villager-ai-behavior-065]
 
 **Added by the 2026-07-10 re-review**
-48. **GIVEN** a Breather with no preemption, **WHEN** `breather_duration_ticks` elapse, **THEN** the villager returns to Deciding and job-claiming resumes on the next Deciding pass (Breather normal exit).
-49. **GIVEN** a Voxel World write NOT intersecting a moving villager's remaining movement cells or their clearance envelope, **WHEN** the signal fires, **THEN** zero re-path evaluations occur for that villager — assert call-count == 0 (Rule 10b negative case; the filter's entire perf purpose).
-50. **GIVEN** an occupant with at least one strictly-farther and one strictly-closer standable adjacent cell relative to the requester, **WHEN** vacating via F4, **THEN** the chosen cell strictly increases Chebyshev distance to the requester — never decreases (F4 direction-correctness; guards the corrected inversion).
+48. **GIVEN** a Breather with no preemption, **WHEN** `breather_duration_ticks` elapse, **THEN** the villager returns to Deciding and job-claiming resumes on the next Deciding pass (Breather normal exit). [TR-villager-ai-behavior-057]
+49. **GIVEN** a Voxel World write NOT intersecting a moving villager's remaining movement cells or their clearance envelope, **WHEN** the signal fires, **THEN** zero re-path evaluations occur for that villager — assert call-count == 0 (Rule 10b negative case; the filter's entire perf purpose). [TR-villager-ai-behavior-012]
+50. **GIVEN** an occupant with at least one strictly-farther and one strictly-closer standable adjacent cell relative to the requester, **WHEN** vacating via F4, **THEN** the chosen cell strictly increases Chebyshev distance to the requester — never decreases (F4 direction-correctness; guards the corrected inversion). [TR-villager-ai-behavior-079]
 
 *(Evidence-tier note per the project test table: AC1–8, 10–36, 41–50 are
 blocking headless unit tests (incl. the 46a/b/c split); AC9, 37, 40, 40b
 are blocking integration tests; AC38 is provisional-integration
 (Save/Load); AC39 is formally an Advisory/Performance criterion gated at
 VS/Full-Vision milestones — not part of the Logic gate, re-tiered
-2026-07-10.)*
+2026-07-10.)* [TR-villager-ai-behavior-096]
 
 ## Open Questions
 
@@ -744,7 +744,7 @@ VS/Full-Vision milestones — not part of the Logic gate, re-tiered
    before the next frame's interpolation advances further. This same
    `current_cell` also serves F4 targeting and Edge Case 2 walled-in
    queries identically (see building-system.md OQ 3b for the reciprocal
-   note); (b) **job-queue scan cost** — now bounded
+   note) [TR-villager-ai-behavior-046]; (b) **job-queue scan cost** — now bounded
    per-pass by `max_selection_candidates` (15), but aggregate cost across
    30 villagers remains the ADR's to architect; (c) **wander flood-fill
    aggregate cost** at the population ceiling (small, but include it in
@@ -752,7 +752,7 @@ VS/Full-Vision milestones — not part of the Logic gate, re-tiered
    synthetic 30-villager stress case** (unreachable-job-dense + parallel
    construction write-storm at 3x warp) even though VS ships with 5 —
    cheap insurance against discovering a structural flaw after Alpha
-   content lands (2026-07-10 review recommendation). Re-review
+   content lands (2026-07-10 review recommendation). [TR-villager-ai-behavior-047] Re-review
    additions to the stress scope: synchronized mass-Deciding spikes
    (Rule 10c's stagger under test), Breather step-away/bed-drift
    pathing costs, and Rule 10b's widened all-movement filter scope.

@@ -64,21 +64,21 @@ a manage-everything dashboard, or Sims needs-micromanagement.
 
 1. **Selection** exists only in Idle (no build tool armed): a click
    whose pick hits a villager selects them; a click hitting nothing
-   deselects; Esc deselects; clicking another villager switches. While
+   deselects; Esc deselects; clicking another villager switches. [TR-villager-info-ui-028] While
    any build tool is armed, all clicks belong to the Building pipeline
    — selection is untouchable (no accidental villager-clicks
-   mid-build). **Two routing clauses** *(added 2026-07-11 review)*:
+   mid-build). [TR-villager-info-ui-001] **Two routing clauses** *(added 2026-07-11 review)*:
    - **HUD-hover gate**: the villager-hit query honors the SAME shared
      world-pick hover-suppression flag Building UI's Rule 11 defines —
      while the cursor hovers any HUD element, the query does not run:
      a click over the HUD can neither select a villager rendered
      behind it nor deselect (the HUD consumes that click). One flag,
      every world-pick consumer (reciprocal generalization added to
-     Building UI Rule 11).
+     Building UI Rule 11). [TR-villager-info-ui-002]
    - **Esc routing**: if a Building UI element holds keyboard focus (a
      focused toast, the expanded anchor — its Rule 9b), Esc first
      releases THAT focus; only an Esc pressed with no HUD focus
-     deselects the villager. Deterministic two-step, no double-fire.
+     deselects the villager. Deterministic two-step, no double-fire. [TR-villager-info-ui-029]
    - **Keyboard-selection exemption** *(explicit, user decision
      2026-07-11)*: selecting a villager is 3D spatial targeting, a
      different class from HUD chrome — MVP ships selection as
@@ -86,7 +86,7 @@ a manage-everything dashboard, or Sims needs-micromanagement.
      is mouse-only" commitment (Building UI Rule 9b), not an oversight.
      A keyboard selection path (select-cycle / focus-nearest-distressed)
      is committed to the VS revision alongside the roster view (Open
-     Question 1).
+     Question 1). [TR-villager-info-ui-030]
 2. **The panel** (right side, compact) shows: name, current activity
    as a player-readable label (**all SIX AI states** — Deciding →
    "Thinking", Traveling → "On the way", Working → "Working", Sleeping
@@ -98,7 +98,7 @@ a manage-everything dashboard, or Sims needs-micromanagement.
    completeness — near-invisible at MVP, staggered-visible at scale
    per Villager AI Rule 10c*), one bar per active need (MVP: sleep),
    the mood-band icon (3 states), the why-string (Rule 2b), and the
-   distress icon-flag when active.
+   distress icon-flag when active. [TR-villager-info-ui-031]
 2b. **The why-slot is ONE slot** *(added 2026-07-11 — the precedence
    was consumed "verbatim" but never restated)*: it shows text
    whenever a need is urgent or mood is not Happy, and its CONTENT is
@@ -108,19 +108,19 @@ a manage-everything dashboard, or Sims needs-micromanagement.
    panel's distress flag is the ICON companion to that slot, never a
    second competing text: when a distress flag is active, the why-slot
    text IS the distress-derived template (Rule 11's "never directs to
-   the wrong fix" guarantee).
+   the wrong fix" guarantee). [TR-villager-info-ui-032]
 3. **Live mirror — state over events** *(clarified 2026-07-11 — the
    old "via their signals" wording contradicted AC17)*: while
    selected, the panel **re-reads upstream state directly each update
    frame** (raw delta — readable during pause); upstream signals
    (band-change, despawn, distress) are wake/dirty hints and event
    triggers, never the source of displayed values — no cached copies
-   (the same state-over-events consumption model Needs established).
+   (the same state-over-events consumption model Needs established). [TR-villager-info-ui-033]
    It holds selection when the villager walks off-screen (no camera
    follow in MVP — Open Question). Selection is the only state this
    system owns — held as a stable villager id/handle whose identity
    stability across Suspended transitions is `[assumption]` until
-   Villager AI's identity work lands (its OQ 5; see Open Questions).
+   Villager AI's identity work lands (its OQ 5; see Open Questions). [TR-villager-info-ui-010]
 4. **Overhead distress icon**: villagers with an active distress flag
    (**trapped, ground-sleeping** — Villager AI Edge Case 2 / Rule 12)
    show a subtle icon above their head, visible unselected,
@@ -134,18 +134,18 @@ a manage-everything dashboard, or Sims needs-micromanagement.
    currently-fine bedless villager would violate "only genuine
    distress earns an icon" (reciprocal fix applied to Villager AI's
    UI Requirements flag list). No permanent mood icons over heads
-   (Pillar 4 calm; the panel is where mood lives). *Implementation
+   (Pillar 4 calm; the panel is where mood lives). [TR-villager-info-ui-034] *Implementation
    note (parallel to Building UI's Edge Case 6 pattern): one manager
    drives all N icons — one Suspended signal hides all, one iteration,
    never N independent subscriptions; distress flags are state-derived
    conditions, not pulses, so flicker is not expected — if playtest
    shows boundary flicker, a hold-time knob is the remedy (Open
-   Questions).*
+   Questions).* [TR-villager-info-ui-035]
 5. **Why-strings pass through verbatim** from Needs & Mood (its UI
-   contract) — this UI never composes its own explanations.
+   contract) — this UI never composes its own explanations. [TR-villager-info-ui-036]
 6. The panel design assumes N villagers (VS ~5, ceiling 20–30) from
    day one — selection is per-villager; only the roster/list view is
-   deferred (Open Questions).
+   deferred (Open Questions). [TR-villager-info-ui-037]
 
 ### States and Transitions
 
@@ -153,7 +153,7 @@ a manage-everything dashboard, or Sims needs-micromanagement.
 |-------|-------|------|----------|
 | Unselected | Boot, deselect, villager despawn | Villager clicked (Idle mode) | No panel; overhead distress icons still visible |
 | Selected(v) | Click hit villager v | Deselect / other villager / Suspended | Panel live-mirrors v; overhead icons unchanged |
-| Suspended | Camera & Input Suspended | Reactivation | Panel + icons hidden; selection retained through the transition |
+| Suspended | Camera & Input Suspended | Reactivation | Panel + icons hidden; selection retained through the transition [TR-villager-info-ui-038] |
 
 ### Interactions with Other Systems
 
@@ -165,7 +165,7 @@ a manage-everything dashboard, or Sims needs-micromanagement.
 - **Camera & Input** (upstream, MVP): mouse-ray + click actions in
   Idle; Suspended propagation. Selection introduces no new InputMap
   actions (reuses the existing click action in the unclaimed Idle
-  niche).
+  niche). [TR-villager-info-ui-039]
 - **Building UI** (MVP sibling): mode coordination — armed tool ⇒
   Building pipeline owns clicks; Idle ⇒ this system may claim
   villager hits. One rule, no overlap.
@@ -184,12 +184,12 @@ the upstream contracts this UI reads but never computes.
 ## Edge Cases
 
 1. **Selected villager despawns** (none in MVP; waves later) → graceful
-   deselect, panel closes — never a stale panel.
+   deselect, panel closes — never a stale panel. [TR-villager-info-ui-040]
 2. **Ray hits villager and block** → nearest hit wins by ray-parametric
    distance in world units; "tie" is defined by an explicit tolerance —
    `|t_villager − t_block| < pick_tie_epsilon` (small constant,
    `[assumption]` until implementation) → the villager wins (the
-   interactive entity). *(Re-specified 2026-07-11: floating-point ties
+   interactive entity). [TR-villager-info-ui-015] *(Re-specified 2026-07-11: floating-point ties
    never occur naturally across two query mechanisms — the old wording
    was mock-only-testable.)* **Query separation**: villager hit-testing
    is a dedicated physics query on a dedicated villager collision
@@ -198,22 +198,22 @@ the upstream contracts this UI reads but never computes.
    voxel-world's open picking question); the two hits are merged by
    comparing their world-unit distances. Building's own placement
    raycast ignores the villager layer (no ghost flicker from villagers
-   walking through the pick).
+   walking through the pick). [TR-villager-info-ui-014]
 3. **Several villagers along the ray** → nearest wins, deterministic
    (same parametric-distance rule; equal-distance villagers break ties
    by stable villager processing order, matching Villager AI's
-   determinism convention).
+   determinism convention). [TR-villager-info-ui-016]
 4. **Selection during pause** → fully functional (raw delta); the
-   frozen villager's panel reads normally.
+   frozen villager's panel reads normally. [TR-villager-info-ui-041]
 5. **Distress while selected** → overhead icon and panel flag derive
-   from the same signal — they can never disagree.
+   from the same signal — they can never disagree. [TR-villager-info-ui-042]
 6. **Suspended during selection** → selection retained through the
-   transition (the villager kept simulating); panel restores on return.
+   transition (the villager kept simulating); panel restores on return. [TR-villager-info-ui-038]
 7. **Build tool armed while a villager is selected** (key 1–5) → the
    panel closes and selection clears — clean mode switch, mirroring
-   Rule 1's exclusivity.
+   Rule 1's exclusivity. [TR-villager-info-ui-043]
 8. **Why-string exceeds panel width** → wraps, never silently truncates
-   (Pillar 4).
+   (Pillar 4). [TR-villager-info-ui-044]
 9. **Many distressed villagers far away** → overhead icons may overlap
    at distance; accepted in MVP (clustering → VS+, Open Questions).
 10. **Villager behind the bottom toolbar** → overhead icon may be
@@ -252,16 +252,16 @@ Mood-band icons (3) and the overhead distress icon are
 **differentiated by icon SHAPE + label/tooltip, never by hue alone**
 (the Visual Direction Note's §4 day-one pairing rule — the same
 commitment the sibling GDDs carry; "colorblind-safe" is the mechanism,
-not just a label). The distress icon delivers Villager AI's
+not just a label). [TR-villager-info-ui-045] The distress icon delivers Villager AI's
 distress-cue requirement — gentle, cozy-not-alarming per Pillar 3. A
 **pre-click hover affordance is required** (cursor change or subtle
 highlight when the pointer is over a selectable villager — exact
 treatment to the UX spec; without it the "curiosity test" bets on
-blind discovery), plus a subtle selection outline on the villager
-(outline mechanism → godot-shader-specialist at implementation), and
+blind discovery) [TR-villager-info-ui-046], plus a subtle selection outline on the villager
+(outline mechanism → godot-shader-specialist at implementation) [TR-villager-info-ui-047], and
 the panel in the warm UI style. Audio: a soft select sound only (a
 distress-onset audio cue is deferred to the audio spec — Open
-Questions). **New assets required**: 3 mood icons (distinct
+Questions). [TR-villager-info-ui-048] **New assets required**: 3 mood icons (distinct
 silhouettes), distress icon, hover-affordance treatment,
 selection-outline treatment.
 
@@ -285,7 +285,7 @@ This GDD *is* the UI — pointer forward:
 > minimal-by-design with room to grow (reserved space, generous
 > whitespace), never as an incomplete stat sheet; and the pre-click
 > hover affordance (Visual/Audio Requirements) is a required
-> deliverable, not optional polish.
+> deliverable, not optional polish. [TR-villager-info-ui-046]
 
 ## Cross-References
 
@@ -306,36 +306,36 @@ incorporated. The 2026-07-11 full design review rewrote AC6 (six
 states) and added AC21–26. Split per the project's test-evidence
 table.)*
 
-**Blocking — headless unit tests**
-1. **GIVEN** Idle mode and a mocked villager hit, **WHEN** click fires, **THEN** that villager is selected and the panel opens.
-2. **GIVEN** Idle and a mocked empty hit, **WHEN** click fires, **THEN** selection clears; **GIVEN** Esc, **THEN** likewise.
-3. **GIVEN** villager A selected and a hit on B, **WHEN** click fires, **THEN** selection switches to B in one step.
-4. **GIVEN** any build tool armed (mocked), **WHEN** a click fires, **THEN** no selection change — clicks belong to Building (Rule 1).
-5. **GIVEN** a selected villager and a mocked tool-arm event, **THEN** the panel closes and selection clears (Edge Case 7).
-6. **GIVEN** each of the SIX AI activity states (mocked) in turn — Deciding, Traveling, Working, Sleeping, **Breather**, Wandering, **WHEN** selected, **THEN** the panel shows the correct distinct player-readable label for each; **WHEN** the state changes while selected, **THEN** the label updates the same frame (Rule 2, full six-way mapping — *corrected 2026-07-11 from "five": Breather was untested*; Deciding's label is a mapping-completeness check, not an expected player observation at MVP).
-7. **GIVEN** mocked need values, **WHEN** rendered, **THEN** each active need bar shows the raw 0–100 value — no UI-side scaling or smoothing.
-8. **GIVEN** a mood band change event, **WHEN** received, **THEN** the band icon updates (band signal only).
-9. **GIVEN** mood not Happy or a need urgent, **THEN** the why-string renders verbatim from the Needs payload; **GIVEN** mood Happy AND no urgent need, **THEN** the why-string area is empty/hidden (Rule 2 both directions).
-10. **GIVEN** a mocked distress flag set on any villager (selected or not), **THEN** its overhead icon activates; **WHEN** cleared, **THEN** it deactivates (Rule 4).
-11. **GIVEN** a distressed villager selected, **THEN** panel flag and overhead icon reflect the same source state — single source, no divergence (Edge Case 5).
-12. **GIVEN** pause (mocked), **THEN** click-to-select, panel value updates, and Esc-deselect all still fire on the paused frame — raw delta (Edge Case 4).
-13. **GIVEN** Suspended active with a selection, **THEN** panel and overhead icons are hidden while the selection value persists unchanged; **WHEN** reactivated, **THEN** the same villager is selected and the panel restores (Edge Case 6 + state table).
-14. **GIVEN** a selected villager despawn event, **THEN** selection clears gracefully — no stale panel, no error (Edge Case 1).
-15. **GIVEN** a mocked ray with a villager and a nearer block, **THEN** the block wins; **GIVEN** overlap/tie, **THEN** the villager wins (Edge Case 2).
-16. **GIVEN** a mocked ray hitting villagers A/B/C at different distances, **THEN** the nearest is selected — deterministic and repeatable (Edge Case 3).
-17. **GIVEN** 20+ mocked villagers, **WHEN** selecting #1 then #17, **THEN** exactly one villager is ever selected and every panel value reflects live upstream state — mutating the upstream mock directly (bypassing signals) never leaves a stale local copy on reselect (Rules 3/6: selection is the ONLY owned state).
+**Blocking — headless unit tests** [TR-villager-info-ui-023]
+1. **GIVEN** Idle mode and a mocked villager hit, **WHEN** click fires, **THEN** that villager is selected and the panel opens. [TR-villager-info-ui-028]
+2. **GIVEN** Idle and a mocked empty hit, **WHEN** click fires, **THEN** selection clears; **GIVEN** Esc, **THEN** likewise. [TR-villager-info-ui-028]
+3. **GIVEN** villager A selected and a hit on B, **WHEN** click fires, **THEN** selection switches to B in one step. [TR-villager-info-ui-028]
+4. **GIVEN** any build tool armed (mocked), **WHEN** a click fires, **THEN** no selection change — clicks belong to Building (Rule 1). [TR-villager-info-ui-001]
+5. **GIVEN** a selected villager and a mocked tool-arm event, **THEN** the panel closes and selection clears (Edge Case 7). [TR-villager-info-ui-043]
+6. **GIVEN** each of the SIX AI activity states (mocked) in turn — Deciding, Traveling, Working, Sleeping, **Breather**, Wandering, **WHEN** selected, **THEN** the panel shows the correct distinct player-readable label for each; **WHEN** the state changes while selected, **THEN** the label updates the same frame (Rule 2, full six-way mapping — *corrected 2026-07-11 from "five": Breather was untested*; Deciding's label is a mapping-completeness check, not an expected player observation at MVP). [TR-villager-info-ui-031]
+7. **GIVEN** mocked need values, **WHEN** rendered, **THEN** each active need bar shows the raw 0–100 value — no UI-side scaling or smoothing. [TR-villager-info-ui-049]
+8. **GIVEN** a mood band change event, **WHEN** received, **THEN** the band icon updates (band signal only). [TR-villager-info-ui-031]
+9. **GIVEN** mood not Happy or a need urgent, **THEN** the why-string renders verbatim from the Needs payload; **GIVEN** mood Happy AND no urgent need, **THEN** the why-string area is empty/hidden (Rule 2 both directions). [TR-villager-info-ui-032] [TR-villager-info-ui-036]
+10. **GIVEN** a mocked distress flag set on any villager (selected or not), **THEN** its overhead icon activates; **WHEN** cleared, **THEN** it deactivates (Rule 4). [TR-villager-info-ui-034]
+11. **GIVEN** a distressed villager selected, **THEN** panel flag and overhead icon reflect the same source state — single source, no divergence (Edge Case 5). [TR-villager-info-ui-042]
+12. **GIVEN** pause (mocked), **THEN** click-to-select, panel value updates, and Esc-deselect all still fire on the paused frame — raw delta (Edge Case 4). [TR-villager-info-ui-041]
+13. **GIVEN** Suspended active with a selection, **THEN** panel and overhead icons are hidden while the selection value persists unchanged; **WHEN** reactivated, **THEN** the same villager is selected and the panel restores (Edge Case 6 + state table). [TR-villager-info-ui-038]
+14. **GIVEN** a selected villager despawn event, **THEN** selection clears gracefully — no stale panel, no error (Edge Case 1). [TR-villager-info-ui-040]
+15. **GIVEN** a mocked ray with a villager and a nearer block, **THEN** the block wins; **GIVEN** overlap/tie, **THEN** the villager wins (Edge Case 2). [TR-villager-info-ui-015]
+16. **GIVEN** a mocked ray hitting villagers A/B/C at different distances, **THEN** the nearest is selected — deterministic and repeatable (Edge Case 3). [TR-villager-info-ui-016]
+17. **GIVEN** 20+ mocked villagers, **WHEN** selecting #1 then #17, **THEN** exactly one villager is ever selected and every panel value reflects live upstream state — mutating the upstream mock directly (bypassing signals) never leaves a stale local copy on reselect (Rules 3/6: selection is the ONLY owned state). [TR-villager-info-ui-033] [TR-villager-info-ui-037]
 
 **Added by design review (2026-07-11) — blocking headless**
-21. **GIVEN** the shared hover-suppression flag active (mocked cursor-over-HUD), **WHEN** a click fires over a villager rendered behind the HUD, **THEN** no selection change occurs — neither select nor deselect (Rule 1 HUD-hover gate).
-22. **GIVEN** a villager selected AND a Building UI element holding keyboard focus (mocked), **WHEN** Esc fires, **THEN** the HUD focus releases and the selection is UNCHANGED; **WHEN** Esc fires again with no HUD focus, **THEN** the villager deselects (Rule 1 Esc routing — deterministic two-step).
-23. **GIVEN** a mocked trapped flag AND an urgent sleep need simultaneously, **WHEN** the panel renders, **THEN** the why-slot shows the distress-derived template ("trapped"), never the need-why — Rule 2b precedence (Needs Core Rule 11's "never directs to the wrong fix").
-24. **[Forward-looking — multi-need arrives VS+]** **GIVEN** two mocked urgent needs, **WHEN** the panel renders, **THEN** the why-slot shows the strongest-drain need's string; **GIVEN** equal drains, **THEN** schema order breaks the tie (Rule 2b, Needs Core Rule 11 tie-break).
-25. **GIVEN** a mocked bedless villager who is AWAKE and not distress-flagged, **WHEN** rendered, **THEN** no overhead icon shows; **WHEN** their sleep turns urgent and they ground-sleep, **THEN** the ground-sleeping icon activates (Rule 4's no-bed fold — the negative half).
-26. **GIVEN** a mocked villager-hit at distance t₁ and block-hit at t₂ with |t₁−t₂| < `pick_tie_epsilon`, **WHEN** the pick resolves, **THEN** the villager wins; **GIVEN** the block strictly nearer beyond epsilon, **THEN** the block wins (Edge Case 2's explicit tolerance — replaces the untestable float-tie).
+21. **GIVEN** the shared hover-suppression flag active (mocked cursor-over-HUD), **WHEN** a click fires over a villager rendered behind the HUD, **THEN** no selection change occurs — neither select nor deselect (Rule 1 HUD-hover gate). [TR-villager-info-ui-002]
+22. **GIVEN** a villager selected AND a Building UI element holding keyboard focus (mocked), **WHEN** Esc fires, **THEN** the HUD focus releases and the selection is UNCHANGED; **WHEN** Esc fires again with no HUD focus, **THEN** the villager deselects (Rule 1 Esc routing — deterministic two-step). [TR-villager-info-ui-029]
+23. **GIVEN** a mocked trapped flag AND an urgent sleep need simultaneously, **WHEN** the panel renders, **THEN** the why-slot shows the distress-derived template ("trapped"), never the need-why — Rule 2b precedence (Needs Core Rule 11's "never directs to the wrong fix"). [TR-villager-info-ui-032]
+24. **[Forward-looking — multi-need arrives VS+]** **GIVEN** two mocked urgent needs, **WHEN** the panel renders, **THEN** the why-slot shows the strongest-drain need's string; **GIVEN** equal drains, **THEN** schema order breaks the tie (Rule 2b, Needs Core Rule 11 tie-break). [TR-villager-info-ui-032]
+25. **GIVEN** a mocked bedless villager who is AWAKE and not distress-flagged, **WHEN** rendered, **THEN** no overhead icon shows; **WHEN** their sleep turns urgent and they ground-sleep, **THEN** the ground-sleeping icon activates (Rule 4's no-bed fold — the negative half). [TR-villager-info-ui-034]
+26. **GIVEN** a mocked villager-hit at distance t₁ and block-hit at t₂ with |t₁−t₂| < `pick_tie_epsilon`, **WHEN** the pick resolves, **THEN** the villager wins; **GIVEN** the block strictly nearer beyond epsilon, **THEN** the block wins (Edge Case 2's explicit tolerance — replaces the untestable float-tie). [TR-villager-info-ui-015]
 
 **Advisory — interaction test / manual walkthrough**
 18. **GIVEN** a live viewport, **WHEN** a villager walks behind the toolbar, **THEN** the accepted occlusion is documented (walkthrough, Edge Case 10).
-19. **GIVEN** a long why-string, **THEN** it wraps with no silent truncation (visual check, Edge Case 8).
+19. **GIVEN** a long why-string, **THEN** it wraps with no silent truncation (visual check, Edge Case 8). [TR-villager-info-ui-044]
 20. **GIVEN** a first-time playtester, **THEN** they click a villager unprompted within the first minutes and can afterwards state how it's doing and why (Game Feel — playtest doc).
 
 ## Open Questions
@@ -343,7 +343,7 @@ table.)*
 1. **Roster/list view** of all villagers — now ALSO carries the
    committed **keyboard selection path** (select-cycle /
    focus-nearest-distressed; the MVP mouse-only exemption in Rule 1 is
-   explicitly temporary) → *Vertical Slice, once ~5 villagers exist*
+   explicitly temporary) → *Vertical Slice, once ~5 villagers exist* [TR-villager-info-ui-030]
 2. **Camera focus on selected villager** (requires a new "focus on
    point" API from Camera & Input) → *Vertical Slice, with camera-input*
 3. **Distress icon clustering** at distance (Edge Case 9) → *VS+*
@@ -351,11 +351,11 @@ table.)*
    generation (Villager AI OQ 5), Vertical Slice*. Until that lands,
    Rule 3's selection-handle identity stability across Suspended is
    `[assumption]` — verify against Scene/World Management's transition
-   mechanics at implementation.
+   mechanics at implementation. [TR-villager-info-ui-010]
 5. **UX spec** (incl. hover affordance, minimal-by-design panel layout,
    distress-icon billboard mode — full vs. Y-locked, pending camera
    angle) → */ux-design villager-panel in Pre-Production (see the UX
-   Flag)*
+   Flag)* [TR-villager-info-ui-027]
 6. **Proactive distress alerting at population scale** *(2026-07-11
    review)* — the overhead icon is passive/spatial; at VS ~5 and the
    20–30 ceiling, an off-screen trapped villager pings nothing. Whether

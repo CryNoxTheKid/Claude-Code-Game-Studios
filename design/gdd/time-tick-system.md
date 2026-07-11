@@ -56,39 +56,40 @@ manually before production.)*
 ### Core Rules
 
 1. Every frame, this system computes **game delta-time** = raw engine delta
-   × time-warp multiplier × (0 if paused, else 1). All simulation systems
-   query this value, never raw engine delta.
+   × time-warp multiplier × (0 if paused, else 1). [TR-time-tick-system-021]
+   All simulation systems
+   query this value, never raw engine delta. [TR-time-tick-system-022]
 2. Time-warp has three fixed speeds: 1x, 2x, 3x, switchable via player input
    (UI trigger RESOLVED 2026-07-10: Building UI owns the MVP time controls —
    pause on Space, speed on +/− or direct 1x/2x/3x buttons, top-right HUD;
-   see building-ui.md Rules 1/10).
+   see building-ui.md Rules 1/10). [TR-time-tick-system-023]
 3. Pause is a separate, independent toggle. Enabling it sets game delta to
    0 WITHOUT discarding the stored time-warp speed; disabling it resumes at
-   that exact speed.
+   that exact speed. [TR-time-tick-system-024]
 4. This system does NOT use Godot's global `Engine.time_scale` — it
    maintains its own multiplier, so non-simulation systems (Camera & Input,
-   UI animations) remain unaffected by pause/warp and stay fully responsive.
+   UI animations) remain unaffected by pause/warp and stay fully responsive. [TR-time-tick-system-025]
 5. Raw engine delta (from `_process`/`_physics_process`) remains available
    to every system as normal — this system does not intercept or replace
    it, it only additionally computes and exposes "game delta" as a derived
-   value.
+   value. [TR-time-tick-system-026]
 6. This system's game delta-time is NOT paused or altered by Scene/World
    Management's Transitioning state — per that GDD's Core Rule 4,
    simulation must continue uninterrupted through scene transitions. Only
-   the player's explicit Pause toggle affects it.
+   the player's explicit Pause toggle affects it. [TR-time-tick-system-027]
 7. In addition to the continuous game delta, this system emits a discrete
    **tick** signal at a fixed rate (`ticks_per_second`, scaled by
    time-warp) — for systems that don't need per-frame precision (villager
    schedules, needs-decay steps) and prefer a "a game tick happened" event.
-   This decouples simulation step rate from render frame rate.
-8. Ticks do NOT fire while paused (consistent with Rule 3).
+   This decouples simulation step rate from render frame rate. [TR-time-tick-system-028]
+8. Ticks do NOT fire while paused (consistent with Rule 3). [TR-time-tick-system-029]
 
 ### States and Transitions
 
 | State | Entry Condition | Exit Condition | Behavior |
 |-------|-----------------|-----------------|----------|
-| Running | Default; Pause is disabled | Player enables Pause | Game delta = raw delta × time-warp; ticks fire at `ticks_per_second × time-warp` |
-| Paused | Player enables Pause | Player disables Pause | Game delta = 0; no ticks fire; the time-warp value stays stored, not reset |
+| Running | Default; Pause is disabled | Player enables Pause | Game delta = raw delta × time-warp; ticks fire at `ticks_per_second × time-warp` [TR-time-tick-system-021] [TR-time-tick-system-028] |
+| Paused | Player enables Pause | Player disables Pause | Game delta = 0; no ticks fire; the time-warp value stays stored, not reset [TR-time-tick-system-024] [TR-time-tick-system-029] |
 
 ### Interactions with Other Systems
 
@@ -99,7 +100,7 @@ manually before production.)*
   re-review found the reset created an irreversible warp trap in dungeon
   scenes, where the warp controls don't exist). Time-warp and pause are
   global game state that persists unchanged across all scene transitions;
-  no system calls into this one on transition events. The time-warp-reset
+  no system calls into this one on transition events. [TR-time-tick-system-030] The time-warp-reset
   function is retired from the contract.
 - **Camera & Input**: deliberately uses RAW engine delta, not this system's
   game delta — stays fully responsive during pause/warp. No dependency in
@@ -128,7 +129,7 @@ Godot's global `Engine.time_scale`/`SceneTree.paused`.)*
 
 ### Game Delta-Time
 
-`game_delta = clamp(raw_delta, 0, max_raw_delta) * time_warp * (paused ? 0 : 1)`
+`game_delta = clamp(raw_delta, 0, max_raw_delta) * time_warp * (paused ? 0 : 1)` [TR-time-tick-system-021] [TR-time-tick-system-031]
 
 *(Canonical form REVISED 2026-07-10 review: the `max_raw_delta` clamp was
 previously stated only in Edge Cases while the formula here read as if
@@ -149,7 +150,7 @@ lives in it.)*
 ### Tick Accumulator (drift-free — subtracts, never resets to 0)
 
 `tick_accumulator += game_delta`
-`while tick_accumulator >= tick_interval: fire tick(); tick_accumulator -= tick_interval`
+`while tick_accumulator >= tick_interval: fire tick(); tick_accumulator -= tick_interval` [TR-time-tick-system-032]
 where `tick_interval = 1 / ticks_per_second`
 
 | Variable | Symbol | Type | Range | Description |
@@ -158,12 +159,12 @@ where `tick_interval = 1 / ticks_per_second`
 | tick_interval | `tick_interval` | float | derived, `1/ticks_per_second` = 0.5s | Game-time between ticks |
 
 Runs in `_physics_process` (fixed step) for deterministic, frame-rate-
-independent simulation. **Assumption (2026-07-10 review)**: this relies on
+independent simulation. [TR-time-tick-system-033] **Assumption (2026-07-10 review)**: this relies on
 the project default `physics_ticks_per_second = 60`; if that project
 setting is ever changed, `raw_delta` and all worked examples here change
 with it. The accumulator MUST be float64 (GDScript `float` — not a
 32-bit shader/packed float) so long sessions don't lose sub-tick
-precision.
+precision. [TR-time-tick-system-034]
 
 **Example**: `time_warp=2`, accumulator already at 0.4700 → `+0.0334` →
 `0.5034` → **tick fires**, `-0.5` → `0.0034` carries forward (no drift).
@@ -172,7 +173,7 @@ precision.
 
 `raw_ticks = floor(tick_accumulator / tick_interval)`
 `ticks_to_fire = min(raw_ticks, max_ticks_per_frame)` — excess time beyond
-the cap is discarded, not deferred
+the cap is discarded, not deferred [TR-time-tick-system-035]
 
 | Variable | Symbol | Type | Range | Description |
 |----------|--------|------|-------|-------------|
@@ -187,7 +188,7 @@ as "exactly N ticks per game-time interval" (e.g. Villager AI's
 chained-build heartbeat, "exactly 36 ticks at defaults") holds only
 *barring a discard event*. A discard permanently drops simulated time —
 consumers must derive durations from tick COUNTS they observe, never from
-wall-clock or game-clock arithmetic that assumes no tick was ever lost.
+wall-clock or game-clock arithmetic that assumes no tick was ever lost. [TR-time-tick-system-036]
 The reciprocal caveat is noted in villager-ai-behavior.md.
 
 *(Godot note: deliberately NOT `Engine.time_scale`/`SceneTree.paused`/
@@ -199,25 +200,25 @@ project's dependency-injection-over-singleton preference.)*
 
 | Scenario | Expected Behavior | Rationale |
 |----------|-------------------|-----------|
-| Raw delta-time itself is unusually large (e.g. after an alt-tab stall, several seconds) | `raw_delta` is clamped to `max_raw_delta` BEFORE `game_delta` is computed | Prevents huge one-frame jumps for continuous consumers (build progress, movement) — not just the tick accumulator |
-| The tick catch-up cap (10) is repeatedly hit across consecutive frames | No special handling in this system — this is a performance signal that the simulation is too slow for the current warp/tick rate, must be fixed via profiling | This system can only bound overload, not fix it |
-| Game boot (Scene/World Management's Booting state) | Defaults to `paused = false`, `time_warp = 1` | Matches the "learn by doing" onboarding approach — no reason to start paused |
-| Player toggles Pause and time-warp rapidly in succession | Each toggle is processed immediately and independently, no debounce needed | Discrete, simple toggles — no accumulation problem expected |
-| Time-warp speed is changed while paused | The change is accepted and stored, but has no effect until resumed (since `game_delta` is 0 while paused) | Consistent with Core Rule 3 — pause and time-warp speed are independent |
+| Raw delta-time itself is unusually large (e.g. after an alt-tab stall, several seconds) | `raw_delta` is clamped to `max_raw_delta` BEFORE `game_delta` is computed | Prevents huge one-frame jumps for continuous consumers (build progress, movement) — not just the tick accumulator [TR-time-tick-system-031] |
+| The tick catch-up cap (10) is repeatedly hit across consecutive frames | No special handling in this system — this is a performance signal that the simulation is too slow for the current warp/tick rate, must be fixed via profiling | This system can only bound overload, not fix it [TR-time-tick-system-037] |
+| Game boot (Scene/World Management's Booting state) | Defaults to `paused = false`, `time_warp = 1` | Matches the "learn by doing" onboarding approach — no reason to start paused [TR-time-tick-system-038] |
+| Player toggles Pause and time-warp rapidly in succession | Each toggle is processed immediately and independently, no debounce needed | Discrete, simple toggles — no accumulation problem expected [TR-time-tick-system-039] |
+| Time-warp speed is changed while paused | The change is accepted and stored, but has no effect until resumed (since `game_delta` is 0 while paused) | Consistent with Core Rule 3 — pause and time-warp speed are independent [TR-time-tick-system-040] |
 
 ## Dependencies
 
 | System | Direction | Nature of Dependency |
 |--------|-----------|----------------------|
 | *(none)* | This system depends on | Foundation layer — zero upstream dependencies |
-| Scene/World Management | (edge retired 2026-07-10) | Formerly called the time-warp-reset function on transition begin — removed; warp/pause persist across transitions as global state |
+| Scene/World Management | (edge retired 2026-07-10) | Formerly called the time-warp-reset function on transition begin — removed; warp/pause persist across transitions as global state [TR-time-tick-system-030] |
 | Villager AI & Behavior | Depended on by | Consumes game delta and/or tick signal |
 | Needs & Mood System | Depended on by | Consumes tick signal for decay steps |
 | Gathering & Production Chains | Depended on by | Consumes tick signal for production steps |
 | Building System | Depended on by | Consumes tick events for build-over-time construction progress (its Formula F3) |
 | Squad & Combat System | Depended on by | Consumes game delta and/or tick signal |
 | Audio System | Depended on by | Likely uses tick/game delta for ambient timing (TBD when authored) |
-| Building UI | Depended on by | Owns the MVP time controls — calls the pause/warp API, displays the returned state (Core Rule 2 resolution; added 2026-07-10, cross-review fix) |
+| Building UI | Depended on by | Owns the MVP time controls — calls the pause/warp API, displays the returned state (Core Rule 2 resolution; added 2026-07-10, cross-review fix) [TR-time-tick-system-041] |
 | Main Menu & Settings | Depended on by (Alpha) | Settings-level time options only — the in-game pause/speed controls belong to Building UI (corrected 2026-07-10) |
 | Camera & Input | (explicitly NOT a dependent) | Uses raw engine delta directly — documented for clarity, not a real edge |
 
@@ -252,7 +253,7 @@ simulation is the actual "reward."
 
 ### Input Responsiveness
 
-Pause/time-warp toggling must register within 1 frame (~16ms).
+Pause/time-warp toggling must register within 1 frame (~16ms). [TR-time-tick-system-042]
 
 ### Weight / Transition
 
@@ -266,7 +267,7 @@ lag between pressing the key and its effect.
 ## UI Requirements
 
 Pause indicator (icon/overlay) and speed indicator (1x/2x/3x) — likely part
-of a small "Time HUD" element. Exact placement to be defined in `/ux-design`.
+of a small "Time HUD" element. [TR-time-tick-system-043] Exact placement to be defined in `/ux-design`.
 
 > **📌 UX Flag — Time & Tick System**: This system has UI requirements (pause
 > indicator, speed indicator). In Phase 4 (Pre-Production), run `/ux-design`
@@ -291,62 +292,62 @@ missing criteria and 2 precision fixes.)*
 
 1. **GIVEN** `raw_delta`, `time_warp`, `paused`, **WHEN** `game_delta` is
    computed, **THEN** it equals `raw_delta * time_warp * (0 if paused else
-   1)`, within floating-point tolerance (1e-6). *[Logic]*
+   1)`, within floating-point tolerance (1e-6). *[Logic]* [TR-time-tick-system-021]
 2. **GIVEN** the player selects a time-warp speed, **WHEN** selected,
-   **THEN** it is exactly one of {1, 2, 3}. *[Logic]*
+   **THEN** it is exactly one of {1, 2, 3}. *[Logic]* [TR-time-tick-system-023]
 3. **GIVEN** Pause is enabled, **WHEN** toggled, **THEN** `game_delta`
-   becomes 0 and the stored time-warp value is unchanged. *[Logic]*
+   becomes 0 and the stored time-warp value is unchanged. *[Logic]* [TR-time-tick-system-024]
 4. **GIVEN** Pause is disabled, **WHEN** toggled, **THEN** `game_delta`
    resumes using the previously stored time-warp value (not reset to 1).
-   *[Logic]*
+   *[Logic]* [TR-time-tick-system-024]
 5. **GIVEN** time-warp is changed while paused, **WHEN** changed, **THEN**
    the new value is stored but has no effect on `game_delta` until Pause is
-   disabled. *[Logic]*
+   disabled. *[Logic]* [TR-time-tick-system-040]
 6. **GIVEN** Godot's `Engine.time_scale`, **WHEN** inspected during
    gameplay, **THEN** it remains at its default (1.0) regardless of this
-   system's pause/warp state. *[Integration]*
+   system's pause/warp state. *[Integration]* [TR-time-tick-system-025]
 7. **GIVEN** a scene transition begins, **WHEN** it does, **THEN** this
    system's `game_delta` continues to be computed normally (not suspended).
-   *[Integration]*
+   *[Integration]* [TR-time-tick-system-027]
 8. **GIVEN** any `time_warp`/pause state, **WHEN** a scene transition
    begins and completes, **THEN** this system's state (`time_warp`,
    `paused`, accumulator) is untouched — no API of this system is invoked
    by transition events. *(REVISED 2026-07-10: replaces the retired
-   time-warp-reset criterion.)* *[Integration]*
+   time-warp-reset criterion.)* *[Integration]* [TR-time-tick-system-030]
 9. **GIVEN** the tick accumulator, **WHEN** `game_delta` is added each
    physics frame, **THEN** a tick fires each time the accumulator crosses
-   `tick_interval`, via subtraction (not reset). *[Logic]*
+   `tick_interval`, via subtraction (not reset). *[Logic]* [TR-time-tick-system-032]
 10. **GIVEN** `time_warp = N`, **WHEN** ticks are measured over one
     real-time second, **THEN** they fire at `ticks_per_second × N`.
-    *[Logic]*
+    *[Logic]* [TR-time-tick-system-028]
 11. **GIVEN** more ticks are due than `max_ticks_per_frame`, **WHEN**
     processed, **THEN** only `max_ticks_per_frame` ticks fire and excess
-    accumulated time is discarded. *[Logic]*
+    accumulated time is discarded. *[Logic]* [TR-time-tick-system-035]
 12. **GIVEN** `raw_delta` exceeds `max_raw_delta`, **WHEN** `game_delta` is
-    computed, **THEN** `raw_delta` is clamped first. *[Logic]*
+    computed, **THEN** `raw_delta` is clamped first. *[Logic]* [TR-time-tick-system-031]
 13. **GIVEN** the game is paused, **WHEN** ticks would otherwise be due,
-    **THEN** none fire. *[Logic]*
+    **THEN** none fire. *[Logic]* [TR-time-tick-system-029]
 14. **GIVEN** game boot completes, **WHEN** this system initializes,
-    **THEN** `paused=false` and `time_warp=1` by default. *[Integration]*
+    **THEN** `paused=false` and `time_warp=1` by default. *[Integration]* [TR-time-tick-system-038]
 15. **GIVEN** raw engine delta, **WHEN** this system computes `game_delta`,
     **THEN** raw delta remains unmodified and available to any other
-    system. *[Logic]*
+    system. *[Logic]* [TR-time-tick-system-026]
 16. **GIVEN** Pause/time-warp are toggled multiple times in quick
     succession, **WHEN** each toggle is processed, **THEN** it is applied
-    immediately and independently, with no debounce delay. *[Logic]*
+    immediately and independently, with no debounce delay. *[Logic]* [TR-time-tick-system-039]
 17. **Performance**: `game_delta` and tick-accumulator computation stay
     under 0.5ms combined per physics frame. *[DEFERRED — requires full
-    build + profiling]*
+    build + profiling]* [TR-time-tick-system-044]
 18. No hardcoded values — `time_warp_options`, `ticks_per_second`,
     `max_ticks_per_frame`, and `max_raw_delta` are all read from config.
-    *[Config/Data, Advisory]*
+    *[Config/Data, Advisory]* [TR-time-tick-system-020]
 
 **Added by the 2026-07-10 design review:**
-19. **GIVEN** the game is already paused, **WHEN** pause is requested again (idempotency), **THEN** state is unchanged and no duplicate pause side effects (audio dampening, signal emissions) occur. *[Logic]*
-20. **GIVEN** the game is paused at warp 3x, **WHEN** the player changes warp to 2x and later unpauses, **THEN** the game resumes at 2x — pause survived the warp change, the warp change survived the pause. *[Logic]*
-21. **GIVEN** any external event that changes `time_warp`, **WHEN** it is applied, **THEN** the tick accumulator's stored value is NOT modified — warp changes only affect future `game_delta`, never banked time. *[Logic]*
-22. **GIVEN** multiple systems subscribed to the tick signal, **WHEN** a tick fires, **THEN** exactly ONE global broadcast occurs per tick — consumers share the same emission, no per-consumer timers exist anywhere in the project. *[Integration]*
-23. **GIVEN** a deterministic test harness running 10,000 ticks at fixed `raw_delta`, **WHEN** total simulated time is compared against `10000 × tick_interval`, **THEN** accumulated drift is under one `tick_interval` (the subtract-not-reset guarantee at scale). *[Logic]*
+19. **GIVEN** the game is already paused, **WHEN** pause is requested again (idempotency), **THEN** state is unchanged and no duplicate pause side effects (audio dampening, signal emissions) occur. *[Logic]* [TR-time-tick-system-045]
+20. **GIVEN** the game is paused at warp 3x, **WHEN** the player changes warp to 2x and later unpauses, **THEN** the game resumes at 2x — pause survived the warp change, the warp change survived the pause. *[Logic]* [TR-time-tick-system-040]
+21. **GIVEN** any external event that changes `time_warp`, **WHEN** it is applied, **THEN** the tick accumulator's stored value is NOT modified — warp changes only affect future `game_delta`, never banked time. *[Logic]* [TR-time-tick-system-046]
+22. **GIVEN** multiple systems subscribed to the tick signal, **WHEN** a tick fires, **THEN** exactly ONE global broadcast occurs per tick — consumers share the same emission, no per-consumer timers exist anywhere in the project. *[Integration]* [TR-time-tick-system-007]
+23. **GIVEN** a deterministic test harness running 10,000 ticks at fixed `raw_delta`, **WHEN** total simulated time is compared against `10000 × tick_interval`, **THEN** accumulated drift is under one `tick_interval` (the subtract-not-reset guarantee at scale). *[Logic]* [TR-time-tick-system-032]
 
 ## Open Questions
 

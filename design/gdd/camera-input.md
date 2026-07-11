@@ -55,58 +55,58 @@ manually before production.)*
 
 1. The camera orbits a target point (a look-at point in world space) at a
    configurable distance, yaw, and pitch — position is derived from
-   target + spherical offset, not stored independently.
+   target + spherical offset, not stored independently. [TR-camera-input-021]
 2. Middle-mouse-drag rotates the camera: horizontal drag changes yaw,
-   vertical drag changes pitch (within the pitch clamp bounds).
+   vertical drag changes pitch (within the pitch clamp bounds). [TR-camera-input-022]
 3. Q/E keys rotate yaw by a fixed step per press (an alternative to mouse
-   drag).
+   drag). [TR-camera-input-023]
 4. The mouse wheel zooms by scaling distance **multiplicatively** (not
-   additively), clamped to a min/max distance range.
+   additively), clamped to a min/max distance range. [TR-camera-input-024]
 5. WASD pans the orbit target along the ground plane, direction relative to
    the camera's current yaw ("W" always means "forward relative to view"),
    scaled by delta-time and current distance (panning feels proportionally
-   faster when zoomed out). Screen-edge panning is deliberately NOT
+   faster when zoomed out). [TR-camera-input-025] Screen-edge panning is deliberately NOT
    included in MVP — a decision, not an omission: edge-pan fights the
    mouse-driven building workflow (the cursor lives at the screen edges
    during placement) *(made explicit 2026-07-10 review; revisit at
    playtest if players ask for it)*.
 6. The orbit target is clamped to the Voxel World's horizontal bounds (plus
-   a small margin) so panning cannot drift into the void beyond the world edge. *(Clarified 2026-07-11, large-world decision: the clamp is the WORLD edge - free camera roaming across the whole 2000x2000 world is intended, exploration pillar; the camera is not restricted to the settlement core.)*
+   a small margin) so panning cannot drift into the void beyond the world edge. [TR-camera-input-026] *(Clarified 2026-07-11, large-world decision: the clamp is the WORLD edge - free camera roaming across the whole 2000x2000 world is intended, exploration pillar; the camera is not restricted to the settlement core.)*
 7. This system owns the InputMap action definitions (e.g., `build_place`,
    `build_remove`, `camera_rotate_left`) but does NOT interpret what an
    action means — it only reports "this action fired" via signal; the
-   consuming system (Building System, etc.) owns interpretation.
+   consuming system (Building System, etc.) owns interpretation. [TR-camera-input-027]
 8. This system exposes a "current mouse world-ray" query (derived from the
    camera's projection and the mouse's screen position), so any system
    (e.g., the Building System, which forwards it to Voxel World's raycast)
    can convert the mouse position into a world-space ray without
-   recomputing the camera projection itself. The ray is ALWAYS computable —
+   recomputing the camera projection itself. [TR-camera-input-028] The ray is ALWAYS computable —
    in every state, including Suspended (frozen transform) — callers never
-   need a "is the ray available?" branch *(clarified 2026-07-10 review)*.
+   need a "is the ray available?" branch *(clarified 2026-07-10 review)*. [TR-camera-input-029]
 9. **Raw-delta contract** *(authored 2026-07-10 review — building-ui.md and
    villager-info-ui.md already cite this contract; it was implied by the
    Formulas but never stated as a rule)*: all camera motion (rotate, zoom,
    pan) is driven by RAW engine delta-time, never by Time & Tick's
-   `game_delta`. Camera feel is identical at 1x, 2x, 3x warp.
+   `game_delta`. Camera feel is identical at 1x, 2x, 3x warp. [TR-camera-input-030]
 10. **Pause contract** *(authored 2026-07-10 review, same provenance)*:
     game pause does NOT suspend this system — the camera remains fully
     controllable and input dispatch continues while paused, so the player
     can inspect their village and queue plans. **Suspended ≠ Pause**:
     Suspended is exclusively the scene-transition state (see States); the
-    two conditions are independent and neither implies the other.
+    two conditions are independent and neither implies the other. [TR-camera-input-031]
 11. **Action registration** *(authored 2026-07-10 review)*: the InputMap
     actions this system owns are registered in the Godot project settings
     (project.godot) at project scope, not created in code at runtime — the
     authoritative list is the union of actions named by downstream GDDs
     (Building System, Building UI, Villager Info UI), collected at
-    `/create-architecture` into the input ADR.
+    `/create-architecture` into the input ADR. [TR-camera-input-032]
 
 ### States and Transitions
 
 | State | Entry Condition | Exit Condition | Behavior |
 |-------|-----------------|-----------------|----------|
-| Active | Default; also entered from Suspended when a scene transition ends — on transition-complete OR transition-abort *(abort path added 2026-07-10, reciprocal with Scene/World Management's Core Rule 7 three-signal contract: without it, a failed load stranded the camera in Suspended permanently)* | A scene transition begins (see Scene/World Management) | Full camera control (rotate/zoom/pan) and input dispatch are enabled |
-| Suspended | A scene transition begins (Scene/World Management's Transitioning state) | Scene transition completes OR aborts (either end-signal releases Suspended — never complete alone) | Camera position freezes; no rotate/zoom/pan; input events are not dispatched to gameplay systems. **Ordering** *(2026-07-10 review)*: suspension takes effect the moment the transition-begin signal is processed — an input event arriving later in the SAME frame is already ignored; an input processed earlier that frame stands (single-frame greyzone accepted, invisible at 60fps) |
+| Active | Default; also entered from Suspended when a scene transition ends — on transition-complete OR transition-abort *(abort path added 2026-07-10, reciprocal with Scene/World Management's Core Rule 7 three-signal contract: without it, a failed load stranded the camera in Suspended permanently)* [TR-camera-input-033] | A scene transition begins (see Scene/World Management) | Full camera control (rotate/zoom/pan) and input dispatch are enabled |
+| Suspended | A scene transition begins (Scene/World Management's Transitioning state) | Scene transition completes OR aborts (either end-signal releases Suspended — never complete alone) | Camera position freezes; no rotate/zoom/pan; input events are not dispatched to gameplay systems. [TR-camera-input-034] **Ordering** *(2026-07-10 review)*: suspension takes effect the moment the transition-begin signal is processed — an input event arriving later in the SAME frame is already ignored; an input processed earlier that frame stands (single-frame greyzone accepted, invisible at 60fps) [TR-camera-input-035] |
 
 *(Directly implements Scene/World Management's Core Rule 6 — "neither scene
 receives input" during a transition.)*
@@ -119,7 +119,7 @@ receives input" during a transition.)*
 - **Voxel World** (Foundation sibling): **no direct connection.** This
   system only provides the mouse world-ray; the Building System fetches
   that ray and forwards it to Voxel World's raycast API. Camera & Input
-  never calls Voxel World itself.
+  never calls Voxel World itself. [TR-camera-input-036]
 - **Building System** (MVP, downstream): consumes InputMap action signals
   (e.g., `build_place`) and the mouse-world-ray query to interpret player
   input and perform picking (via Voxel World).
@@ -132,7 +132,7 @@ already-proven values rather than inventing new ones.)*
 
 ### Camera Position from Spherical Coordinates
 
-`camera_position = target + Vector3(distance * sin(yaw) * cos(pitch), distance * sin(pitch), distance * cos(yaw) * cos(pitch))`
+`camera_position = target + Vector3(distance * sin(yaw) * cos(pitch), distance * sin(pitch), distance * cos(yaw) * cos(pitch))` [TR-camera-input-021]
 
 | Variable | Symbol | Type | Range | Description |
 |----------|--------|------|-------|-------------|
@@ -149,11 +149,11 @@ stored independently.
 **Important Godot note**: `pitch` must never approach the poles (±90°) — the
 spherical-to-Cartesian derivation degenerates there (the yaw axis becomes
 undefined). The 0.15–1.5 rad range (≈8.6°–86°) is exactly this safety
-margin, not an arbitrary choice.
+margin, not an arbitrary choice. [TR-camera-input-037]
 
 ### Zoom (multiplicative)
 
-`distance' = clamp(distance * zoom_factor, 4.0, 60.0)`
+`distance' = clamp(distance * zoom_factor, 4.0, 60.0)` [TR-camera-input-024]
 
 | Variable | Symbol | Type | Range | Description |
 |----------|--------|------|-------|-------------|
@@ -164,7 +164,7 @@ margin, not an arbitrary choice.
 
 ### Pan (yaw-relative, distance-scaled)
 
-`target' = clamp_to_bounds(target + input_dir.normalized().rotated(UP, yaw) * delta * distance * 0.7)`
+`target' = clamp_to_bounds(target + input_dir.normalized().rotated(UP, yaw) * delta * distance * 0.7)` [TR-camera-input-025]
 
 | Variable | Symbol | Type | Range | Description |
 |----------|--------|------|-------|-------------|
@@ -180,7 +180,7 @@ margin, not an arbitrary choice.
 API (unchanged since 4.3), no tunable value of our own. **Important**: both
 must be computed from the same screen point in the same frame (don't cache
 one and recompute the other later, or Suspended-state freezes could desync
-them).
+them). [TR-camera-input-038]
 
 ### Godot 4.7 clarification: device ID is irrelevant here
 
@@ -188,28 +188,28 @@ The 4.7 change (`DEVICE_ID_MOUSE`/`DEVICE_ID_KEYBOARD` replacing hardcoded
 `0`) only concerns which physical device generated an event. Nothing in this
 system branches on device identity (actions route through named InputMap
 actions and typed event checks) — deliberately a non-issue, so no one adds
-unnecessary device-ID logic here later.
+unnecessary device-ID logic here later. [TR-camera-input-039]
 
 ## Edge Cases
 
 | Scenario | Expected Behavior | Rationale |
 |----------|-------------------|-----------|
-| Mouse-drag would push `pitch` beyond its bounds (0.15/1.5) | Silently clamps to the boundary, no error | Standard clamp behavior, prevents pole degeneration |
-| WASD held while the target is already at the world bound | Target stays clamped, no further movement in that direction, no error | Prevents drifting into the void without blocking input |
-| A scene transition begins while the rotate mouse button is held | Camera immediately enters Suspended; the held button is ignored until released and re-pressed | Prevents a "stuck" drag state from surviving the transition |
-| Camera returns from Suspended to Active | Resumes with the exact same yaw/pitch/distance/target it had when frozen — no snap, no catching up on queued input | Prevents disorientation after a scene transition |
-| Very large delta-time in one frame (e.g., a hitch, or the window was minimized) | Delta-time is clamped to a maximum before entering the Pan formula | Prevents a huge camera jump after a stall |
-| Mouse wheel fires very rapidly (fast scrolling) | Each event independently applies the zoom factor; the clamp (4.0–60.0) prevents overshoot regardless of event count | No compounding issue from the multiplicative formula |
-| The mouse world-ray query is called while Suspended | Remains technically computable (camera transform is frozen but valid) — consuming systems shouldn't act on it anyway, since input dispatch is disabled during the transition | No special case needed in the ray calculation itself; consistency comes from input suspension |
+| Mouse-drag would push `pitch` beyond its bounds (0.15/1.5) | Silently clamps to the boundary, no error | Standard clamp behavior, prevents pole degeneration [TR-camera-input-040] |
+| WASD held while the target is already at the world bound | Target stays clamped, no further movement in that direction, no error | Prevents drifting into the void without blocking input [TR-camera-input-026] |
+| A scene transition begins while the rotate mouse button is held | Camera immediately enters Suspended; the held button is ignored until released and re-pressed | Prevents a "stuck" drag state from surviving the transition [TR-camera-input-041] |
+| Camera returns from Suspended to Active | Resumes with the exact same yaw/pitch/distance/target it had when frozen — no snap, no catching up on queued input | Prevents disorientation after a scene transition [TR-camera-input-042] |
+| Very large delta-time in one frame (e.g., a hitch, or the window was minimized) | Delta-time is clamped to a maximum before entering the Pan formula | Prevents a huge camera jump after a stall [TR-camera-input-043] |
+| Mouse wheel fires very rapidly (fast scrolling) | Each event independently applies the zoom factor; the clamp (4.0–60.0) prevents overshoot regardless of event count | No compounding issue from the multiplicative formula [TR-camera-input-044] |
+| The mouse world-ray query is called while Suspended | Remains technically computable (camera transform is frozen but valid) — consuming systems shouldn't act on it anyway, since input dispatch is disabled during the transition | No special case needed in the ray calculation itself; consistency comes from input suspension [TR-camera-input-029] |
 
 ## Dependencies
 
 | System | Direction | Nature of Dependency |
 |--------|-----------|----------------------|
-| Scene/World Management | This system depends on | Listens for the transition signals: Suspended entered on begin, exited on complete OR abort (abort listener added 2026-07-10, reciprocal with that GDD's Core Rule 7) |
+| Scene/World Management | This system depends on | Listens for the transition signals: Suspended entered on begin, exited on complete OR abort (abort listener added 2026-07-10, reciprocal with that GDD's Core Rule 7) [TR-camera-input-033] |
 | Voxel World | (indirect only, via Building System) | See Interactions — no direct call |
 | Building System | Depended on by | Consumes InputMap action signals and the mouse-world-ray query |
-| Building UI | Depended on by | Registers its bindings (`tool_select_1..5`, `time_pause`, `time_speed_up/down`) under this system's action ownership (its Rule 12); follows Suspended (added 2026-07-10, cross-review bidirectional fix) |
+| Building UI | Depended on by | Registers its bindings (`tool_select_1..5`, `time_pause`, `time_speed_up/down`) under this system's action ownership (its Rule 12); follows Suspended (added 2026-07-10, cross-review bidirectional fix) [TR-camera-input-032] |
 | Villager Info UI | Depended on by | Consumes the mouse-world-ray + click action in Idle for villager selection; follows Suspended (added 2026-07-10, cross-review bidirectional fix) |
 
 ## Tuning Knobs
@@ -241,7 +241,7 @@ except `pitch_min`/`pitch_max` (pole-degeneracy math, see Formulas) and
 This system has almost no dedicated visual/audio events of its own — its
 "feedback" IS the camera motion itself. Two light touches are worth
 specifying: (1) the mouse cursor should change during an active rotate-drag
-(e.g., to a grab/orbit icon) to signal the drag is engaged; (2) reaching a
+(e.g., to a grab/orbit icon) to signal the drag is engaged [TR-camera-input-045]; (2) reaching a
 pan boundary is deliberately silent — no additional VFX/audio cue — matching
 Pillar 4 (clarity over complexity) and avoiding noise during normal building
 flow.
@@ -260,9 +260,9 @@ grid-locked RTS camera (too stiff for an "orbit around your creation" feel).
 
 | Action | Max Input-to-Response Latency (ms) | Frame Budget (at 60fps) | Notes |
 |--------|-------------------------------------|--------------------------|-------|
-| Mouse-drag rotate | ~16ms (1 frame) | 1 frame | Must feel 1:1, zero perceptible lag |
-| Zoom (wheel) | ~16ms | 1 frame | Instant response to the wheel event |
-| WASD pan | ~16ms | 1 frame | Input registers the same frame it's pressed |
+| Mouse-drag rotate | ~16ms (1 frame) | 1 frame | Must feel 1:1, zero perceptible lag [TR-camera-input-046] |
+| Zoom (wheel) | ~16ms | 1 frame | Instant response to the wheel event [TR-camera-input-046] |
+| WASD pan | ~16ms | 1 frame | Input registers the same frame it's pressed [TR-camera-input-046] |
 
 ### Animation Feel Targets / Impact Moments
 
@@ -287,7 +287,7 @@ matching the already-validated prototype feel. Hitting a boundary
 
 ## UI Requirements
 
-Minimal — only the mouse cursor state (see Visual/Audio). No dedicated HUD
+Minimal — only the mouse cursor state (see Visual/Audio). [TR-camera-input-045] No dedicated HUD
 element. Camera settings (e.g., sensitivity) belong to Main Menu & Settings
 (Alpha tier) later, not here.
 
@@ -309,67 +309,67 @@ behavior, InputMap non-interpretation as a positive checkable contract).)*
 
 1. **GIVEN** the camera is active, **WHEN** position is computed, **THEN** it
    always equals target + spherical offset (never independently stored).
-   *[Logic]*
+   *[Logic]* [TR-camera-input-021]
 2. **GIVEN** middle-mouse-drag, **WHEN** dragged horizontally, **THEN** yaw
    changes proportionally by `mouse_drag_sensitivity`; vertical drag changes
-   pitch, clamped to `[pitch_min, pitch_max]`. *[Logic]*
+   pitch, clamped to `[pitch_min, pitch_max]`. *[Logic]* [TR-camera-input-022]
 3. **GIVEN** Q or E is pressed, **WHEN** the press registers, **THEN** yaw
-   changes by ±`q_e_rotate_step`. *[Logic]*
+   changes by ±`q_e_rotate_step`. *[Logic]* [TR-camera-input-023]
 4. **GIVEN** a single mouse wheel event, **WHEN** it fires, **THEN** distance
    is multiplied by `zoom_factor_in`/`out` and clamped to
-   `[distance_min, distance_max]`. *[Logic]*
+   `[distance_min, distance_max]`. *[Logic]* [TR-camera-input-024]
 5. **GIVEN** N sequential zoom-in wheel events (rapid scrolling), **WHEN**
    each fires, **THEN** distance still respects the clamp regardless of N.
-   *[Logic]*
+   *[Logic]* [TR-camera-input-044]
 6. **GIVEN** WASD input, **WHEN** held, **THEN** the target moves in the
    yaw-rotated input direction, scaled by delta-time and current distance.
-   *[Logic]*
+   *[Logic]* [TR-camera-input-025]
 7. **GIVEN** the target is already at a world bound and WASD keeps pushing
    outward, **WHEN** pan is applied repeatedly, **THEN** it produces zero
    further delta in that direction with no exception raised (input is not
-   blocked, it simply has no further effect). *[Logic]*
+   blocked, it simply has no further effect). *[Logic]* [TR-camera-input-026]
 8. **GIVEN** pitch would exceed its bounds, **WHEN** rotation input is
-   applied, **THEN** it clamps silently without error. *[Logic]*
+   applied, **THEN** it clamps silently without error. *[Logic]* [TR-camera-input-040]
 9. **GIVEN** a scene transition begins, **WHEN** the signal fires, **THEN**
    the camera immediately enters Suspended (no rotate/zoom/pan, no input
-   dispatch). *[Integration]*
+   dispatch). *[Integration]* [TR-camera-input-034]
 10. **GIVEN** the camera is Suspended, **WHEN** the transition completes —
     OR aborts on load failure *(abort case added 2026-07-10, reciprocal
     with Scene/World Management Core Rule 7)* — **THEN** it returns to
     Active with the exact same yaw/pitch/distance/target it had when
-    suspended. *[Integration]*
+    suspended. *[Integration]* [TR-camera-input-033] [TR-camera-input-042]
 11. **GIVEN** the rotate mouse button is held when a transition begins,
     **WHEN** suspended, **THEN** the held button is ignored until released
-    and re-pressed. *[Integration]*
+    and re-pressed. *[Integration]* [TR-camera-input-041]
 12. **GIVEN** the camera is Suspended, **WHEN** the mouse world-ray is
     queried, **THEN** it returns a valid ray from the frozen transform — no
-    error, no special-case branch. *[Logic]*
+    error, no special-case branch. *[Logic]* [TR-camera-input-029]
 13. **GIVEN** a very large delta-time (e.g., after a stall), **WHEN** the pan
     formula runs, **THEN** delta-time is clamped to `max_delta_time` first.
-    *[Logic]*
+    *[Logic]* [TR-camera-input-043]
 14. **GIVEN** the mouse world-ray query is called, **WHEN** invoked, **THEN**
     origin and direction are computed from the same screen point in the same
-    frame. *[Logic]*
+    frame. *[Logic]* [TR-camera-input-038]
 15. **GIVEN** an InputMap action fires (e.g. `build_place`), **WHEN** this
     system processes it, **THEN** the emitted signal payload contains only
     the action name string, and the emitting code path contains no branch on
     that string's value. *[Advisory — code-review check, re-tiered
     2026-07-10: "contains no branch" is verified by reading the code, not
-    by a runtime assertion]*
+    by a runtime assertion]* [TR-camera-input-027]
 16. **Performance**: camera position recomputation and input processing
     complete within budget every frame. *[DEFERRED — requires full build +
-    profiling]*
+    profiling]* [TR-camera-input-047]
 17. No hardcoded values — all tuning knob values are read from config/
-    exported vars, verified by code review. *[Config/Data, Advisory]*
+    exported vars, verified by code review. *[Config/Data, Advisory]* [TR-camera-input-019]
 
 **Added by the 2026-07-10 design review** *(precision note: all "exact
 same value" comparisons in ACs above — e.g. AC10's restored
 yaw/pitch/distance/target — mean equality within 1e-4, not bitwise float
-equality)*:
-18. **GIVEN** project boot, **WHEN** the InputMap is inspected, **THEN** every action name any downstream GDD references (`build_place`, `build_remove`, camera actions, UI shortcuts) exists as a registered action — no consumer ever queries an unregistered action name. *[Integration]*
-19. **GIVEN** a mouse click that a UI element consumes (Building UI / Villager Info UI click-ownership), **WHEN** the click is handled by the UI layer, **THEN** this system does NOT also emit the corresponding world-action signal for that same click — exactly one owner per click. *[Integration]*
-20. **GIVEN** the pan-bound margin is configured to 0 (the current default), **WHEN** the target is panned hard against a world edge, **THEN** the clamp still behaves per AC7 (zero further delta, no error) — margin 0 is a valid configuration, not an edge case. *[Logic]*
-21. **GIVEN** the mouse is at screen position P, **WHEN** the world-ray is queried and intersected with the ground plane, **THEN** re-projecting that intersection back to screen space yields P within 1 pixel (round-trip projection correctness). *[Logic]*
+equality [TR-camera-input-048])*:
+18. **GIVEN** project boot, **WHEN** the InputMap is inspected, **THEN** every action name any downstream GDD references (`build_place`, `build_remove`, camera actions, UI shortcuts) exists as a registered action — no consumer ever queries an unregistered action name. *[Integration]* [TR-camera-input-032]
+19. **GIVEN** a mouse click that a UI element consumes (Building UI / Villager Info UI click-ownership), **WHEN** the click is handled by the UI layer, **THEN** this system does NOT also emit the corresponding world-action signal for that same click — exactly one owner per click. *[Integration]* [TR-camera-input-020]
+20. **GIVEN** the pan-bound margin is configured to 0 (the current default), **WHEN** the target is panned hard against a world edge, **THEN** the clamp still behaves per AC7 (zero further delta, no error) — margin 0 is a valid configuration, not an edge case. *[Logic]* [TR-camera-input-049]
+21. **GIVEN** the mouse is at screen position P, **WHEN** the world-ray is queried and intersected with the ground plane, **THEN** re-projecting that intersection back to screen space yields P within 1 pixel (round-trip projection correctness). *[Logic]* [TR-camera-input-050]
 
 ## Open Questions
 

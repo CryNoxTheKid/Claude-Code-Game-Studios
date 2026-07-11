@@ -9,15 +9,21 @@
 
 - Total requirements (2026-07-11 review baseline + same-day rerun): **349**
 - Covered: **349 (100 percent)** - Partial: 0 - Gaps: **0**
+- **Back-annotation complete (2026-07-11): 471 registered TR-IDs, all labeled inline
+  in their GDDs (1:1 verified — every GDD label has a registry entry and vice versa).**
+  The count exceeds the 349 baseline because the back-annotation pass normalized
+  restatement occurrences and extracted at finer granularity.
 - ADRs: 14 (13 Accepted, ADR-0003 Superseded by ADR-0014)
 - Verdict trail: baseline CONCERNS (all-Proposed) -> rerun **PASS** after spike QQ3,
   full ADR resolution, and the ADR-0014 large-world supersede
   (see `architecture-review-2026-07-11.md` + `-rerun.md`)
 
-## Registered TR-IDs (63)
+## ADR-worthy TR-IDs (the original 63 of 471 registered)
 
 ADR<->TR mapping lives in each ADR's "GDD Requirements Addressed" section; the registry
-carries the stable IDs and requirement text. Registered entries below.
+carries the stable IDs and requirement text (471 entries total after the 2026-07-11
+back-annotation — see the Back-Annotation section below). The tables below list only
+the 63 ADR-addressed entries.
 
 ### scene-world-management (6)
 
@@ -141,12 +147,37 @@ carries the stable IDs and requirement text. Registered entries below.
 
 None — 0 uncovered requirements as of the 2026-07-11 rerun.
 
-## Back-Annotation Task (carried condition from the gate check)
+## Back-Annotation Task (carried condition from the gate check) — DONE 2026-07-11
 
-~295 of the 349 requirements are covered "directly by GDD + architecture.md Module
-Ownership" and carry NO registered TR-ID (the GDDs contain no TR- labels). Story
-authoring depends on stable TR-IDs — run the back-annotation pass early in
-Pre-Production, before /create-stories.
+The back-annotation pass is complete. All 11 system GDDs carry inline
+`[TR-<system>-NNN]` labels; the registry (`tr-registry.yaml`) is the source of
+truth for every requirement text and holds **471 entries** (63 original + 28
+previously ADR-referenced-but-unregistered + 380 newly extracted). The tables
+above list only the original 63 ADR-worthy entries; per-system totals after
+back-annotation:
+
+| System | TR-IDs |
+|---|---|
+| building-system | 73 |
+| villager-ai-behavior | 64 |
+| build-validation-navigability | 51 |
+| needs-mood-system | 44 |
+| building-ui | 44 |
+| resource-item-database | 37 |
+| scene-world-management | 34 |
+| voxel-world | 34 |
+| camera-input | 32 |
+| villager-info-ui | 30 |
+| time-tick-system | 28 |
+
+Notes from the pass: the phantom `TR-camera-input-010` was dropped (not
+registered); the needs-mood compound cluster 026-029 was split into four
+individually anchored requirements (029's text corrected — per-need STATE is
+deliberately re-derived from restored values, values themselves restored
+exactly); several registry texts were aligned to GDD wording
+(`revised: 2026-07-11`), including resolution updates for TR-villager-ai-035/046,
+TR-building-ui-040, TR-build-validation-019, and TR-scene-world-management-033.
+/create-stories can now embed stable TR-IDs for every requirement.
 
 ## Superseded Requirements
 

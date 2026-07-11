@@ -59,34 +59,34 @@ non-high-risk sections. Review manually before production.)*
 
 1. The world is represented as a bounded 3D grid of cells, addressed by
    integer coordinates (`Vector3i`), with a minimum and maximum extent set at
-   world generation. **The grid origin is fixed at (0,0,0) and no
+   world generation. [TR-voxel-world-016] **The grid origin is fixed at (0,0,0) and no
    negative cell coordinates ever exist** — bounds checks are simple
-   non-negative comparisons *(invariant promoted from AC4 by the
+   non-negative comparisons [TR-voxel-world-027] *(invariant promoted from AC4 by the
    2026-07-10 review; the Formulas section's `floor()` requirement is
    defensive hardening for near-zero world positions, not support for
    negative cells)*.
 2. Every cell holds exactly one of: empty (no block), or a block record
    containing a block-type identifier and a material identifier. There is no
-   "layering" — one cell = one occupant. The identifiers are ids defined by
+   "layering" — one cell = one occupant. [TR-voxel-world-003] The identifiers are ids defined by
    the Resource & Item Database; this system stores them as opaque values
    and never resolves their meaning (no runtime dependency in either
-   direction — see that GDD's Interactions section).
+   direction — see that GDD's Interactions section). [TR-voxel-world-028]
 3. At world generation, terrain cells (ground, hills) are populated
    procedurally within the bounded extent; every cell not part of generated
-   terrain starts empty and is available for player building.
+   terrain starts empty and is available for player building. [TR-voxel-world-029]
 4. Terrain cells and player-placed cells are stored identically — there is no
-   data-level flag distinguishing "natural" from "built." *(→ Open Question:
+   data-level flag distinguishing "natural" from "built." [TR-voxel-world-030] *(→ Open Question:
    do consuming systems need this distinction for gameplay purposes, e.g.
    "can't build directly on undisturbed terrain without clearing it first"?
    → hand off to the Building System GDD.)*
 5. This system exposes a read API (get cell contents, raycast against
-   occupied cells, get a cell's neighbors) and a low-level write API (set
-   cell contents, clear a cell) — it does NOT expose whether a placement is
+   occupied cells, get a cell's neighbors) [TR-voxel-world-031] and a low-level write API (set
+   cell contents, clear a cell) [TR-voxel-world-007] — it does NOT expose whether a placement is
    valid, or undo of the last action; those are the Building System's
    responsibility, composed on top of these primitives.
 6. Every write emits a signal identifying the changed cell and its
    before/after contents, so dependent systems (rendering, the Building
-   System's undo stack, Villager AI navigation) can react without polling.
+   System's undo stack, Villager AI navigation) can react without polling. [TR-voxel-world-032]
 
 ### States and Transitions
 
@@ -96,13 +96,13 @@ non-high-risk sections. Review manually before production.)*
 |-------|-----------------|-----------------|----------|
 | Uninitialized | Before terrain generation runs | Terrain generation completes | No query is valid; the grid is empty/unallocated |
 | Generated | Terrain generation completes | Never (persists for the session) | Grid holds terrain; ready for player mutation and queries |
-| Mutating | A write operation is in progress | Write completes | Very brief; no concurrent writes (mutations are serialized one at a time) |
+| Mutating | A write operation is in progress | Write completes | Very brief; no concurrent writes (mutations are serialized one at a time) [TR-voxel-world-033] |
 
 ### Interactions with Other Systems
 
 - **Scene/World Management** (Foundation sibling): hosting relationship —
   this system's root lives inside the scene Scene/World Management loads
-  (same pattern as that GDD's Interactions section).
+  (same pattern as that GDD's Interactions section). [TR-voxel-world-034]
 - **Building System** (MVP, downstream, primary consumer): calls the write
   API to place/remove blocks, and the read API (raycast picking) to
   determine what's under the cursor. Building System owns: placement
@@ -118,13 +118,13 @@ non-high-risk sections. Review manually before production.)*
 - **Save/Load & World Persistence** (Vertical Slice, downstream): needs to
   serialize/deserialize the grid's full cell contents. Interface: this
   system exposes an iteration API over occupied (non-empty) cells, so
-  Save/Load doesn't need to know internal storage details.
+  Save/Load doesn't need to know internal storage details. [TR-voxel-world-021]
 - **Resource & Item Database** (Foundation sibling, shared vocabulary): the
   block-type/material identifiers stored in cells (Core Rule 2) are ids
   defined by the Resource & Item Database. This system treats them as
   opaque values and never queries that database; consumers that need
   meaning (Building System, rendering) resolve the ids there. No runtime
-  dependency in either direction.
+  dependency in either direction. [TR-voxel-world-028]
 - **Build Validation & Navigability** (MVP, downstream): reads physical
   occupancy for its room/region analysis (read-only, event-driven on the
   Building System's signals) — does NOT mutate the grid.
@@ -136,12 +136,12 @@ high-risk section even in Lean mode.)*
 
 ### Cell-Coordinate ↔ World-Position Conversion
 
-`world_pos = Vector3(cell.x, cell.y, cell.z) * cell_size + Vector3(0.5, 0.5, 0.5) * cell_size`
+`world_pos = Vector3(cell.x, cell.y, cell.z) * cell_size + Vector3(0.5, 0.5, 0.5) * cell_size` [TR-voxel-world-035]
 
 | Variable | Symbol | Type | Range | Description |
 |----------|--------|------|-------|-------------|
 | cell | `cell` | Vector3i | bounded by world extent (see Tuning Knobs) | Integer cell address |
-| cell_size | `cell_size` | float | fixed = `1.0` (locked, Visual Direction Note) | Edge length of one cell; blocks are flush, no gap |
+| cell_size | `cell_size` | float | fixed = `1.0` (locked, Visual Direction Note) | Edge length of one cell; blocks are flush, no gap [TR-voxel-world-012] |
 | world_pos | `world_pos` | Vector3 | practically bounded by world extent × cell_size | Cell **center** point in world space |
 
 **Output range**: unbounded by the formula itself; practically bounded because
@@ -149,7 +149,7 @@ high-risk section even in Lean mode.)*
 **Example**: `cell = (2, 0, 5)` → `world_pos = (2.5, 0.5, 5.5)`.
 
 Inverse — **World → Cell**:
-`cell = Vector3i(floor(world_pos.x / cell_size), floor(world_pos.y / cell_size), floor(world_pos.z / cell_size))`
+`cell = Vector3i(floor(world_pos.x / cell_size), floor(world_pos.y / cell_size), floor(world_pos.z / cell_size))` [TR-voxel-world-036]
 
 Uses `floor()`, not truncation — Core Rule 1 guarantees no negative cell
 coordinates exist, but truncation and `floor()` diverge for world positions
@@ -159,7 +159,7 @@ aliasing them into cell 0 *(reworded 2026-07-10 review — the old text
 implied negative cells were possible, contradicting AC4)*. If the result
 falls outside the world's
 bounds, the API must return an explicit "outside grid" result, NOT silently
-clamp to the edge (see Edge Cases).
+clamp to the edge (see Edge Cases). [TR-voxel-world-037]
 
 ### Raycast / Cell-Picking — deliberately NOT a Formula
 
@@ -169,11 +169,11 @@ Rule 5: "raycast against occupied cells" is part of the read API's
 behavioral contract. Two technically distinct implementations are possible
 (native physics collision vs. a manual DDA algorithm, as the concept
 prototype used) — WHICH one is used is deliberately left to the future
-rendering ADR, not decided in this GDD.
+rendering ADR, not decided in this GDD. [TR-voxel-world-017]
 
 ### Procedural Terrain Height (`procedural_terrain_height`)
 
-`h(x, z) = clamp(round(base_height + amplitude * noise2D(x * frequency, z * frequency)), min_y, max_y)`
+`h(x, z) = clamp(round(base_height + amplitude * noise2D(x * frequency, z * frequency)), min_y, max_y)` [TR-voxel-world-038]
 
 | Variable | Symbol | Type | Range | Description |
 |----------|--------|------|-------|-------------|
@@ -181,7 +181,7 @@ rendering ADR, not decided in this GDD.
 | base_height | `base_height` | int | Tuning Knob | Valley-floor cell height |
 | amplitude | `amplitude` | float | Tuning Knob, ≥ 0 | Max height variation from noise |
 | frequency | `frequency` | float | Tuning Knob, > 0 | Noise scale (lower = broader hills) |
-| noise2D | function | — | returns [-1, 1] | Deterministic, seeded 2D noise |
+| noise2D | function | — | returns [-1, 1] | Deterministic, seeded 2D noise [TR-voxel-world-039] |
 | min_y, max_y | `min_y, max_y` | int | = world's vertical bounds | Clamp range |
 | h | `h` | int | `[min_y, max_y]` | Resulting terrain height at (x, z) |
 
@@ -204,37 +204,37 @@ against memory/draw-call budget. See Tuning Knobs.
   and computes with exact integer arithmetic — neighbor-lookup offsets and
   bounds checks are exact comparisons, not epsilon-tolerant ones. Godot 4.4+
   typed Dictionaries (`Dictionary[Vector3i, ...]`) give static-type safety
-  at negligible cost — use them *(2026-07-10 review note)*.
+  at negligible cost — use them [TR-voxel-world-040] *(2026-07-10 review note)*.
 - Memory back-of-envelope *(revised 2026-07-11, large-world decision)*: the
   original sparse-Dictionary note assumed the old ~100×32×100 bound. At the
   new 2000×2000×32 target, Dictionary storage (~500 B/cell measured) is
   infeasible (>16 GB); storage is **chunked packed arrays** (~1–4 B/cell,
   full world ~172 MB measured in `prototypes/chunked-mesher/`) behind the
   UNCHANGED public accessor API (O(1) `get`/`set` by `Vector3i`,
-  `cell_changed`, `raycast_cells`). See ADR-0014. The `Dictionary[Vector3i]`
+  `cell_changed`, `raycast_cells`). [TR-voxel-world-041] See ADR-0014. The `Dictionary[Vector3i]`
   guidance above remains valid for small lookup tables, not bulk cell storage.
 - Collider strategy is a rendering-ADR concern *(2026-07-10 review note)*:
   if raycast picking is implemented via physics (rather than manual DDA),
   per-cell colliders for tens of thousands of terrain cells are a known
   Jolt/scene-tree scalability trap — the ADR must decide picking mechanism
-  and collider granularity together, not separately.
+  and collider granularity together, not separately. [TR-voxel-world-018]
 - A single read or write must be O(1) relative to grid size (see Acceptance
-  Criteria).
+  Criteria). [TR-voxel-world-019]
 - Bulk-write operations (drag-to-area placement) should emit ONE batched
   signal, not one per cell — otherwise the Building System's undo stack and
-  any rendering listener are thrashed (see Edge Cases).
+  any rendering listener are thrashed (see Edge Cases). [TR-voxel-world-042]
 
 ## Edge Cases
 
 | Scenario | Expected Behavior | Rationale |
 |----------|-------------------|-----------|
-| Query/write for a cell outside the world's bounds | The API returns an explicit "outside grid" result — it does NOT silently clamp to the edge | Prevents silent bugs at boundary cases (see Formulas) |
-| A bulk write operation (e.g., dragging a wall across many cells) | Exactly ONE batched change signal is emitted, not one per cell — and the batched payload (and the bulk-write API's return value) carries the per-cell previous contents for EVERY affected cell *(added 2026-07-10 review: Building's undo stack must restore each cell individually; a batch without per-cell before-states is un-undoable)* | Prevents thrashing the Building System's undo stack and rendering listeners while keeping undo lossless |
-| Terrain generation populates the initial grid | The batched-signal mandate applies here too: generation emits at most ONE batched signal (or none, if listeners attach only after the Generated state) — never one signal per terrain cell *(added 2026-07-10 review)* | A valley floor is tens of thousands of cells; per-cell signals at boot would stall the Booting state |
-| Writing to an already-occupied cell (terrain or another block) | Always overwrites and returns the previous contents; whether overwriting SHOULD be allowed is the caller's (Building System's) decision | This layer stays a pure primitive, not a rules check |
-| `base_height` is misconfigured above `max_y` | The entire terrain clamps flat at `max_y` (no crash, but visibly wrong) | The formula clamps correctly; the designer must notice the tuning mistake — documented as a warning |
-| Read/raycast queries are called very frequently per frame (e.g., every mouse-move for hover picking) | Never mutate grid state; remain cheap (O(1)) regardless of call frequency | Hover-picking is the most frequent query pattern in the Building System |
-| Save/Load iterates occupied cells while a write is in progress | Iteration only observes fully-committed cell states, never a write in progress | Mutations are serialized (see States) — no torn reads |
+| Query/write for a cell outside the world's bounds | The API returns an explicit "outside grid" result — it does NOT silently clamp to the edge [TR-voxel-world-037] | Prevents silent bugs at boundary cases (see Formulas) |
+| A bulk write operation (e.g., dragging a wall across many cells) | Exactly ONE batched change signal is emitted, not one per cell [TR-voxel-world-042] — and the batched payload (and the bulk-write API's return value) carries the per-cell previous contents for EVERY affected cell [TR-voxel-world-043] *(added 2026-07-10 review: Building's undo stack must restore each cell individually; a batch without per-cell before-states is un-undoable)* | Prevents thrashing the Building System's undo stack and rendering listeners while keeping undo lossless |
+| Terrain generation populates the initial grid | The batched-signal mandate applies here too: generation emits at most ONE batched signal (or none, if listeners attach only after the Generated state) — never one signal per terrain cell [TR-voxel-world-044] *(added 2026-07-10 review)* | A valley floor is tens of thousands of cells; per-cell signals at boot would stall the Booting state |
+| Writing to an already-occupied cell (terrain or another block) | Always overwrites and returns the previous contents; whether overwriting SHOULD be allowed is the caller's (Building System's) decision [TR-voxel-world-045] | This layer stays a pure primitive, not a rules check |
+| `base_height` is misconfigured above `max_y` | The entire terrain clamps flat at `max_y` (no crash, but visibly wrong) [TR-voxel-world-046] | The formula clamps correctly; the designer must notice the tuning mistake — documented as a warning |
+| Read/raycast queries are called very frequently per frame (e.g., every mouse-move for hover picking) | Never mutate grid state; remain cheap (O(1)) regardless of call frequency [TR-voxel-world-047] | Hover-picking is the most frequent query pattern in the Building System |
+| Save/Load iterates occupied cells while a write is in progress | Iteration only observes fully-committed cell states, never a write in progress [TR-voxel-world-048] | Mutations are serialized (see States) — no torn reads |
 
 ## Dependencies
 
@@ -273,7 +273,7 @@ System and the still-open rendering ADR — Voxel World only provides data and
 signals, never presentation. The one near-exception would be a loading
 indicator during terrain generation, but Scene/World Management already
 established there was no loading screen at the old world bound — terrain generation must
-therefore run synchronously before the first visible scene. *(Revised
+therefore run synchronously before the first visible scene. [TR-voxel-world-026] *(Revised
 2026-07-11, ADR-0014 large world: the initial view-window mesh build is
 ~2.6 s and runs behind Scene/World Management's transition overlay - the
 "near-instant, no indicator" expectation is superseded at this scale.)*
@@ -312,57 +312,57 @@ misconfiguration, raycast correctness, Save/Load iteration contents.)*
 
 1. **GIVEN** the game boots, **WHEN** terrain generation completes, **THEN**
    every cell within the world bounds holds either a terrain block or is
-   empty, and the system transitions Uninitialized → Generated. *[Logic]*
+   empty, and the system transitions Uninitialized → Generated. [TR-voxel-world-029] *[Logic]*
 2. **GIVEN** a valid cell coordinate within bounds, **WHEN** the read API is
    queried, **THEN** it returns the correct occupant matching the last write
-   to that cell. *[Logic]*
+   to that cell. [TR-voxel-world-031] *[Logic]*
 3. **GIVEN** a cell coordinate outside the world bounds, **WHEN** the read or
    write API is called, **THEN** it returns an explicit "outside grid"
-   result — never a silent clamp or crash. *[Logic]*
+   result — never a silent clamp or crash. [TR-voxel-world-037] *[Logic]*
 4. **GIVEN** a world-space point, **WHEN** converted via World→Cell, **THEN**
    `floor()` is used; the grid origin is fixed at (0,0,0) and no negative
    cell coordinates exist, so bounds checks are simple non-negative
-   comparisons. *[Logic]*
+   comparisons. [TR-voxel-world-027] [TR-voxel-world-036] *[Logic]*
 5. **GIVEN** a cell coordinate, **WHEN** converted via Cell→World, **THEN**
-   the result is the cell's center point. *[Logic]*
+   the result is the cell's center point. [TR-voxel-world-035] *[Logic]*
 6. **GIVEN** a single cell write, **WHEN** it completes, **THEN** exactly one
    change signal is emitted identifying the cell and its before/after
-   contents. *[Logic]*
+   contents. [TR-voxel-world-032] *[Logic]*
 7. **GIVEN** a bulk write affecting N cells, **WHEN** it completes, **THEN**
-   exactly ONE batched change signal is emitted. *[Logic]*
+   exactly ONE batched change signal is emitted. [TR-voxel-world-042] *[Logic]*
 8. **GIVEN** a write to an already-occupied cell, **WHEN** it completes,
    **THEN** it overwrites and returns the previous contents to the caller.
-   *[Logic]*
+   [TR-voxel-world-045] *[Logic]*
 9. **GIVEN** a terrain cell and a player-placed cell with identical
    block-type/material, **WHEN** read via the API, **THEN** the results are
-   indistinguishable — no hidden origin flag. *[Logic]*
+   indistinguishable — no hidden origin flag. [TR-voxel-world-030] *[Logic]*
 10. **GIVEN** the terrain height formula, **WHEN** evaluated at any (x,z)
     within bounds, **THEN** the output is always within `[min_y, max_y]`.
-    *[Logic]*
+    [TR-voxel-world-038] *[Logic]*
 11. **GIVEN** `base_height` > `max_y` (misconfiguration), **WHEN** terrain
     generates, **THEN** it clamps flat at `max_y`, no crash, and a warning
-    is logged. *[Logic]*
+    is logged. [TR-voxel-world-046] *[Logic]*
 12. **GIVEN** a raycast against placed cells, **WHEN** cast, **THEN** it
     correctly returns the first occupied cell along the ray (or none) —
-    independent of the eventual rendering mechanism. *[Integration]*
+    independent of the eventual rendering mechanism. [TR-voxel-world-049] *[Integration]*
 13. **GIVEN** a raycast, **WHEN** called repeatedly (e.g., every frame during
-    hover), **THEN** it never mutates grid state. *[Logic]*
+    hover), **THEN** it never mutates grid state. [TR-voxel-world-047] *[Logic]*
 14. **GIVEN** an iteration over occupied cells (Save/Load), **WHEN** a write
     occurs concurrently, **THEN** the iteration observes only
-    fully-committed states, never a partial write. *[Integration]*
+    fully-committed states, never a partial write. [TR-voxel-world-048] *[Integration]*
 15. **GIVEN** the Save/Load iteration API is called, **WHEN** it runs,
-    **THEN** it returns only non-empty (occupied) cells. *[Logic]*
+    **THEN** it returns only non-empty (occupied) cells. [TR-voxel-world-021] *[Logic]*
 16. **Performance**: a single cell read/write completes in O(1) time
-    relative to grid size. *[Performance, Advisory — milestone-gated:
+    relative to grid size. [TR-voxel-world-019] *[Performance, Advisory — milestone-gated:
     verified at the pre-VS spike, not per-story; re-tiered 2026-07-10
     review (an algorithmic-complexity claim isn't per-commit testable)]*
 17. No hardcoded values in implementation — world bounds, `base_height`,
     `amplitude`, `frequency` are read from config, not literals in code.
-    *[Config/Data, Advisory]*
+    [TR-voxel-world-023] *[Config/Data, Advisory]*
 
 **Added by the 2026-07-10 design review:**
-18. **GIVEN** a bulk write affecting N cells, **WHEN** the batched signal is emitted, **THEN** its payload contains the before/after contents for ALL N affected cells (per-cell granularity inside the single signal), and the bulk-write API's return value carries the same per-cell previous contents. *[Logic]*
-19. **GIVEN** terrain generation at boot, **WHEN** the grid is populated, **THEN** at most one batched change signal is observed by any listener — never per-cell signals. *[Integration]*
+18. **GIVEN** a bulk write affecting N cells, **WHEN** the batched signal is emitted, **THEN** its payload contains the before/after contents for ALL N affected cells (per-cell granularity inside the single signal), and the bulk-write API's return value carries the same per-cell previous contents. [TR-voxel-world-043] *[Logic]*
+19. **GIVEN** terrain generation at boot, **WHEN** the grid is populated, **THEN** at most one batched change signal is observed by any listener — never per-cell signals. [TR-voxel-world-044] *[Integration]*
 
 ## Open Questions
 
@@ -371,5 +371,5 @@ misconfiguration, raycast correctness, Save/Load iteration contents.)*
 | Do terrain and player-placed cells need a gameplay distinction after all (e.g. "can't build directly on undisturbed terrain")? | game-designer (Building System GDD) | When the Building System GDD is authored | **RESOLVED 2026-07-09: YES** — Building System Core Rule 15: terrain is not removable, built cells are; the game must distinguish them. Mechanism (data flag here vs. Building's own record) deferred to the building ADR (see building-system.md Open Question 3) |
 | Can Wave Defense destroy cells (e.g. breach a wall), and if so, through which API? | game-designer (Wave Defense GDD) | After the `/prototype wave-defense` spike | — |
 | What is the concrete "hand-shaped valley" silhouette beyond the base height formula (basin shape, radial falloff)? | level-designer / art-director | Before Vertical Slice | — |
-| Which rendering implementation is used (GridMap vs. MultiMeshInstance3D vs. chunked mesher) — directly determines world-extent and performance limits? | technical-director | At `/create-architecture` (building ADR) | — |
+| Which rendering implementation is used (GridMap vs. MultiMeshInstance3D vs. chunked mesher) — directly determines world-extent and performance limits? [TR-voxel-world-025] | technical-director | At `/create-architecture` (building ADR) | — |
 | Which picking mechanism is used (native physics collision vs. manual DDA)? | godot-specialist | At `/create-architecture` (building ADR) | — |
