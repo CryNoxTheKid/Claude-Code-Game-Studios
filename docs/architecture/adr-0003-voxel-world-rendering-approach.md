@@ -22,7 +22,7 @@ Proposed — **PROVISIONAL pending the pre-VS performance spike** (see `architec
 | Field | Value |
 |-------|-------|
 | **Depends On** | None |
-| **Enables** | The not-yet-written "3D Physics Backend & Picking/Raycast Strategy" ADR — this ADR's picking-mechanism conclusion (manual DDA against the data layer, no block physics colliders) significantly narrows that ADR's scope to villager/UI collision only |
+| **Enables** | ADR-0004 (3D Physics Backend & Picking/Raycast Strategy) — this ADR's picking-mechanism conclusion (manual DDA against the data layer, no block physics colliders) significantly narrows that ADR's scope to villager/UI collision only |
 | **Blocks** | Voxel World and Building System `/dev-story` implementation |
 | **Ordering Note** | Provisional pending the pre-VS 30-villager performance spike (`villager-ai-behavior.md`'s named spike); if the spike finds GridMap's draw-call/memory profile insufficient at Township scale, Alternative C (chunked/greedy mesher) is the named escape hatch — see Alternatives |
 
@@ -168,5 +168,5 @@ N/A — no existing code. If the pre-VS spike triggers a move to Alternative C, 
 - Zero `PhysicsServer3D`/`RayCast3D` usage exists anywhere in Voxel World's or Building System's picking code path — grep-verifiable once implementation exists.
 
 ## Related Decisions
-- Enables the not-yet-written "3D Physics Backend & Picking/Raycast Strategy" ADR, which now scopes down to villager/UI collision only (block picking is settled here).
+- Enables ADR-0004 (3D Physics Backend & Picking/Raycast Strategy), which now scopes down to villager/UI collision only (block picking is settled here).
 - Depends on nothing; informed by `architecture.md`'s Open Question QQ3 and the concept prototype report (`prototypes/building-concept/REPORT.md`).

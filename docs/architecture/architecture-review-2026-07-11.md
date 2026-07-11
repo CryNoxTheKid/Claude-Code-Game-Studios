@@ -232,8 +232,20 @@ The five should-fix defects were fixed in this same session, immediately after t
 5. **architecture.md — API sync:** RID's API block now lists `signal validation_complete(...)`
    (ADR-0005) and annotates `get_by_id()`'s immutable-view return contract (ADR-0006).
 
+Follow-up patches (2026-07-11, autonomous overnight run — all five original patches
+grep-verified as landed first):
+
+6. **Phantom `TR-camera-input-010` dropped** from `architecture.md` item 4 (Must-Have list):
+   the registry is now populated and confirms the ID exists nowhere; the underlying
+   ray-projection requirement is covered by ADR-0003's DDA picking consuming `world_ray`.
+7. **ADR-0003 stale references** (same defect class as patch 4, missed by the review): both
+   "not-yet-written '3D Physics Backend…' ADR" mentions (Enables table + Related Decisions)
+   now point to the authored **ADR-0004**.
+
 Still open (not doc patches): the pre-VS performance spike (QQ3, gates ADR-0003/0007/0008), the
-`Proposed`→`Accepted` transition for all 13 ADRs, and the four pre-gate infrastructure artifacts.
+`Proposed`→`Accepted` transition for all 13 ADRs, and the two remaining pre-gate infrastructure
+artifacts (control-manifest.md — blocked on ADR acceptance; tests/ + CI + ux docs landed
+2026-07-11, commits bb4bb31 + 031730b).
 
 > **Note on ADR-0004 filename vs title:** the H1 ("…Villager Hit-Testing Strategy") still differs
 > from the filename (`physics-backend-picking-strategy`) and from `architecture.md`'s reference name.
