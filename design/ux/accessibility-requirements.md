@@ -11,6 +11,9 @@
 
 **Committed tier: "Indie Baseline" — Game Accessibility Guidelines *Basic* level,
 plus selected *Intermediate* items that our GDDs already commit to anyway.**
+(In `/ux-review`'s tier vocabulary this maps to **Basic+**: all Basic checks
+apply; of the Standard checks, focus-order documentation and text-contrast
+ratios apply; screen-reader checks do not until the Alpha decision.)
 
 Rationale: single-player PC colony builder, mouse-driven core interaction,
 small team. Full WCAG-AA / screen-reader support is not achievable for MVP

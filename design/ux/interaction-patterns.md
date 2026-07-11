@@ -44,6 +44,7 @@ All patterns below are specified for keyboard/mouse.
 | P14 | Suspended-Hide (Transition Arbitration) | Input / Overlay | camera-input |
 | P15 | Discrete Stepper Control | Input | building-ui |
 | P16 | Keyboard Access Actions | Input / Accessibility | building-ui Rule 9b |
+| B1–B4 | Base controls: Button, Value Bar, List, Icon Radio Group | Input / Data Display | (composite sources — see Base Control Patterns) |
 
 ---
 
@@ -371,6 +372,65 @@ Tab/`ui_focus_next` collision (building-ui OQ7, Godot 4.6 dual-focus system).
 **When to Use**: Mandatory for every new persistent HUD element (A2).
 **When NOT to Use**: n/a — the stated MVP exemption (mouse-only villager
 selection) is tracked in accessibility-requirements.md.
+
+---
+
+## Base Control Patterns
+
+Compact entries for the primitive controls the composite patterns above are
+built from. State vocabulary for ALL controls: `normal / hover / pressed /
+focused / disabled` — focus visuals required per accessibility-requirements.md
+A2; hover never carries information focus doesn't (keyboard parity).
+
+### B1 — Button
+**Used In**: tool palette (P9), undo/redo (P8), pause/speed (P7), toast dismiss (P1)
+- States: all five; `disabled` shown greyed + non-interactive (undo/redo mirror
+  stack emptiness). Icon buttons carry tooltips (P10) and a label or shape
+  distinction (A1). Activation: click, or focus + `ui_accept`.
+
+### B2 — Value Bar
+**Used In**: villager need bars (P3; MVP: sleep 0–100)
+- Read-only display; fill + numeric/label pairing (never fill-hue alone, A1);
+  updates every frame from upstream state (raw delta, readable during pause);
+  no animation easing on value changes in MVP (motion restraint, A5).
+
+### B3 — List (Expandable)
+**Used In**: issues-anchor expanded list (P1), furniture list (P9 context panel)
+- Vertical list; keyboard: cycle via the owning element's actions (P16),
+  focused row visibly outlined; rows are compact (icon + label + optional
+  action); list is live (rows retire when their cause resolves, P1
+  reconciliation); empty list ⇒ owning element hidden (anchor at zero issues).
+
+### B4 — Icon Radio Group
+**Used In**: speed control 1x/2x/3x (P7), roof-formation picker (P9)
+- Exactly one active; active state shown by outline + label, not hue alone
+  (A1); click or cycle actions (P16); state always mirrors the owning system's
+  returned state, never a UI-local latch (P7 rule generalized).
+
+---
+
+## Animation Standards
+
+| Context | Standard | Source |
+|---|---|---|
+| HUD panel show/hide | Instant swap — no slide/fade in MVP | building-ui.md Game Feel ("speed over ornament") |
+| Toast appear/retire | Instant appear; retire may fade ≤ 0.2s `[assumption]` | P1; A5 motion restraint |
+| Invalid-commit cue | Fade-out ~1s (`invalid_cue_fade`) | building-ui.md |
+| Camera motion | Instant start/stop, no ease-in/out | camera-input.md |
+| Transition overlay | Fade per scene-world-management spec; must fully unwind on abort | P12 |
+| Screen shake / flash > 3 Hz / parallax | Forbidden in MVP | accessibility-requirements.md A5 |
+| All UI animation clocks | Raw delta; Tweens pause ONLY on Suspended via `tween.pause()` | ADR-0011 |
+
+## Sound Standards
+
+| Context | Standard | Source |
+|---|---|---|
+| Invalid commit | Gentle negative cue, paired with visual marker | building-ui.md, P6 |
+| Warning toast appears | Soft alert `[assumption — sound palette undefined]` | P1; A6 audio pairing |
+| Commit success | In-world placement sound `[assumption]` | building-system.md feel |
+| Room recognized | In-world celebration audio (NOT a toast) | building-ui.md Rule 9d |
+| UI hover/click | No hover sounds in MVP `[assumption — anti-noise]` | A5/A6 spirit |
+| Global rule | Every audio cue has a visible counterpart; game fully playable muted | accessibility-requirements.md A6 |
 
 ---
 
