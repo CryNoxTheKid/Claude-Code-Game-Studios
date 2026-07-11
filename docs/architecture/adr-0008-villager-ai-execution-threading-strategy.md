@@ -1,7 +1,7 @@
 # ADR-0008: Villager AI Execution & Threading Strategy
 
 ## Status
-Proposed — PROVISIONAL pending the pre-VS performance spike (same one tracked as `architecture.md` QQ3, and explicitly named in `villager-ai-behavior.md`'s OQ3 as covering this ADR's staggering mechanism)
+Accepted (2026-07-11 — pre-VS performance spike QQ3 PASSED at ADR-ceiling scale; see prototypes/perf-spike-qq3/REPORT.md. User-delegated decision.)
 
 ## Date
 2026-07-11
@@ -24,7 +24,7 @@ Proposed — PROVISIONAL pending the pre-VS performance spike (same one tracked 
 | **Depends On** | ADR-0007 (AI Pathfinding, Navigation & Room-Analysis) — this ADR schedules/throttles ADR-0007's `AStar3D`-based job selection across many agents, it doesn't change the pathfinding mechanism itself |
 | **Enables** | Villager AI `/dev-story` implementation, specifically its decision-loop and Deciding-state processing |
 | **Blocks** | Villager AI implementation |
-| **Ordering Note** | Provisional pending the pre-VS performance spike, same as ADR-0003 and ADR-0007 |
+| **Ordering Note** | Was provisional pending the pre-VS performance spike — spike PASSED 2026-07-11 with tuning deliverable max_deciding_per_tick = 1 (see prototypes/perf-spike-qq3/REPORT.md) |
 
 ## Context
 

@@ -491,7 +491,7 @@ stricter 1:1 TR-to-ADR mapping was offered and explicitly declined.
 |----|---------|----------|-----------------|
 | QQ1 | Wave-defense ↔ freeform-base spatial contract undefined — no chokepoint concept against a fully player-authored settlement | High | `/prototype wave-defense` (pre-dates this architecture; a future Squad & Combat System architecture pass consumes the result) |
 | QQ2 | Township "prosperity" — the core progression-gating variable — is unnamed even as a candidate | Medium | Must be defined as an explicit function of measurable state in the Township Progression GDD before that system gets its own architecture pass |
-| QQ3 | Required ADRs #3 (Rendering), #4 (Physics/Picking), #7 (Pathfinding) are provisional pending the pre-VS performance spike (30-villager stress case, per villager-ai-behavior.md) | High | Run the spike before these 3 ADRs move Proposed → Accepted |
+| QQ3 | ~~Rendering/Pathfinding/AI-execution ADRs provisional pending the pre-VS performance spike~~ **RESOLVED 2026-07-11**: spike PASSED at ADR-ceiling scale (`prototypes/perf-spike-qq3/REPORT.md`) — ADR-0003/0007/0008 Accepted. Deliverable: `max_deciding_per_tick = 1`. Watch-items: draw-call density margin ~20%, Deciding-pass cost (mitigations named in report), BFS boundary ~12k connected cells | ~~High~~ Closed | Done |
 | QQ4 | Villager identity/handle stability across Suspended transitions is `[assumption]` in villager-info-ui.md | Low | Resolve when Villager AI's identity system is implemented |
 
 **Approved 2026-07-11.**

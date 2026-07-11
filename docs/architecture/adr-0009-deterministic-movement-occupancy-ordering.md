@@ -1,7 +1,7 @@
 # ADR-0009: Deterministic Movement/Occupancy Intra-Frame Ordering
 
 ## Status
-Proposed
+Accepted (2026-07-11 — dependency ADR-0007 accepted after spike QQ3 PASS; see prototypes/perf-spike-qq3/REPORT.md. User-delegated decision.)
 
 ## Date
 2026-07-11

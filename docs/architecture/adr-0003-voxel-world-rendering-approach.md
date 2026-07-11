@@ -1,7 +1,7 @@
 # ADR-0003: Voxel World Rendering Approach
 
 ## Status
-Proposed — **PROVISIONAL pending the pre-VS performance spike** (see `architecture.md` Open Question QQ3; this is not an empirically-validated conclusion, it is the best-reasoned choice given the GDDs' stated data model and the concept prototype's validated interaction feel)
+Accepted (2026-07-11 — pre-VS performance spike QQ3 PASSED at ADR-ceiling scale; see prototypes/perf-spike-qq3/REPORT.md. User-delegated decision.)
 
 ## Date
 2026-07-11
@@ -24,7 +24,7 @@ Proposed — **PROVISIONAL pending the pre-VS performance spike** (see `architec
 | **Depends On** | None |
 | **Enables** | ADR-0004 (3D Physics Backend & Picking/Raycast Strategy) — this ADR's picking-mechanism conclusion (manual DDA against the data layer, no block physics colliders) significantly narrows that ADR's scope to villager/UI collision only |
 | **Blocks** | Voxel World and Building System `/dev-story` implementation |
-| **Ordering Note** | Provisional pending the pre-VS 30-villager performance spike (`villager-ai-behavior.md`'s named spike); if the spike finds GridMap's draw-call/memory profile insufficient at Township scale, Alternative C (chunked/greedy mesher) is the named escape hatch — see Alternatives |
+| **Ordering Note** | Was provisional pending the pre-VS performance spike — spike PASSED 2026-07-11 (draw calls 1598/2000, 60 FPS held at ADR-ceiling scale; see prototypes/perf-spike-qq3/REPORT.md). Alternative C remains the named escape hatch if settlement density ever pushes past the ~20% draw-call margin |
 
 ## Context
 
@@ -136,7 +136,7 @@ func _on_cell_changed(cell: Vector3i, before: CellData, after: CellData) -> void
 ### Risks
 - **Risk** (resolved during this ADR's validation, kept here for record): GridMap's actual collision-generation granularity was uncertain in the first draft, which incorrectly assumed GridMap collision was per-cell and framed disabling it as dodging TR-voxel-world-018's named trap. `godot-specialist` review confirmed GridMap collision is octant-batched (default `cell_octant_size = 8`), not per-cell — the trap as described doesn't apply to GridMap's own collision generation. The decision to disable collision is unaffected (nothing needs it), but the earlier "eliminates a scalability trap" framing was corrected to "removes an unused capability" — see Decision §2 and Consequences → Positive above.
 - **Risk**: the pre-VS performance spike (Township-scale, 20-30 villagers, per `villager-ai-behavior.md`) has not run yet — this ADR's conclusion is reasoned from the GDDs' stated constraints, not measured.
-  **Mitigation**: Status is explicitly PROVISIONAL; `architecture.md`'s Open Question QQ3 tracks this; Alternative C is the named fallback with its migration cost already documented above.
+  **Mitigation**: RESOLVED — spike QQ3 PASSED 2026-07-11 (see prototypes/perf-spike-qq3/REPORT.md); Alternative C remains the named fallback should settlement density exceed the measured ~20% draw-call margin.
 - **Risk**: GridMap's MeshLibrary must grow correctly as Resource & Item Database's tier list grows post-MVP — a manual sync point between two systems that don't otherwise talk to each other at runtime (per ADR-0001, RID is Autoload-tier, read-only, no write-back).
   **Mitigation**: MeshLibrary population happens once at boot, driven by iterating RID's `list_all_ids()` for `building_material`/`furniture_fixture` categories — a one-directional, boot-time-only dependency, not a runtime coupling.
 

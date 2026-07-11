@@ -65,17 +65,17 @@
 <!-- Quick reference linking to full ADRs in docs/architecture/ -->
 - ADR-0001 Inter-System Reference & DI Pattern — **Accepted**
 - ADR-0002 Tuning/Config Data Strategy — **Accepted**
-- ADR-0003 Voxel World Rendering Approach — Proposed (PROVISIONAL, spike-gated QQ3)
+- ADR-0003 Voxel World Rendering Approach — **Accepted** (spike QQ3 PASS)
 - ADR-0004 Physics Backend & Picking Strategy — **Accepted**
 - ADR-0005 Boot Sequencing & Initialization Gate — **Accepted**
 - ADR-0006 Data Definition Immutability & Reference Format — **Accepted**
-- ADR-0007 AI Pathfinding, Navigation & Room Analysis — Proposed (PROVISIONAL, spike-gated QQ3)
-- ADR-0008 Villager AI Execution & Threading — Proposed (PROVISIONAL, spike-gated QQ3)
-- ADR-0009 Deterministic Movement & Occupancy Ordering — Proposed (depends on ADR-0007)
+- ADR-0007 AI Pathfinding, Navigation & Room Analysis — **Accepted** (spike QQ3 PASS)
+- ADR-0008 Villager AI Execution & Threading — **Accepted** (spike QQ3 PASS; `max_deciding_per_tick = 1`)
+- ADR-0009 Deterministic Movement & Occupancy Ordering — **Accepted**
 - ADR-0010 Cross-System UI/World Input Arbitration — **Accepted**
 - ADR-0011 UI Timer & Expiry Management — **Accepted**
 - ADR-0012 Save/Load Serialization Strategy — **Accepted**
-- ADR-0013 Multi-Scene Concurrency Model — Proposed (depends on ADR-0003/0004/0007)
+- ADR-0013 Multi-Scene Concurrency Model — **Accepted**
 
 Status source of truth: each ADR's `## Status` section in `docs/architecture/`.
 

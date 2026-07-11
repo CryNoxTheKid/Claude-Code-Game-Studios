@@ -8,7 +8,7 @@ const NavGraphScript := preload("res://nav_graph.gd")
 const SEED := 1337
 const TICK_LEN := 0.1  # 10 ticks/sec at 1x [assumption — Time & Tick rate TBD]
 const VILLAGER_COUNT := 30
-const MAX_DECIDING_PER_TICK := 4
+var max_deciding_per_tick := 4  # overridable via --mdpt=N
 const CANDIDATES_PER_PASS := 15   # max_selection_candidates (GDD)
 const BFS_LIMIT := 200            # bounded reachability check per candidate
 const WRITES_PER_SEC := 20.0      # write-storm rate at 1x
@@ -50,6 +50,8 @@ func _ready() -> void:
 			scenario = a.get_slice("=", 1)
 		elif a.begins_with("--config="):
 			config = a.get_slice("=", 1)
+		elif a.begins_with("--mdpt="):
+			max_deciding_per_tick = int(a.get_slice("=", 1))
 	if config == "c1":
 		world_w = 64; world_d = 64; world_max_y = 16; base_h = 4; amp = 3
 	metrics.record("meta/scenario", scenario)
@@ -68,7 +70,9 @@ func _run() -> void:
 		"s4":
 			await _scenario_s4()
 	metrics.record("meta/mem_static_mb", "%.1f" % (Performance.get_monitor(Performance.MEMORY_STATIC) / 1048576.0))
-	metrics.save_csv("res://results/%s_%s.csv" % [scenario, config])
+	var suffix := "_mdpt%d" % max_deciding_per_tick if scenario == "s2" else ""
+	metrics.record("meta/mdpt", str(max_deciding_per_tick))
+	metrics.save_csv("res://results/%s_%s%s.csv" % [scenario, config, suffix])
 	print("SPIKE_DONE %s %s" % [scenario, config])
 	get_tree().quit()
 
@@ -302,7 +306,7 @@ func _storm_write() -> void:
 
 
 func _tick() -> void:
-	var budget := MAX_DECIDING_PER_TICK
+	var budget := max_deciding_per_tick
 	while budget > 0 and not deciding_queue.is_empty():
 		budget -= 1
 		var i: int = deciding_queue.pop_front()

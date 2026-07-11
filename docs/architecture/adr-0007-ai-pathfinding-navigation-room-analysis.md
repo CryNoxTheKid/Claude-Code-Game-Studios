@@ -1,7 +1,7 @@
 # ADR-0007: AI Pathfinding, Navigation & Room-Analysis Architecture
 
 ## Status
-Proposed — PROVISIONAL pending the pre-VS performance spike (same one tracked as `architecture.md` Open Question QQ3 and named in `villager-ai-behavior.md`; this ADR's incremental-graph-patching performance is unmeasured, consistent with ADR-0003's precedent)
+Accepted (2026-07-11 — pre-VS performance spike QQ3 PASSED at ADR-ceiling scale; see prototypes/perf-spike-qq3/REPORT.md. User-delegated decision.)
 
 ## Date
 2026-07-11
@@ -24,7 +24,7 @@ Proposed — PROVISIONAL pending the pre-VS performance spike (same one tracked 
 | **Depends On** | ADR-0003 (Voxel World Rendering Approach) — this ADR's graph is built from Voxel World's own occupancy data, the same data layer ADR-0003 established as authoritative |
 | **Enables** | Villager AI and Build Validation & Navigability `/dev-story` implementation |
 | **Blocks** | Both of the above — neither can implement its movement/analysis logic without this decision |
-| **Ordering Note** | Provisional pending the pre-VS performance spike, same as ADR-0003 |
+| **Ordering Note** | Was provisional pending the pre-VS performance spike — spike PASSED 2026-07-11 (patch avg 0.46 ms, query p95 1.9 ms; see prototypes/perf-spike-qq3/REPORT.md) |
 
 ## Context
 
