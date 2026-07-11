@@ -51,11 +51,15 @@ func cell_center(c: Vector3i) -> Vector3:
 
 
 func build(width: int, depth: int) -> void:
+	build_region(0, 0, width, depth)
+
+
+func build_region(x0: int, z0: int, x1: int, z1: int) -> void:
 	astar.clear()
 	standable_ids.clear()
 	var cells: Array[Vector3i] = []
-	for x in width:
-		for z in depth:
+	for x in range(x0, x1):
+		for z in range(z0, z1):
 			for y in max_y + 1:
 				var c := Vector3i(x, y, z)
 				if is_standable(c):

@@ -114,3 +114,26 @@ process RSS (e.g. `OS.get_memory_info()`), not MEMORY_STATIC.
 C2 (ADR ceiling) passes everything, so the GDD-default C1 world is not the
 thing keeping us honest — no world-size cap needed. The flagged GDD/ADR scale
 discrepancy stays a documentation note, not a constraint.
+
+## Addendum 2 (2026-07-11, Pre-Production step 1): QQ5 region spike + un-vsync re-measure
+
+**S5 — region-bounded nav graph on the 2000-world** (data-only, houses included):
+
+| Region | Points | Build (boot) | Mem | Query avg/p95 | Patch avg |
+|---|---|---|---|---|---|
+| 100x100 | 11.2k | 0.26 s | 36 MB | 0.5 / 1.8 ms | 0.36 ms |
+| 200x200 | 47k | 1.1 s | 73 MB | 2.6 / 9.2 ms | 0.37 ms |
+| 300x300 | 106k | 2.5 s | 131 MB | 5.2 / **24 ms** | 0.37 ms |
+| 400x400 | 188k | 4.7 s | 217 MB | 12 / **49 ms** | 0.38 ms |
+
+Patch cost is FLAT (local op) — write-storms scale-free. Query cost scales with
+path length (bench = random worst-case pairs). **QQ5 RESOLVED: settlement-core
+nav region committed <= 200x200** (p95 9.2 ms fits one-per-tick staggering,
+ADR-0008 mdpt=1); 300+ is frame-breaking per single query. Escape hatch past
+200: hierarchical/regional graphs (future ADR).
+
+**Un-vsync re-measure (chunked mesher @2000):** real frame cost avg 1.1-1.6 ms,
+p95 1.7 ms (was vsync-masked at 16.7) — **~10x budget headroom**. TD condition
+closed; greedy-meshing reserve confirmed unnecessary. Streaming p95 4.5 ms;
+the known 141 ms unload-burst hitch remains a production-implementation note
+(staggered unloads, ADR-0014 §3).

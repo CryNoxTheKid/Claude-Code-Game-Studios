@@ -75,7 +75,7 @@ streamed view window.**
 | Metric | Value | Budget |
 |---|---|---|
 | Full-world packed data | 172 MB | ≤4 GB |
-| Frame p95, all views | 16.7 ms (60 FPS, vsync) | ≤16.6 ms |
+| Frame p95, all views | 16.7 ms (vsync-locked); **un-vsync re-measure 2026-07-11: avg 1.1-1.6 ms, p95 1.7 ms — ~10x headroom** | ≤16.6 ms |
 | Draw calls max | 1,293 | ≤2000 |
 | Edit → chunk rebuild | 1.1 ms avg | in-frame |
 | Streaming (1,488 chunks in-flight) | p95 16.7 ms | in-frame |

@@ -74,6 +74,8 @@ func _run() -> void:
 			await _scenario_s2()
 		"s4":
 			await _scenario_s4()
+		"s5":
+			await _scenario_s5()
 	metrics.record("meta/mem_static_mb", "%.1f" % (Performance.get_monitor(Performance.MEMORY_STATIC) / 1048576.0))
 	var suffix := "_mdpt%d" % max_deciding_per_tick if scenario == "s2" else ""
 	metrics.record("meta/mdpt", str(max_deciding_per_tick))
@@ -352,6 +354,77 @@ func _deciding_pass(i: int) -> void:
 	v["path"] = path
 	v["path_i"] = 0
 	v["state"] = "traveling"
+
+
+# ---------- S5 (QQ5): region-bounded nav graph on the large world ----------
+# Data-only (no GridMap, no full-world occupancy — Dictionary fills region+margin
+# with near-surface cells + houses, mirroring what standability actually touches).
+
+func _scenario_s5() -> void:
+	var noise := FastNoiseLite.new()
+	noise.seed = SEED
+	noise.frequency = 0.05
+	nav.occ = occ
+	nav.max_y = world_max_y
+	for region_size: int in [100, 200, 300, 400]:
+		occ.clear()
+		var x0 := world_w / 2 - region_size / 2
+		var t0 := Time.get_ticks_usec()
+		for x in range(x0 - 2, x0 + region_size + 2):
+			for z in range(x0 - 2, x0 + region_size + 2):
+				var h := clampi(8 + int(roundf(noise.get_noise_2d(x, z) * 6.0)), 2, world_max_y - 6)
+				for y in range(maxi(0, h - 4), h):
+					occ[Vector3i(x, y, z)] = 1
+		# settlement houses inside the region (same 14-cell grid as _build_world)
+		var hx := x0 + 4
+		while hx + 8 < x0 + region_size - 4:
+			var hz := x0 + 4
+			while hz + 8 < x0 + region_size - 4:
+				var gh := clampi(8 + int(roundf(noise.get_noise_2d(hx + 4, hz + 4) * 6.0)), 2, world_max_y - 6)
+				for lx in range(hx, hx + 8):
+					for lz in range(hz, hz + 8):
+						occ[Vector3i(lx, gh, lz)] = 1
+						occ[Vector3i(lx, gh + 4, lz)] = 1
+						var edge := lx == hx or lx == hx + 7 or lz == hz or lz == hz + 7
+						if edge and not (lx == hx + 3 and lz == hz):
+							for wy in range(gh + 1, gh + 4):
+								occ[Vector3i(lx, wy, lz)] = 1
+				hz += 14
+			hx += 14
+		metrics.record("s5_r%d/fill_ms" % region_size, "%.0f" % ((Time.get_ticks_usec() - t0) / 1000.0))
+		metrics.record("s5_r%d/occ_cells" % region_size, str(occ.size()))
+
+		t0 = Time.get_ticks_usec()
+		nav.build_region(x0, x0, x0 + region_size, x0 + region_size)
+		metrics.record("s5_r%d/build_ms" % region_size, "%.0f" % ((Time.get_ticks_usec() - t0) / 1000.0))
+		metrics.record("s5_r%d/points" % region_size, str(nav.standable_ids.size()))
+		metrics.record("s5_r%d/mem_mb" % region_size, "%.0f" % (Performance.get_monitor(Performance.MEMORY_STATIC) / 1048576.0))
+
+		var bench: Array[int] = []
+		for i in 200:
+			var a := nav.random_standable(rng)
+			var b := nav.random_standable(rng)
+			var t1 := Time.get_ticks_usec()
+			nav.astar.get_point_path(a, b)
+			bench.append(Time.get_ticks_usec() - t1)
+		_record_usec("s5_r%d/query_usec" % region_size, bench)
+
+		var patch_bench: Array[int] = []
+		for i in 200:
+			var id := nav.random_standable(rng)
+			var pos := nav.astar.get_point_position(id)
+			var c := Vector3i(int(pos.x), int(pos.y), int(pos.z))
+			var t1 := Time.get_ticks_usec()
+			occ[c] = 1
+			nav.patch(c)
+			patch_bench.append(Time.get_ticks_usec() - t1)
+			t1 = Time.get_ticks_usec()
+			occ.erase(c)
+			nav.patch(c)
+			patch_bench.append(Time.get_ticks_usec() - t1)
+		_record_usec("s5_r%d/patch_usec" % region_size, patch_bench)
+		await get_tree().process_frame
+	await get_tree().process_frame
 
 
 # ---------- S4: BFS on merged structures ----------
