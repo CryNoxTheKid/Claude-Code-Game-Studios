@@ -649,14 +649,23 @@ extremes — the load check, not the ranges, is the guarantee.*
    resident memory, not just pass latency; Rule 11's incremental-update
    mandate governs its compute side. A sparse/pruned representation is
    the expected mitigation (ADR).
-   Also owned by the ADR: the cell-rule vs. NavigationServer3D approach
-   (either must honor Rule 7's event contract and Rule 2's exact
-   movement graph); a backing data structure with O(affected-region)
-   cell lookups (a sparse cell dictionary qualifies;
-   GridMap.get_used_cells-style full iteration does not); and — if
-   Voxel World's ADR adopts chunked streaming — chunk boundaries being
-   distinguishable from the world edge (Edge Case 12). →
-   *building/AI ADR + the pre-VS performance spike (reciprocal axis
-   added to villager-ai-behavior.md OQ 3)*
+   Also owned by the ADR: the cell-rule vs. NavigationServer3D approach —
+   **RESOLVED 2026-07-11 via ADR-0007: cell-rule, not NavigationServer3D.**
+   This system runs its own independent BFS/flood-fill calling Villager
+   AI's shared `is_standable`/`is_step_legal` predicates directly (the
+   same functions Villager AI's own `AStar3D`-based pathfinding calls),
+   honoring Rule 7's event contract and Rule 2's exact movement graph by
+   construction — not a geometric navmesh approximation. Backing data
+   structure: Voxel World's own sparse `Dictionary[Vector3i, CellData]`
+   (ADR-0003), giving O(affected-region) lookups natively —
+   `GridMap.get_used_cells()`-style full iteration was never in the
+   design (GridMap is a pure rendering mirror per ADR-0003, not the data
+   layer this system queries). Chunk-boundary-vs-world-edge distinguishing
+   (Edge Case 12) remains open pending Voxel World's chunked-streaming
+   status, which has not been revisited since ADR-0003 kept the sparse
+   dictionary as a single unbounded structure, not chunked — moot for
+   MVP. → *pre-VS performance spike still required for regions (a)-(c)
+   above (reciprocal axis in villager-ai-behavior.md OQ 3) — ADR-0007
+   is itself PROVISIONAL pending that same spike.*
 6. **"Housed" as a prosperity input** — formalize the owned-sheltered-bed
    status for Township Progression. → *Township Progression GDD, Alpha*

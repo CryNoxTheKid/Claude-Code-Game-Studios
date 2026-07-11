@@ -269,7 +269,10 @@ dense RTS command card, nested ribbon menus, or modal dialog churn.
     HUD must NOT consume the pointer-release event of an in-progress
     world drag (Edge Case 5 depends on the drag owner still observing
     the release; a naive whole-zone mouse-filter=STOP would swallow
-    it).
+    it) — **RESOLVED 2026-07-11 via ADR-0010**: Building System tracks
+    an in-progress drag's release via `_input()` (fires before Control
+    consumption) rather than `_unhandled_input()`, immune to HUD hover
+    regardless of the HUD's own mouse_filter configuration.
 12. New InputMap actions introduced by this GDD (`tool_select_1..5`,
     `time_pause`, `time_speed_up/down`, and — added 2026-07-10 —
     `toast_focus_cycle`, `toast_dismiss`, `toggle_issues`,
@@ -356,11 +359,19 @@ not as formulas.
    mirrors state via signals; a click racing a just-disabled state is a
    silent no-op — the UI never issues an action the source system would
    reject noisily.
-5. **Drag released over the HUD.** Hover suppression (Rule 11) applies
-   to *starting* picks, not active drags: a drag begun in the world
-   commits on release even over the HUD, using the last valid world
-   preview (the preview locks when the cursor enters HUD space). No
-   accidental aborts from brushing the toolbar.
+5. **Drag released over the HUD.** *(mechanism RESOLVED 2026-07-11 via
+   ADR-0010)* Hover suppression (Rule 11) applies to *starting* picks,
+   not active drags: a drag begun in the world commits on release even
+   over the HUD, using the last valid world preview (the preview locks
+   when the cursor enters HUD space). No accidental aborts from brushing
+   the toolbar. Mechanism: once dragging, Building System listens for the
+   release via Godot's `_input()` (fires before any Control's `_gui_input`
+   consumption, regardless of cursor position) instead of
+   `_unhandled_input()`, and claims the event via
+   `set_input_as_handled()` — so the release is never swallowed by the
+   HUD's own click-consumption, and the commit uses the locked preview
+   position rather than re-deriving one from the (HUD-positioned) release
+   point.
 6. **Suspended with live toasts.** The toast/anchor set survives
    Suspended: hidden with the HUD, restored on reactivation; all UI
    timers (grace, debounce windows, the invalid-cue fade) pause while
@@ -578,9 +589,17 @@ checks are ADVISORY (interaction test or walkthrough doc).)*
    4.5's AccessKit accessibility APIs postdate the model's training
    data; verify against the pinned 4.7 docs before implementing the
    HUD input layer → *Technical Setup / building ADR*
-8. **Timer architecture** — per-key wall-clock grace/debounce timers
-   (potentially one per active issue subject) argue for a single
-   centralized expiry-timestamp manager over N Godot `Timer` nodes
-   (pause/resume-with-remaining is one recorded offset instead of N
-   fragile `time_left` reconstructions) → *implementation choice,
-   building ADR / lead-programmer*
+8. **Timer architecture** — **RESOLVED 2026-07-11 via ADR-0011**: a
+   single centralized expiry-timestamp manager (`Dictionary[key,
+   TimerRecord]` + one shared `_process` loop), not N Godot `Timer`
+   nodes — chosen for zero per-timer Node-lifecycle overhead at
+   potentially-dozens-of-simultaneous-subjects scale, and for direct
+   consistency with Time & Tick System's own "no per-consumer timers
+   anywhere" precedent. Correction to this GDD's original rationale:
+   Godot's `Timer.paused` property actually DOES preserve and
+   auto-resume `time_left` natively (confirmed via ADR-0011's engine
+   validation) — N Timer nodes would NOT have required "fragile
+   time_left reconstruction" as originally assumed here; the real
+   reasons for the centralized choice are Node-overhead and
+   project-precedent-consistency, not pause-fidelity (both approaches
+   achieve exact pause fidelity equally well).

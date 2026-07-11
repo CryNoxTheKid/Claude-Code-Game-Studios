@@ -713,17 +713,23 @@ batch atomicity.)*
    vs. this system's own built-cell record (Core Rule 15 resolved the
    *design* question with "yes, needed"; the *mechanism* is architectural).
    → *building ADR via `/create-architecture`*
-3b. **Mid-path solidification race** *(added by the 2026-07-10 re-review)*
-   — villager movement is continuous game-delta interpolation (Villager AI
-   F1), but Edge Case 6's "a cell never becomes solid under a character"
-   guarantee is tick-discrete: whether a villager mid-interpolation INTO a
-   cell counts as "occupying" it, and the intra-frame ordering of AI
-   position update vs. occupancy check, are undefined. Related: a
-   blueprint-only wall is walkable and can complete mid-transit (a
-   consequence of the intentional non-solid-blueprints rule, Core Rule
-   14b). Owned by NEITHER this GDD nor Villager AI alone — it is a seam.
-   → *Building/AI integration section of the building ADR (cross-pointer
-   in villager-ai-behavior.md OQ 3)*
+3b. **Mid-path solidification race** *(added by the 2026-07-10 re-review;
+   RESOLVED 2026-07-11 via ADR-0009)* — villager movement is continuous
+   game-delta interpolation (Villager AI F1), but Edge Case 6's "a cell
+   never becomes solid under a character" guarantee is tick-discrete.
+   **Resolution**: a villager's occupied cell is always the discrete,
+   tick-boundary-quantized `current_cell` (it occupies its `from_cell`
+   for the whole transit, never the `to_cell` until arrival) — this
+   system's occupancy check always reads that discrete value, never an
+   interpolation-progress float. The blueprint-completing-mid-transit
+   case (a villager walking through a still-non-solid blueprint location
+   when it completes, per the intentional non-solid-blueprints rule, Core
+   Rule 14b) is one instance of the general race ADR-0009 resolves: Voxel
+   World's write signal fires synchronously, so Villager AI's existing
+   re-path-on-blocking-write contract redirects the villager before its
+   next frame's visual interpolation advances further — no special-case
+   handling needed beyond the general mechanism.
+   → *ADR-0009 (cross-pointer in villager-ai-behavior.md OQ 3)*
 3c. **Aggregate ghost ceiling + degraded-preview mechanism** *(added by
    the 2026-07-10 re-review)* — no settlement-wide cap exists on
    simultaneous Planned/UnderConstruction ghosts (only per-command 512 +

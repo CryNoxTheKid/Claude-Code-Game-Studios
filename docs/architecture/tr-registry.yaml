@@ -23,34 +23,486 @@
 #   NNN = three-digit zero-padded sequence per system, starting at 001
 #
 # STATUS VALUES: active | deprecated | superseded-by: TR-[system]-NNN
-
-version: 1
-last_updated: ""
-
-requirements: []
-
-# --- EXAMPLE ENTRIES (remove when first real entries are added) ---
 #
-# - id: TR-combat-001
-#   system: combat
-#   gdd: design/gdd/combat-system.md
-#   requirement: "Player takes damage from enemies based on attack power minus defence"
-#   created: 2026-03-10
-#   revised: ""
-#   status: active
-#
-# - id: TR-combat-002
-#   system: combat
-#   gdd: design/gdd/combat-system.md
-#   requirement: "Combo window timing is 0.4 seconds between hits"
-#   created: 2026-03-10
-#   revised: "2026-04-01"
-#   status: active
-#
-# - id: TR-combat-003
-#   system: combat
-#   gdd: design/gdd/combat-system.md
-#   requirement: "Old damage formula using raw stats"
-#   created: 2026-03-10
-#   revised: ""
-#   status: superseded-by: TR-combat-001
+# ─────────────────────────────────────────────────────────────────────────
+# PROVENANCE NOTE (2026-07-11, first population by /architecture-review):
+#   The MVP GDDs contain NO TR-ID labels (verified by grep — zero `TR-`
+#   occurrences across design/gdd/*.md). The TR-IDs below were assigned during
+#   the 2026-07-11 architecture pass and referenced only inside the ADRs and
+#   architecture.md. This first population therefore records ONLY the ~54
+#   "ADR-worthy" requirements that the 13 ADRs formally address (their "GDD
+#   Requirements Addressed" tables), which is the authoritative source for each
+#   ID's text. The ~295 GDD-specified requirements that need no ADR are NOT yet
+#   registered — they are covered directly by their GDD + architecture.md
+#   Module Ownership per the recorded interpretive call. `requirement` text here
+#   is reconstructed from the ADRs/architecture.md and should be back-annotated
+#   against the source GDD wording when the GDDs are given explicit TR-ID labels.
+# ─────────────────────────────────────────────────────────────────────────
+
+version: 2
+last_updated: "2026-07-11"
+
+requirements:
+
+  # ── Scene/World Management ──────────────────────────────────────────────
+  - id: TR-scene-world-management-004
+    system: scene-world-management
+    gdd: design/gdd/scene-world-management.md
+    requirement: "Boot gate: Resource & Item Database must reach Ready before the Valley scene attaches and before Building System / Villager AI initialize; DB failure halts boot on an error screen."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-scene-world-management-013
+    system: scene-world-management
+    gdd: design/gdd/scene-world-management.md
+    requirement: "Savepoint creation is bound exclusively to transition_ended(success=true)."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-scene-world-management-023
+    system: scene-world-management
+    gdd: design/gdd/scene-world-management.md
+    requirement: "Boot-order enforcement is owned by a dedicated boot-order mechanism/ADR."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-scene-world-management-024
+    system: scene-world-management
+    gdd: design/gdd/scene-world-management.md
+    requirement: "Savepoint creation is bound exclusively to transition_ended(success=true)."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-scene-world-management-030
+    system: scene-world-management
+    gdd: design/gdd/scene-world-management.md
+    requirement: "All transition tunables are read from data/config, never hardcoded literals."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-scene-world-management-033
+    system: scene-world-management
+    gdd: design/gdd/scene-world-management.md
+    requirement: "Two-simultaneous-live-scenes partitioning for WorldEnvironment, Camera3D.current, audio listeners, navigation maps, input routing, and GI/lighting bleed — shared World3D vs separate SubViewports."
+    created: 2026-07-11
+    revised: ""
+    status: active
+
+  # ── Voxel World / Grid Data ─────────────────────────────────────────────
+  - id: TR-voxel-world-017
+    system: voxel-world
+    gdd: design/gdd/voxel-world.md
+    requirement: "Raycast/cell picking without the per-cell-collider scalability trap."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-voxel-world-018
+    system: voxel-world
+    gdd: design/gdd/voxel-world.md
+    requirement: "Raycast/cell picking without the per-cell-collider scalability trap."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-voxel-world-021
+    system: voxel-world
+    gdd: design/gdd/voxel-world.md
+    requirement: "Save/Load iteration API exposes only occupied (non-empty) cells."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-voxel-world-023
+    system: voxel-world
+    gdd: design/gdd/voxel-world.md
+    requirement: "World/terrain tuning values are read from config, never hardcoded."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-voxel-world-025
+    system: voxel-world
+    gdd: design/gdd/voxel-world.md
+    requirement: "The voxel rendering representation (GridMap vs MultiMeshInstance3D vs chunked mesher) is an open architecture decision."
+    created: 2026-07-11
+    revised: ""
+    status: active
+
+  # ── Camera & Input ──────────────────────────────────────────────────────
+  - id: TR-camera-input-019
+    system: camera-input
+    gdd: design/gdd/camera-input.md
+    requirement: "All tuning-knob values are read from config/exported vars, not hardcoded."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-camera-input-020
+    system: camera-input
+    gdd: design/gdd/camera-input.md
+    requirement: "Exactly one owner per click; Camera & Input must not also emit a world-action signal when a Control consumed the click."
+    created: 2026-07-11
+    revised: ""
+    status: active
+
+  # ── Time & Tick System ──────────────────────────────────────────────────
+  - id: TR-time-tick-system-020
+    system: time-tick-system
+    gdd: design/gdd/time-tick-system.md
+    requirement: "All tunables are read from config, not hardcoded."
+    created: 2026-07-11
+    revised: ""
+    status: active
+
+  # ── Resource & Item Database ────────────────────────────────────────────
+  - id: TR-resource-item-database-007
+    system: resource-item-database
+    gdd: design/gdd/resource-item-database.md
+    requirement: "Validation produces a structured result returned by the validation call itself (dependency-injectable/unit-testable), not just logged."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-resource-item-database-010
+    system: resource-item-database
+    gdd: design/gdd/resource-item-database.md
+    requirement: "Returned item definitions are immutable to callers; caller mutation must never affect subsequent queries."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-resource-item-database-019
+    system: resource-item-database
+    gdd: design/gdd/resource-item-database.md
+    requirement: "Boot sequencing: Scene/World Management's Booting state gates on this database reaching Ready before Building System / Villager AI initialize; no dependency back on Scene/World Management."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-resource-item-database-023
+    system: resource-item-database
+    gdd: design/gdd/resource-item-database.md
+    requirement: "visual_asset reference must resolve to an existing asset at boot; unresolved references fail boot validation."
+    created: 2026-07-11
+    revised: ""
+    status: active
+
+  # ── Building System ─────────────────────────────────────────────────────
+  - id: TR-building-system-002
+    system: building-system
+    gdd: design/gdd/building-system.md
+    requirement: "Pick->preview->commit pipeline requires a raycast/cell query every frame a tool is armed."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-building-system-003
+    system: building-system
+    gdd: design/gdd/building-system.md
+    requirement: "Ghost-preview re-rasterization, degrade-to-outline threshold, and aggregate ghost rendering."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-building-system-023
+    system: building-system
+    gdd: design/gdd/building-system.md
+    requirement: "Save/Load: open blueprint cells + per-cell construction progress are persisted."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-building-system-026
+    system: building-system
+    gdd: design/gdd/building-system.md
+    requirement: "Pick->preview->commit pipeline requires a raycast/cell query every frame a tool is armed."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-building-system-033
+    system: building-system
+    gdd: design/gdd/building-system.md
+    requirement: "Save/Load: the undo/redo stack is explicitly excluded from save data."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-building-system-035
+    system: building-system
+    gdd: design/gdd/building-system.md
+    requirement: "Ghost-preview re-rasterization, degrade-to-outline threshold, and aggregate ghost rendering."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-building-system-038
+    system: building-system
+    gdd: design/gdd/building-system.md
+    requirement: "All tuning knobs must be externally data-driven, never hardcoded."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-building-system-039
+    system: building-system
+    gdd: design/gdd/building-system.md
+    requirement: "Ghost-preview re-rasterization, degrade-to-outline threshold, and aggregate ghost rendering."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-building-system-040
+    system: building-system
+    gdd: design/gdd/building-system.md
+    requirement: "Mid-path solidification race: intra-frame ordering between a villager position update and a same-frame occupancy check must be made deterministic."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-building-system-041
+    system: building-system
+    gdd: design/gdd/building-system.md
+    requirement: "Ghost-preview re-rasterization, degrade-to-outline threshold, and aggregate ghost rendering."
+    created: 2026-07-11
+    revised: ""
+    status: active
+
+  # ── Villager AI & Behavior ──────────────────────────────────────────────
+  - id: TR-villager-ai-behavior-009
+    system: villager-ai-behavior
+    gdd: design/gdd/villager-ai-behavior.md
+    requirement: "Standability predicate (canonical walkability ground truth)."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-villager-ai-behavior-010
+    system: villager-ai-behavior
+    gdd: design/gdd/villager-ai-behavior.md
+    requirement: "Step-legality predicate (canonical walkability ground truth)."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-villager-ai-behavior-011
+    system: villager-ai-behavior
+    gdd: design/gdd/villager-ai-behavior.md
+    requirement: "Walkability rules exposed as the canonical ground truth queried by Build Validation."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-villager-ai-behavior-013
+    system: villager-ai-behavior
+    gdd: design/gdd/villager-ai-behavior.md
+    requirement: "Deciding-pass staggering: simultaneous mass-Deciding events stagger selection passes across frames in a stable, deterministic villager order."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-villager-ai-behavior-016
+    system: villager-ai-behavior
+    gdd: design/gdd/villager-ai-behavior.md
+    requirement: "Dependency-injected RNG source (live RNG in production, fixed-sequence double in tests) for deterministic wander/micro-behavior selection."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-villager-ai-behavior-027
+    system: villager-ai-behavior
+    gdd: design/gdd/villager-ai-behavior.md
+    requirement: "Save/Load: serialize per-villager position, activity, claimed job id, owned bed, need levels; re-validate stale claim/bed ids on load without crashing."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-villager-ai-behavior-035
+    system: villager-ai-behavior
+    gdd: design/gdd/villager-ai-behavior.md
+    requirement: "The pathfinding algorithm itself is an open architectural choice."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-villager-ai-behavior-036
+    system: villager-ai-behavior
+    gdd: design/gdd/villager-ai-behavior.md
+    requirement: "Mid-travel re-path required when a Voxel World write blocks the current path."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-villager-ai-behavior-041
+    system: villager-ai-behavior
+    gdd: design/gdd/villager-ai-behavior.md
+    requirement: "Milestone-gated performance: 16.6 ms frame budget maintained at VS population (~5) and Full Vision ceiling (30)."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-villager-ai-behavior-046
+    system: villager-ai-behavior
+    gdd: design/gdd/villager-ai-behavior.md
+    requirement: "Mid-path solidification race also affects F4 nudge-aside targeting and walled-in queries."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-villager-ai-behavior-047
+    system: villager-ai-behavior
+    gdd: design/gdd/villager-ai-behavior.md
+    requirement: "Pre-VS performance spike: synthetic 30-villager stress case covering staggered Deciding."
+    created: 2026-07-11
+    revised: ""
+    status: active
+
+  # ── Build Validation & Navigability ─────────────────────────────────────
+  - id: TR-build-validation-navigability-008
+    system: build-validation-navigability
+    gdd: design/gdd/build-validation-navigability.md
+    requirement: "Must reuse Villager AI's exact walkability rules, not a plain 4/8-neighbor flood-fill."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-build-validation-navigability-009
+    system: build-validation-navigability
+    gdd: design/gdd/build-validation-navigability.md
+    requirement: "Graph walk from region interior to any open-sky standable cell."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-build-validation-navigability-016
+    system: build-validation-navigability
+    gdd: design/gdd/build-validation-navigability.md
+    requirement: "Config-load-time blocking validation: max_room_height >= Building System's max wall_height."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-build-validation-navigability-019
+    system: build-validation-navigability
+    gdd: design/gdd/build-validation-navigability.md
+    requirement: "Deferred engine-capability decision: NavigationServer3D rebake vs custom cell flood-fill."
+    created: 2026-07-11
+    revised: ""
+    status: active
+
+  # ── Needs & Mood System ─────────────────────────────────────────────────
+  - id: TR-needs-mood-system-020
+    system: needs-mood-system
+    gdd: design/gdd/needs-mood-system.md
+    requirement: "Config-load-time blocking validation of the ladder-ordering invariant."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-needs-mood-system-025
+    system: needs-mood-system
+    gdd: design/gdd/needs-mood-system.md
+    requirement: "Live-pair integration-test infrastructure: a real Needs instance + real Villager AI villager exercised through a full decay->recovery->wake round trip."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-needs-mood-system-026
+    system: needs-mood-system
+    gdd: design/gdd/needs-mood-system.md
+    requirement: "Save/Load: per-villager need values persisted (compound cluster 026-029 in ADR-0012; individual split pending GDD back-annotation)."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-needs-mood-system-027
+    system: needs-mood-system
+    gdd: design/gdd/needs-mood-system.md
+    requirement: "Save/Load: smoothed mood restored as-saved, never re-initialized via the F4 spawn formula (compound cluster 026-029 in ADR-0012)."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-needs-mood-system-028
+    system: needs-mood-system
+    gdd: design/gdd/needs-mood-system.md
+    requirement: "Save/Load: schema-drift handling on load (compound cluster 026-029 in ADR-0012)."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-needs-mood-system-029
+    system: needs-mood-system
+    gdd: design/gdd/needs-mood-system.md
+    requirement: "Save/Load: restore exactly the saved need/mood state without re-derivation (compound cluster 026-029 in ADR-0012)."
+    created: 2026-07-11
+    revised: ""
+    status: active
+
+  # ── Building UI ─────────────────────────────────────────────────────────
+  - id: TR-building-ui-008
+    system: building-ui
+    gdd: design/gdd/building-ui.md
+    requirement: "Material/furniture palette populated at runtime from Resource & Item Database queries."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-building-ui-014
+    system: building-ui
+    gdd: design/gdd/building-ui.md
+    requirement: "First-appearance grace on expiry must re-query Build Validation's queryable state, not the triggering event."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-building-ui-015
+    system: building-ui
+    gdd: design/gdd/building-ui.md
+    requirement: "Grace/debounce/invalid-cue timers pause and resume-with-remaining-time only on the Suspended transition, decoupled from Control visibility."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-building-ui-018
+    system: building-ui
+    gdd: design/gdd/building-ui.md
+    requirement: "Dismissal debounce: per-key wall-clock suppression window."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-building-ui-028
+    system: building-ui
+    gdd: design/gdd/building-ui.md
+    requirement: "Hover-over-HUD sets a queryable flag that gates world-pick starts."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-building-ui-029
+    system: building-ui
+    gdd: design/gdd/building-ui.md
+    requirement: "Hover suppression must not swallow the pointer-release event of an in-progress world-space drag."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-building-ui-037
+    system: building-ui
+    gdd: design/gdd/building-ui.md
+    requirement: "All numeric UI-behavior values must be externally data-driven config, not hardcoded."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-building-ui-038
+    system: building-ui
+    gdd: design/gdd/building-ui.md
+    requirement: "Mirror/event logic must be exercisable headless via mocked upstream signals and mocked queryable state (BLOCKING automated-test tier)."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-building-ui-040
+    system: building-ui
+    gdd: design/gdd/building-ui.md
+    requirement: "Timer-architecture decision: centralized expiry-timestamp manager vs N per-issue Godot Timer nodes."
+    created: 2026-07-11
+    revised: ""
+    status: active
+
+  # ── Villager Info UI ────────────────────────────────────────────────────
+  - id: TR-villager-info-ui-002
+    system: villager-info-ui
+    gdd: design/gdd/villager-info-ui.md
+    requirement: "Villager-hit query must honor the same shared world-pick hover-suppression flag defined by Building UI."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-villager-info-ui-014
+    system: villager-info-ui
+    gdd: design/gdd/villager-info-ui.md
+    requirement: "Villager-hit testing is a dedicated physics query on a dedicated villager collision layer, fully separate from block-picking; Building's placement raycast must ignore this layer."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-villager-info-ui-015
+    system: villager-info-ui
+    gdd: design/gdd/villager-info-ui.md
+    requirement: "Villager-vs-block pick resolution: nearest wins by ray-parametric distance, with an explicit tie tolerance constant pick_tie_epsilon."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-villager-info-ui-016
+    system: villager-info-ui
+    gdd: design/gdd/villager-info-ui.md
+    requirement: "Multiple-villagers-along-ray: nearest wins deterministically; equal-distance ties break via stable villager processing order."
+    created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-villager-info-ui-023
+    system: villager-info-ui
+    gdd: design/gdd/villager-info-ui.md
+    requirement: "Panel logic must support headless mocking of villager hits, tool-arm state, and all six activity states (BLOCKING automated-test tier)."
+    created: 2026-07-11
+    revised: ""
+    status: active

@@ -412,8 +412,13 @@ one tick", which broke at `move_speed` < 2.0)*.
 ### Deliberately NOT formulas (and why)
 
 - **The pathfinding algorithm** (A*, flow fields, hierarchical) —
-  architecture, deferred to the AI ADR; this GDD only defines the
-  walkability rules (Core Rules 8–9) any algorithm must respect.
+  architecture, **RESOLVED 2026-07-11 via ADR-0007: `AStar3D`** (Godot's
+  standalone graph-search utility, manually populated with standable
+  cells and legal-step connections, incrementally patched — not
+  `NavigationServer3D`/navmesh baking; no `AStarGrid3D` class exists in
+  Godot 4.7 to use instead). This GDD's walkability rules (Core Rules
+  8–9) remain the canonical predicates the graph is built from — see
+  ADR-0007 for the graph-construction mechanism.
 - **Need decay/recovery rates, thresholds, ground-sleep penalty** — owned
   by the Needs & Mood GDD (Core Rules 12–13 reference, never define).
 - **Construction progress per tick** — Building System F3.
@@ -712,19 +717,34 @@ VS/Full-Vision milestones — not part of the Logic gate, re-tiered
    source ENUM (bed_sheltered / bed_unsheltered / ground_no_bed_owned /
    ground_bed_unreachable / ground_trapped — its Core Rules 4/10/11),
    all thresholds/multipliers registered constants.
-2. **AI architecture** — behavior tree vs. utility layer vs. plain FSM per
-   agent. The 20–30 ceiling explicitly permits deep per-agent AI; the
-   choice is architectural, not design. → *AI ADR via `/create-architecture`*
-3. **Pathfinding algorithm + re-path storm cost** — algorithm choice, and
-   whether N villagers re-pathing on every Voxel World write signal needs
-   throttling/batching at scale. Also added by the 2026-07-10 re-review:
-   (a) **mid-path solidification race** — this GDD's continuous movement
-   interpolation (F1) vs. the Building System's tick-discrete "never
-   solid under a character" guarantee (its Edge Case 6) leaves a
-   mid-interpolation villager's occupancy undefined (see building-system.md
-   OQ 3b — a shared seam owned by the building/AI ADR; note it also
-   governs F4 targeting and Edge Case 2 walled-in queries, not just
-   Edge Case 6 deferral); (b) **job-queue scan cost** — now bounded
+2. **AI architecture** — **RESOLVED 2026-07-11 via ADR-0008: plain explicit
+   FSM** (enum state + one function per state, matching this GDD's fixed
+   6-state/strict-discrete-priority design directly) — not a behavior tree
+   or utility-AI layer, both rejected as solving a flexibility/blended-
+   scoring problem this GDD's design doesn't have. Deciding-pass
+   staggering (a per-tick budget + stable-order FIFO queue) and an
+   explicit no-threading decision (single-threaded, `WorkerThreadPool`
+   named only as a future escape hatch) are also settled by ADR-0008.
+3. **Pathfinding algorithm + re-path storm cost** — **algorithm choice
+   RESOLVED 2026-07-11 via ADR-0007: `AStar3D`** (manually-populated graph
+   of standable cells + legal-step connections, incrementally patched on
+   Voxel World writes; not `NavigationServer3D`, no `AStarGrid3D` class
+   exists in Godot 4.7). **Still open**: whether N villagers re-pathing on
+   every Voxel World write signal needs throttling/batching at scale —
+   owned by the Villager AI Execution & Threading Strategy ADR (not yet
+   written). Also added by the 2026-07-10 re-review:
+   (a) **mid-path solidification race** — **RESOLVED 2026-07-11 via
+   ADR-0009**: a villager's occupied cell is always the discrete,
+   tick-boundary-quantized `current_cell` (occupies `from_cell` for the
+   whole transit, never `to_cell` until arrival); continuous interpolation
+   is purely cosmetic and never consulted by any occupancy/logic query.
+   The residual visual-clipping window is closed by Godot's synchronous
+   signal emission — a Voxel World write's re-path-filter notification
+   fires in the same call stack as the write, redirecting the villager
+   before the next frame's interpolation advances further. This same
+   `current_cell` also serves F4 targeting and Edge Case 2 walled-in
+   queries identically (see building-system.md OQ 3b for the reciprocal
+   note); (b) **job-queue scan cost** — now bounded
    per-pass by `max_selection_candidates` (15), but aggregate cost across
    30 villagers remains the ADR's to architect; (c) **wander flood-fill
    aggregate cost** at the population ceiling (small, but include it in

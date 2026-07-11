@@ -143,12 +143,17 @@ top can make each material feel distinct rather than interchangeable.
    is EXCLUDED from all listing queries — it is reachable only via direct
    get-by-id (Edge Cases 1–2), never in a palette or category list.
 9. **Returned definitions are immutable to callers** *(added 2026-07-10
-   review)*. A caller can never alter what a subsequent query returns
-   (AC19). This is a REQUIREMENT, not a mechanism: whether it is
-   implemented via defensive copies, read-only Resources, or an immutable
-   wrapper is a performance-sensitive implementation choice (palette and
-   hover queries run per-frame) owned by the data-architecture ADR (Open
-   Question 5).
+   review; mechanism RESOLVED 2026-07-11 via ADR-0006)*. A caller can never
+   alter what a subsequent query returns (AC19) through any idiomatic
+   property or method — `get_by_id()` returns a getter-only `ItemDefinition`
+   wrapper (no setters exist) around the internally-stored, freely-editable
+   `ItemDefinitionResource`. This is deliberately not a defensive copy (no
+   per-query duplication cost, which matters directly for the per-frame
+   palette/hover query pattern this rule originally flagged as
+   performance-sensitive) — the wrapper's lack of any setter is what makes
+   sharing the underlying data safe. The guarantee covers accidental/
+   idiomatic mutation; deliberate `Object.get()`/`set()` reflection bypass
+   is a documented residual risk in ADR-0006, not fully closed.
 
 ### States and Transitions
 
@@ -430,10 +435,10 @@ and Transitions), never on log strings.)*
 16. **GIVEN** the MVP data set, **WHEN** "list all ids" is called, **THEN** every authored entry's id is present exactly once and no unauthored id appears (`missing_item` never appears — it is not authored). *[Config/Data, MVP]*
 17. **GIVEN** the database is in any non-Ready state (Unloaded, Validating, or Failed), **WHEN** any lookup API is called, **THEN** the call returns an explicit error result per the validation-result contract — never data, never a partial read *(reworded 2026-07-10: "fails/errors" was ambiguous)*. *[Logic, MVP]*
 18. **GIVEN** a definition queried at boot, **WHEN** the same id is queried again after intervening queries for other ids, **THEN** the returned values equal the boot-time values — this guards internal cache integrity against unrelated queries, distinct from AC19's external-mutation resistance *(distinction stated 2026-07-10)*. *[Logic, MVP]*
-19. **GIVEN** a definition object returned by a query, **WHEN** the caller mutates the returned object, **THEN** a subsequent query for the same id returns the original, unmutated authored values (Core Rule 9). *[Logic, MVP — PROVISIONAL pending the data-architecture ADR's immutability mechanism (defensive copy vs read-only Resource); the requirement stands, the test's implementation shape follows the ADR]*
+19. **GIVEN** a definition object returned by a query, **WHEN** the caller attempts to mutate the returned object via any idiomatic property or method (there is no such property or method to use — this is enforced by the returned type's shape, not by a runtime check), **THEN** a subsequent query for the same id returns the original, unmutated authored values (Core Rule 9). *[Logic, MVP — RESOLVED 2026-07-11 via ADR-0006: `get_by_id()` returns a getter-only `ItemDefinition` wrapper (no setters exist) around the shared internal `ItemDefinitionResource`; the guarantee covers accidental/idiomatic mutation, not deliberate `Object.get()`/`set()` reflection bypass — see ADR-0006 Risks]*
 20. **GIVEN** a stackable entry with `max_stack_size < 1`, **WHEN** the game boots, **THEN** boot halts naming the entry. *[Logic, MVP]*
 21. **GIVEN** a non-stackable entry with `max_stack_size` authored, **WHEN** the game boots, **THEN** boot succeeds SILENTLY — no warning is emitted *(reworked 2026-07-10 with Edge Case 7: the field is required-present on every entry, so a warning would be guaranteed noise)*. *[Logic, MVP]*
-22. **GIVEN** an entry whose `visual_asset` reference does not resolve to an existing asset, **WHEN** the game boots, **THEN** boot halts naming the entry. *[Config/Data, MVP — PROVISIONAL pending the data-format ADR (Open Question 5): path-string vs typed-Resource references fail very differently in Godot]*
+22. **GIVEN** an entry whose `visual_asset` reference does not resolve to an existing asset, **WHEN** the game boots, **THEN** boot halts naming the entry — distinguishing two failure shapes: (a) the entry's backing `.tres` itself fails to load entirely (a missing/broken `[ext_resource]`), reported as "entry failed to load"; (b) the `.tres` loads but its `visual_asset` field is null, reported as "visual_asset unresolved". *[Config/Data, MVP — RESOLVED 2026-07-11 via ADR-0006 (Open Question 5): `visual_asset` is a typed `Mesh` reference (`@export var visual_asset: Mesh`), not a path string; RID's boot pipeline must check the entry resource itself loaded successfully before checking the field]*
 
 **Added at the 2026-07-10 review:**
 23. **GIVEN** an entry with a negative or non-integer `tier`, **WHEN** the game boots, **THEN** boot halts naming the entry (the Rule 4 `int ≥ 0` declaration, now enforced). *[Logic, MVP]*
@@ -469,7 +474,11 @@ and Transitions), never on log strings.)*
    Building System GDD*
 5. **Data file format and organization** (one resource file per entry vs.
    consolidated tables; hot-reload in editor) — implementation, not design.
-   → *future data-architecture ADR via `/create-architecture`*
+   → **RESOLVED 2026-07-11 via ADR-0006**: one `.tres` `ItemDefinitionResource`
+   file per entry (matches ADR-0002's config-data idiom), `visual_asset` as
+   a typed `Mesh` reference (not a path string). Hot-reload-in-editor
+   behavior was not separately assessed — carries forward as an
+   implementation detail, not a blocking gap.
 6. **Localization pipeline for `display_name`** — MVP ships English-only but
    localization-ready (UI Requirements). The actual string-extraction
    workflow is unowned. → *localization-lead, pre-Alpha*
