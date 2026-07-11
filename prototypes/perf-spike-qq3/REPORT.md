@@ -78,6 +78,37 @@ build-validation-navigability.md TR-020's documented risk.
   status)
 - `architecture.md` QQ3 → resolved by this report.
 
+## Addendum (2026-07-11, user request): world-scale staircase 500 → 1000 → 2000
+
+Question: could the map be much bigger — 2000×2000? Measured with the same
+naive GridMap + full-column + Dictionary architecture (S1 only):
+
+| Size | Cells | Populate | Memory | Near view | Full view | Draw calls (full) |
+|---|---|---|---|---|---|---|
+| 100 (ADR ceiling) | 87k | 0.07 s | 89 MB | 60 FPS | 60 FPS | 1,598 ✅ |
+| 500 | 2.2M | 1.9 s | 1.1 GB | 60 FPS | **~35 FPS** | 16,229 ❌ |
+| 1000 | 8.9M | 8.1 s | 4.2 GB (static) | **~24 FPS** | **7.5 FPS** | 65,835 ❌ |
+| 2000 | ~32M | ~30 s (terrain only) | **>16 GB RSS — killed** | n/a | n/a | n/a |
+
+Scaling is linear in cells for memory (~500 B/cell all-in) and roughly linear
+in draw calls for the full view — the budget breaks between 100 and 500,
+memory breaks between 1000 and 2000 (hard, before rendering even starts).
+
+**Conclusion**: 2000×2000 is architecturally out of reach for the *accepted*
+MVP approach — and that approach was never designed for it (ADR-0003 scopes
+to the bounded ~100×100 valley; this addendum does NOT invalidate the spike
+PASS at design scale). Reaching 2000×2000 would be an open-world voxel
+architecture: chunked/greedy meshing with hidden-face culling (ADR-0003
+Alternative C, cuts rendered geometry ~10–50×), packed chunk storage instead
+of `Dictionary` (~500 B/cell → ~2–4 B/cell), distance culling/LOD, and chunk
+streaming. That is a game-concept-level scope change (new GDD constraint +
+ADR-0003 supersede), not a tuning knob.
+
+Instrumentation note: the 6 GB memory guard keyed on `Performance.MEMORY_STATIC`
+did not fire at 2000 — MEMORY_STATIC (5.1 GB at kill time) excludes
+RenderingServer/GridMap buffers (real RSS 16 GB). Future guards must read
+process RSS (e.g. `OS.get_memory_info()`), not MEMORY_STATIC.
+
 ## C1-vs-C2 headroom
 
 C2 (ADR ceiling) passes everything, so the GDD-default C1 world is not the

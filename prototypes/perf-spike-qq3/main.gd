@@ -52,6 +52,11 @@ func _ready() -> void:
 			config = a.get_slice("=", 1)
 		elif a.begins_with("--mdpt="):
 			max_deciding_per_tick = int(a.get_slice("=", 1))
+		elif a.begins_with("--size="):
+			var s := int(a.get_slice("=", 1))
+			world_w = s
+			world_d = s
+			config = "size%d" % s
 	if config == "c1":
 		world_w = 64; world_d = 64; world_max_y = 16; base_h = 4; amp = 3
 	metrics.record("meta/scenario", scenario)
@@ -109,7 +114,15 @@ func _build_world() -> void:
 	# Terrain: full columns (naive GridMap worst case — deliberate, see PLAN.md)
 	for x in world_w:
 		if x % 10 == 0:
-			print("PROGRESS terrain x=%d/%d occ=%d elapsed_ms=%.0f" % [x, world_w, occ.size(), (Time.get_ticks_usec() - t0) / 1000.0])
+			var mem_mb := Performance.get_monitor(Performance.MEMORY_STATIC) / 1048576.0
+			print("PROGRESS terrain x=%d/%d occ=%d elapsed_ms=%.0f mem_mb=%.0f" % [x, world_w, occ.size(), (Time.get_ticks_usec() - t0) / 1000.0, mem_mb])
+			if mem_mb > 6000.0:  # memory guard: abort cleanly instead of OOM-crashing
+				metrics.record("build/ABORTED_mem_guard_mb", "%.0f" % mem_mb)
+				metrics.record("build/aborted_at_cells", str(occ.size()))
+				metrics.save_csv("res://results/%s_%s_ABORTED.csv" % [scenario, config])
+				print("SPIKE_DONE %s %s (MEM GUARD ABORT)" % [scenario, config])
+				get_tree().quit()
+				return
 		for z in world_d:
 			var h := clampi(base_h + int(roundf(noise.get_noise_2d(x, z) * amp)), 1, world_max_y - 6)
 			for y in h:
@@ -168,6 +181,7 @@ func _build_nav() -> void:
 # ---------- S1: rendering scale ----------
 
 func _scenario_s1() -> void:
+	cam.far = maxf(500.0, world_w * 2.5)
 	_build_world()
 	var center := Vector3(world_w / 2.0, float(base_h), world_d / 2.0)
 	var views := {
