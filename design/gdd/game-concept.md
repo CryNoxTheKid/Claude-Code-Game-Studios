@@ -56,6 +56,12 @@ and unexplored terrain that make leaving the settlement an expedition.
 > architecture in ADR-0014 (supersedes ADR-0003). This replaces the earlier
 > "small hand-shaped valley (~100×100)" framing throughout older documents —
 > where an older doc says "valley bound", read "settlement core region".
+> **Far-world content direction (2026-07-11, creative director — headline only,
+> design deferred)**: the space between settlement and seals is filled by
+> (1) encounters, both hostile AND friendly, (2) resource nodes, (3) ruins.
+> To be designed in dedicated GDDs before the dungeon/exploration epics;
+> answers the CD gate condition "far world must not read hollow".
+
 
 ---
 
