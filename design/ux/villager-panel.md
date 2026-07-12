@@ -1,6 +1,6 @@
 # UX Spec: Villager Panel
 
-> **Status**: Ready for Review (all sections approved — run /ux-review)
+> **Status**: Approved (/ux-review 2026-07-12 — verdict APPROVED; both advisories resolved)
 > **Author**: user + ux-designer
 > **Last Updated**: 2026-07-12
 > **Journey Phase(s)**: unknown — no player journey map yet (see Open Questions)
@@ -141,6 +141,7 @@ World-space companions owned by this spec:
 | Visible (live) | Villager selected | Panel live-mirrors upstream state every frame (raw delta) |
 | Paused | Game pause | Values frozen (simulation halted) — panel stays fully interactive (TR-041) |
 | Suspended | Scene transition | Panel + overhead icons hidden; selection retained; restores on complete/abort (TR-038) |
+| Stale handle (error) | Retained selection id cannot be resolved on reactivation (TR-010 assumption fails) | Treated exactly like despawn: graceful deselect, panel stays closed, no error surface — never a stale or broken panel |
 | Why-slot empty | Mood Happy AND no urgent need | C4/C5 collapsed; panel height stays stable — no layout jumping |
 | Distress | Distress flag active | C5 icon shows; C4 shows the distress-derived template (precedence per TR-032) |
 
@@ -255,8 +256,9 @@ Per `design/ux/accessibility-requirements.md`:
   C4 is multi-line by design and tolerates +40% expansion (German/French) —
   wraps, never truncates (TR-044).
 - **HIGH PRIORITY: activity labels must stay one line.** Budget: the label
-  column must fit the longest label + 40% expansion ("Taking a break" is the
-  tightest); verify against the final font at implementation.
+  column fits **>= 20 characters** ("Taking a break" = 14 chars + 40% expansion
+  ≈ 20); any translation exceeding 20 characters must be shortened editorially,
+  never auto-truncated. Verify against the final font at implementation.
 - Band labels (Happy/Content/Low) are short; +40% safe.
 - Need values are raw 0-100 integers — locale-neutral, no formatting.
 - Villager names are generated content, not localized (identity system VS+).

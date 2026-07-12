@@ -1,6 +1,6 @@
 # HUD Design
 
-> **Status**: Ready for Review (all sections approved 2026-07-11 — run /ux-review)
+> **Status**: Approved (/ux-review 2026-07-12 — verdict APPROVED after Visual-Budget + edge-margin revision)
 > **Author**: user + ux-designer
 > **Last Updated**: 2026-07-11
 > **Template**: HUD Design
@@ -153,6 +153,24 @@ Layout rules (from GDD commitments):
   TR-building-ui-067); it never exceeds the toolbar's width envelope.
 - Toolbar is the mouse entry point into the core verb and stays permanent; it
   is the widest element and defines the bottom safe margin for world picking.
+- **Edge margin**: every HUD zone keeps a minimum inset of **16 px at 720p**
+  (scales proportionally with resolution) from its screen edge — nothing sits
+  flush against the border.
+
+### Visual Budget
+
+Hard ceilings for simultaneous on-screen HUD (checkable in QA):
+
+- **Worst case = 8 elements**: toolbar + context panel + time controls +
+  3 toasts + issues anchor + villager panel. Nothing else may appear
+  concurrently at MVP; any new element must displace or fold into an existing
+  zone (philosophy design test).
+- **Screen coverage <= ~25%** of total area across all HUD zones combined at
+  1280x720 (the tightest supported layout); the **center third of the screen
+  is always HUD-free** — only transient at-cursor cues (invalid cue, tooltip)
+  and world-space overlays may enter it.
+- Toast stack is capped at `toast_max_visible` (3); overflow lives in the
+  anchor (P1) — the budget cannot be exceeded by message volume.
 
 ---
 
