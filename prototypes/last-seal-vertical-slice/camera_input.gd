@@ -11,9 +11,9 @@ extends Node3D
 # tuning-knob table on purpose for this prototype.
 # ---------------------------------------------------------------------------
 
-const DISTANCE_DEFAULT: float = 35.0
+const DISTANCE_DEFAULT: float = 16.0
 const YAW_DEFAULT: float = 0.8
-const PITCH_DEFAULT: float = 0.9
+const PITCH_DEFAULT: float = 0.65
 const PITCH_MIN: float = 0.3
 const PITCH_MAX: float = 1.4
 const DISTANCE_MIN: float = 8.0

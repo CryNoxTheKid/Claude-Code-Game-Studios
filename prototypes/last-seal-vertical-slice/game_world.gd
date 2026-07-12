@@ -119,7 +119,7 @@ func _setup_environment() -> void:
 	# Cozy-at-scale: distance fog keeps the settlement core intimate.
 	env.fog_enabled = true
 	env.fog_light_color = FOG_COLOR
-	env.fog_density = 0.006
+	env.fog_density = 0.0035  # slice tuning: keep the core warm/readable, fog owns the horizon
 	env.fog_sky_affect = 0.35
 	var world_env := WorldEnvironment.new()
 	world_env.environment = env

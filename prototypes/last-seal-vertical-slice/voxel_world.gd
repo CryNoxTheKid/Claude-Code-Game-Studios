@@ -24,7 +24,11 @@ const THATCH := 12
 const BED := 20
 
 const BAND_COLORS: Array[Color] = [
-	Color(0.35, 0.55, 0.25), Color(0.45, 0.60, 0.30), Color(0.55, 0.55, 0.45), Color(0.60, 0.58, 0.55),
+	# Art bible §4.3 per-height-band mapping: warm-neutral low -> cool-pale high
+	Color("9CAD6E"),  # Lowland  — grass/valley floor
+	Color("A98F5E"),  # Midland  — earth/hills
+	Color("7C818A"),  # Highland — stone
+	Color("C9D3D8"),  # Peak     — snow, blends into fog
 ]
 
 signal cell_changed(changes: Array)    # Array of {cell: Vector3i, before: int, after: int} — ONE emission per write call (batched)
@@ -42,7 +46,7 @@ var _region_cell_max: Vector2i = Vector2i.ZERO    # exclusive
 
 func _ready() -> void:
 	_noise.seed = SEED
-	_noise.frequency = 0.05
+	_noise.frequency = 0.012  # slice tuning: rolling hills, not per-cell speckle (was 0.05)
 	_material.vertex_color_use_as_albedo = true
 	# cull_mode left at default CULL_BACK — winding is authored for correct backface culling
 
@@ -193,8 +197,17 @@ func get_region_aabb() -> AABB:
 
 
 func terrain_height(x: int, z: int) -> int:
+	# Gentle rolling hills (low frequency) with a flattened settlement core:
+	# building on speckle-bumps is miserable, and the core is the play area
+	# (slice tuning 2026-07-12; authored heightmaps are a production option).
 	var n := _noise.get_noise_2d(float(x), float(z))
-	return clampi(8 + int(roundf(n * 6.0)), 2, MAX_Y - 6)
+	var center := Vector2(float(WORLD_SIZE) / 2.0, float(WORLD_SIZE) / 2.0)
+	var dist := Vector2(float(x), float(z)).distance_to(center)
+	var core_blend := smoothstep(40.0, 110.0, dist)  # 0 at core -> 1 outside
+	# Core keeps GENTLE undulation (+-1..2 cells); far terrain rolls fully.
+	var amplitude := lerpf(1.8, 6.0, core_blend)
+	var h := 8.0 + n * amplitude
+	return clampi(int(roundf(h)), 2, MAX_Y - 6)
 
 
 func _fill_chunk_terrain(cc: Vector2i) -> void:
