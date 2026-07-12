@@ -1,0 +1,25 @@
+; VERTICAL SLICE - NOT FOR PRODUCTION
+; Validation Question: full build->furnish->live loop, unguided <=5 min, cozy at scale
+; Date: 2026-07-12
+
+config_version=5
+
+[application]
+
+config/name="Last Seal - Vertical Slice"
+run/main_scene="res://GameWorld.tscn"
+config/features=PackedStringArray("4.7")
+
+[autoload]
+
+TimeTickSystem="*res://time_tick_system.gd"
+ResourceItemDatabase="*res://resource_item_database.gd"
+
+[display]
+
+window/size/viewport_width=1600
+window/size/viewport_height=900
+
+[rendering]
+
+renderer/rendering_method="forward_plus"
