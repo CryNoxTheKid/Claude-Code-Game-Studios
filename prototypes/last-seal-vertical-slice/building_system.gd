@@ -25,8 +25,36 @@ const DRAG_THRESHOLD_PX := 6.0
 const MAX_CELLS_PER_COMMAND := 512
 const PREVIEW_DEGRADATION_THRESHOLD := 128
 const UNDO_STACK_DEPTH := 50
-const GHOST_POOL_SIZE := 160  # > degradation threshold so per-cell ghosts never starve below it
 const CORNER_POOL_SIZE := 8
+
+# Boundary-face mesh data (flush cell_size=1.0, cell = integer MIN corner; mirrors
+# voxel_world's face-culled mesher convention: emit a face only where the 6-neighbor
+# is absent). Each face's 4 corners are wound CCW as seen from outside along its
+# direction, matching Godot's front-face/CULL_BACK convention (verified via cross
+# product per face during authoring -- see building-system.md ghost rendering fix).
+const _FACE_DIRS: Array[Vector3i] = [
+	Vector3i(1, 0, 0), Vector3i(-1, 0, 0),
+	Vector3i(0, 1, 0), Vector3i(0, -1, 0),
+	Vector3i(0, 0, 1), Vector3i(0, 0, -1),
+]
+const _FACE_VERTS: Array = [
+	[Vector3(1, 0, 0), Vector3(1, 1, 0), Vector3(1, 1, 1), Vector3(1, 0, 1)],  # +X
+	[Vector3(0, 0, 0), Vector3(0, 0, 1), Vector3(0, 1, 1), Vector3(0, 1, 0)],  # -X
+	[Vector3(0, 1, 0), Vector3(0, 1, 1), Vector3(1, 1, 1), Vector3(1, 1, 0)],  # +Y
+	[Vector3(0, 0, 0), Vector3(1, 0, 0), Vector3(1, 0, 1), Vector3(0, 0, 1)],  # -Y
+	[Vector3(0, 0, 1), Vector3(1, 0, 1), Vector3(1, 1, 1), Vector3(0, 1, 1)],  # +Z
+	[Vector3(0, 0, 0), Vector3(0, 1, 0), Vector3(1, 1, 0), Vector3(1, 0, 0)],  # -Z
+]
+# Same 4 local UV corners for every face (0,0)-(1,1) in TILE space, later remapped
+# into the atlas sub-rect for that cell's value (_build_ghost_mesh). Order matches
+# _FACE_VERTS' per-face winding; a slice-pragmatic simplification vs. voxel_world's
+# per-direction UV orientation -- fine for a translucent preview, not the final build.
+const _QUAD_UV: Array[Vector2] = [Vector2(0, 0), Vector2(1, 0), Vector2(1, 1), Vector2(0, 1)]
+
+# Ghost tint (baked into vertex colors, multiplies the atlas texture underneath --
+# see design/gdd/building-system.md Visual Requirements + the textured-ghost fix).
+const GHOST_TINT_NEUTRAL := Color(0.85, 0.92, 1.0, 0.55)  # blueprint + valid drag/single-cell preview
+const GHOST_TINT_INVALID := Color(1.0, 0.6, 0.25, 0.6)    # invalid drag/single-cell preview subset
 
 signal tool_changed(tool_id: int)
 signal palette_changed(material_id: String)
@@ -76,14 +104,22 @@ var _drag_current_cell: Vector3i = Vector3i.ZERO
 var _drag_plane_y: int = 0
 var _drag_item_id: String = ""
 
-# Ghost rendering (pooled)
+# Ghost rendering: merged, face-culled, TEXTURED meshes (real block tile per cell,
+# translucent) -- one surface per tint, not per cell. Texture source: voxel_world's
+# atlas (see get_atlas() addition, building_system.gd write-up).
+var _atlas_texture: Texture2D
+var _atlas_uv_rect: Callable = Callable()  # (cell_value: int) -> Rect2
+var _mat_ghost_valid: StandardMaterial3D    # blueprint mesh + valid drag/single-cell preview
+var _mat_ghost_invalid: StandardMaterial3D  # invalid drag/single-cell preview subset
+var _blueprint_mesh_instance: MeshInstance3D
+var _preview_valid_mesh: MeshInstance3D
+var _preview_invalid_mesh: MeshInstance3D
+
+# Corner-marker degrade path only (>128-cell drags) -- still small boxes, still pooled
 var _box_mesh: BoxMesh
 var _mat_valid: StandardMaterial3D
 var _mat_invalid: StandardMaterial3D
-var _ghost_pool: Array[MeshInstance3D] = []
 var _corner_pool: Array[MeshInstance3D] = []
-var _blueprint_ghosts: Dictionary = {}       # Vector3i -> MeshInstance3D
-var _blueprint_ghost_free: Array[MeshInstance3D] = []
 
 func _process(_delta: float) -> void:
 	if _voxel_world == null or _camera_input == null:
@@ -102,7 +138,7 @@ func setup(voxel_world: Node3D, camera_input: Node3D, hud: CanvasLayer) -> void:
 	_hud = hud
 	_materials = ResourceItemDatabase.list_by_category("building_material")
 	_furniture_items = ResourceItemDatabase.list_by_category("furniture_fixture")
-	_build_ghost_pools()
+	_build_ghost_visuals()
 	_camera_input.action_fired.connect(_on_action_fired)
 	_camera_input.build_click.connect(_on_build_click)
 	TimeTickSystem.tick.connect(_on_tick)
@@ -267,8 +303,7 @@ func _on_cancel() -> void:
 func _abort_drag() -> void:
 	_is_pressed = false
 	_is_drag_active = false
-	_hide_ghost_pool()
-	_hide_corner_pool()
+	_hide_all_ghosts()
 
 func _set_wall_height(h: int) -> void:
 	var clamped: int = clampi(h, MIN_WALL_HEIGHT, MAX_WALL_HEIGHT)
@@ -334,36 +369,33 @@ func _update_pick() -> void:
 				_update_single_cell_preview(hit)
 
 func _update_block_ghost(hit: Dictionary) -> void:
-	_hide_ghost_pool()
 	_hide_corner_pool()
-	var mi: MeshInstance3D = _ghost_pool[0]
 	if _camera_input.remove_modifier_held:
 		var cell: Vector3i = hit.cell
-		var valid: bool = _voxel_world.get_cell(cell) >= BUILT_CELL_MIN_VALUE
-		mi.global_position = _cell_center(cell)
-		mi.material_override = _mat_valid if valid else _mat_invalid
+		var existing_value: int = _voxel_world.get_cell(cell)
+		var valid: bool = existing_value >= BUILT_CELL_MIN_VALUE
+		# Removal preview textures with the REAL existing block, not a selection.
+		_render_tool_preview([cell] if valid else [], [] if valid else [cell], existing_value)
 	else:
 		var target: Vector3i = hit.cell + hit.normal
 		var item: ResourceItemDatabase.ItemDef = _current_material()
 		var valid2: bool = item != null and _is_cell_valid_for_commit(target, false)
-		mi.global_position = _cell_center(target)
-		mi.material_override = _mat_valid if valid2 else _mat_invalid
-	mi.visible = true
+		var value: int = item.cell_value if item != null else 0
+		_render_tool_preview([target] if valid2 else [], [] if valid2 else [target], value)
 
 func _update_furniture_ghost(hit: Dictionary) -> void:
-	_hide_ghost_pool()
 	_hide_corner_pool()
-	var mi: MeshInstance3D = _ghost_pool[0]
 	var target: Vector3i = hit.cell + hit.normal
-	var valid: bool = _current_furniture() != null and _is_cell_valid_for_commit(target, true)
-	mi.global_position = _cell_center(target)
-	mi.material_override = _mat_valid if valid else _mat_invalid
-	mi.visible = true
+	var item: ResourceItemDatabase.ItemDef = _current_furniture()
+	var valid: bool = item != null and _is_cell_valid_for_commit(target, true)
+	var value: int = item.cell_value if item != null else 0
+	_render_tool_preview([target] if valid else [], [] if valid else [target], value)
 
 func _update_single_cell_preview(hit: Dictionary) -> void:
 	var target: Vector3i = hit.cell + hit.normal
 	var cells: Array[Vector3i] = _rasterize_for_tool(_tool, target, target, target.y)
-	_render_drag_ghosts(cells)
+	var item: ResourceItemDatabase.ItemDef = _current_material()
+	_render_drag_ghosts(cells, item.cell_value if item != null else 0)
 
 func _update_drag_shape(hit: Dictionary) -> void:
 	var mouse_pos: Vector2 = get_viewport().get_mouse_position()
@@ -377,7 +409,10 @@ func _update_drag_shape(hit: Dictionary) -> void:
 	for c in raw_cells:
 		if _voxel_world.is_in_region(c):
 			clipped.append(c)
-	_render_drag_ghosts(clipped)
+	# Material is LOCKED at drag-press (_drag_item_id), not re-read live, so a
+	# palette change mid-drag doesn't retexture an in-progress preview.
+	var locked_item: ResourceItemDatabase.ItemDef = ResourceItemDatabase.get_by_id(_drag_item_id)
+	_render_drag_ghosts(clipped, locked_item.cell_value if locked_item != null else 0)
 
 func _rasterize_for_tool(tool_id: int, start: Vector3i, cur: Vector3i, plane_y: int) -> Array[Vector3i]:
 	match tool_id:
@@ -466,8 +501,7 @@ func _on_release() -> void:
 			pass
 	_is_pressed = false
 	_is_drag_active = false
-	_hide_ghost_pool()
-	_hide_corner_pool()
+	_hide_all_ghosts()
 
 func _handle_block_press(hit: Dictionary) -> void:
 	if _camera_input.remove_modifier_held:
@@ -681,7 +715,24 @@ func _flush_batched_signals() -> void:
 
 # --- Ghost pools (tool preview + blueprint progress) ---
 
-func _build_ghost_pools() -> void:
+func _build_ghost_visuals() -> void:
+	# Merged, face-culled, TEXTURED ghost meshes: one shared material per tint
+	# (blueprint + valid-preview share the neutral tint; invalid-preview gets its
+	# own), one persistent MeshInstance3D per role. The atlas texture supplies the
+	# real block look; tint is baked into each mesh's own vertex colors
+	# (_build_ghost_mesh) and multiplies the sampled texel underneath.
+	var atlas: Dictionary = _voxel_world.get_atlas()
+	_atlas_texture = atlas.get("texture")
+	_atlas_uv_rect = atlas.get("uv_rect", Callable())
+	_mat_ghost_valid = _make_textured_ghost_material()
+	_mat_ghost_invalid = _make_textured_ghost_material()
+	_blueprint_mesh_instance = _make_ghost_mesh_instance(_mat_ghost_valid)
+	_preview_valid_mesh = _make_ghost_mesh_instance(_mat_ghost_valid)
+	_preview_invalid_mesh = _make_ghost_mesh_instance(_mat_ghost_invalid)
+
+	# Corner-marker degrade path: small solid boxes, simple albedo-tinted materials
+	# (no vertex colors/UVs on a bare BoxMesh here -- kept as its own simple,
+	# untextured material pair; an outline doesn't need to show the real tile).
 	_box_mesh = BoxMesh.new()
 	_box_mesh.size = Vector3.ONE
 
@@ -695,38 +746,133 @@ func _build_ghost_pools() -> void:
 	_mat_invalid.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_mat_invalid.albedo_color = Color(0.95, 0.55, 0.15, 0.45)
 
-	for i in GHOST_POOL_SIZE:
-		var mi := MeshInstance3D.new()
-		mi.mesh = _box_mesh
-		mi.visible = false
-		add_child(mi)
-		_ghost_pool.append(mi)
-
 	for i in CORNER_POOL_SIZE:
 		var mi := MeshInstance3D.new()
 		mi.mesh = _box_mesh
 		mi.scale = Vector3(0.25, 0.25, 0.25)
 		mi.visible = false
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		add_child(mi)
 		_corner_pool.append(mi)
 
-func _render_drag_ghosts(cells: Array[Vector3i]) -> void:
-	_hide_ghost_pool()
+func _make_textured_ghost_material() -> StandardMaterial3D:
+	var mat := StandardMaterial3D.new()
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.cull_mode = BaseMaterial3D.CULL_BACK
+	mat.vertex_color_use_as_albedo = true
+	mat.albedo_texture = _atlas_texture
+	mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	return mat
+
+func _make_ghost_mesh_instance(mat: StandardMaterial3D) -> MeshInstance3D:
+	var mi := MeshInstance3D.new()
+	mi.material_override = mat
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mi.visible = false
+	add_child(mi)
+	return mi
+
+## Boundary-face mesh for an arbitrary cell set: emits a quad only where the
+## 6-neighbor is absent FROM THE SET (world contents are irrelevant here). Each
+## cell samples its OWN atlas tile (cell_values: Vector3i -> cell_value) so a
+## mixed blueprint (wood + thatch + bed) renders each cell's real texture; a
+## uniform tint is baked into every vertex color and multiplies the sampled
+## texel underneath. One surface -- see _FACE_DIRS/_FACE_VERTS/_QUAD_UV.
+func _build_ghost_mesh(cell_values: Dictionary, tint: Color) -> ArrayMesh:
+	var mesh := ArrayMesh.new()
+	if cell_values.is_empty():
+		return mesh
+	var verts: PackedVector3Array = PackedVector3Array()
+	var normals: PackedVector3Array = PackedVector3Array()
+	var colors: PackedColorArray = PackedColorArray()
+	var uvs: PackedVector2Array = PackedVector2Array()
+	var indices: PackedInt32Array = PackedInt32Array()
+	for c in cell_values.keys():
+		var cell: Vector3i = c
+		var origin: Vector3 = Vector3(cell.x, cell.y, cell.z)
+		var uv_rect: Rect2 = Rect2(0.0, 0.0, 1.0, 1.0)
+		if _atlas_uv_rect.is_valid():
+			uv_rect = _atlas_uv_rect.call(int(cell_values[c]))
+		for i in _FACE_DIRS.size():
+			var dir: Vector3i = _FACE_DIRS[i]
+			if cell_values.has(cell + dir):
+				continue  # interior face -- neighbor is in the same set, cull it
+			var base_index: int = verts.size()
+			var normal: Vector3 = Vector3(dir.x, dir.y, dir.z)
+			var face_verts: Array = _FACE_VERTS[i]
+			for j in face_verts.size():
+				verts.append(origin + face_verts[j])
+				normals.append(normal)
+				colors.append(tint)
+				var local_uv: Vector2 = _QUAD_UV[j]
+				uvs.append(Vector2(
+					uv_rect.position.x + local_uv.x * uv_rect.size.x,
+					uv_rect.position.y + local_uv.y * uv_rect.size.y))
+			indices.append(base_index)
+			indices.append(base_index + 1)
+			indices.append(base_index + 2)
+			indices.append(base_index)
+			indices.append(base_index + 2)
+			indices.append(base_index + 3)
+	if verts.is_empty():
+		return mesh
+	var arrays: Array = []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = verts
+	arrays[Mesh.ARRAY_NORMAL] = normals
+	arrays[Mesh.ARRAY_COLOR] = colors
+	arrays[Mesh.ARRAY_TEX_UV] = uvs
+	arrays[Mesh.ARRAY_INDEX] = indices
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	return mesh
+
+## Builds a Vector3i -> cell_value Dictionary for a cell list that shares ONE
+## material (drag/single-cell previews are always one tool + one selection).
+func _uniform_cell_values(cells: Array[Vector3i], value: int) -> Dictionary:
+	var out: Dictionary = {}
+	for c in cells:
+		out[c] = value
+	return out
+
+func _render_drag_ghosts(cells: Array[Vector3i], cell_value: int) -> void:
 	_hide_corner_pool()
 	if cells.is_empty():
+		_preview_valid_mesh.visible = false
+		_preview_invalid_mesh.visible = false
 		return
 	var roof_invalid_formation: bool = _tool == Tool.ROOF and FORMATIONS[_formation_index] != "Flat"
 	if cells.size() > PREVIEW_DEGRADATION_THRESHOLD:
+		_preview_valid_mesh.visible = false
+		_preview_invalid_mesh.visible = false
 		_render_corner_markers(cells, not roof_invalid_formation)
 		return
-	var shown: int = mini(cells.size(), _ghost_pool.size())
-	for i in shown:
-		var cell: Vector3i = cells[i]
-		var mi: MeshInstance3D = _ghost_pool[i]
-		mi.global_position = _cell_center(cell)
+	var valid_cells: Array[Vector3i] = []
+	var invalid_cells: Array[Vector3i] = []
+	for cell in cells:
 		var valid: bool = (not roof_invalid_formation) and _is_cell_valid_for_commit(cell, _tool == Tool.FURNITURE)
-		mi.material_override = _mat_valid if valid else _mat_invalid
-		mi.visible = true
+		if valid:
+			valid_cells.append(cell)
+		else:
+			invalid_cells.append(cell)
+	_render_tool_preview(valid_cells, invalid_cells, cell_value)
+
+## Rebuilds the two merged tool-preview meshes from an already-split cell set.
+## Shared by the drag/hover preview (WALL/FLOOR/ROOF) and the single-cell
+## BLOCK/FURNITURE preview (called with a 1-cell array on whichever side is
+## valid). cell_value is uniform across one call -- only one tool/material is
+## ever armed at a time (WALL/FLOOR/ROOF lock it at drag-press; see _drag_item_id).
+func _render_tool_preview(valid_cells: Array[Vector3i], invalid_cells: Array[Vector3i], cell_value: int) -> void:
+	if valid_cells.is_empty():
+		_preview_valid_mesh.visible = false
+	else:
+		_preview_valid_mesh.mesh = _build_ghost_mesh(_uniform_cell_values(valid_cells, cell_value), GHOST_TINT_NEUTRAL)
+		_preview_valid_mesh.visible = true
+	if invalid_cells.is_empty():
+		_preview_invalid_mesh.visible = false
+	else:
+		_preview_invalid_mesh.mesh = _build_ghost_mesh(_uniform_cell_values(invalid_cells, cell_value), GHOST_TINT_INVALID)
+		_preview_invalid_mesh.visible = true
 
 func _render_corner_markers(cells: Array[Vector3i], valid: bool) -> void:
 	var min_c: Vector3i = cells[0]
@@ -747,56 +893,30 @@ func _render_corner_markers(cells: Array[Vector3i], valid: bool) -> void:
 		mi.visible = true
 
 func _hide_all_ghosts() -> void:
-	_hide_ghost_pool()
+	_preview_valid_mesh.visible = false
+	_preview_invalid_mesh.visible = false
 	_hide_corner_pool()
-
-func _hide_ghost_pool() -> void:
-	for mi in _ghost_pool:
-		mi.visible = false
 
 func _hide_corner_pool() -> void:
 	for mi in _corner_pool:
 		mi.visible = false
 
+## Rebuilds the single merged blueprint mesh from the current cell set (Planned +
+## UnderConstruction combined -- uniform ghost tint for the slice, no per-cell
+## progress-alpha; see design/gdd/building-system.md Visual Requirements). Each
+## cell textures with ITS OWN material (a mixed wood+thatch+bed blueprint renders
+## each cell's real tile), since a command's cells can span multiple past commits.
 func _refresh_blueprint_ghosts() -> void:
-	var stale: Array[Vector3i] = []
-	for cell in _blueprint_ghosts.keys():
-		if not _blueprint.has(cell):
-			stale.append(cell)
-	for cell in stale:
-		var mi: MeshInstance3D = _blueprint_ghosts[cell]
-		mi.visible = false
-		_blueprint_ghost_free.append(mi)
-		_blueprint_ghosts.erase(cell)
+	if _blueprint.is_empty():
+		_blueprint_mesh_instance.visible = false
+		return
+	var cell_values: Dictionary = {}
 	for cell in _blueprint.keys():
 		var entry: Dictionary = _blueprint[cell]
-		var mi: MeshInstance3D
-		if _blueprint_ghosts.has(cell):
-			mi = _blueprint_ghosts[cell]
-		else:
-			mi = _acquire_blueprint_ghost()
-			_blueprint_ghosts[cell] = mi
-		mi.global_position = _cell_center(cell)
 		var def: ResourceItemDatabase.ItemDef = ResourceItemDatabase.get_by_id(String(entry["item_id"]))
-		var progress_ratio: float = 0.0
-		if def != null and def.build_ticks > 0:
-			progress_ratio = float(entry["progress_ticks"]) / float(def.build_ticks)
-		var mat: StandardMaterial3D = mi.material_override as StandardMaterial3D
-		mat.albedo_color.a = clampf(0.15 + progress_ratio * 0.55, 0.15, 0.85)
-		mi.visible = true
-
-func _acquire_blueprint_ghost() -> MeshInstance3D:
-	if not _blueprint_ghost_free.is_empty():
-		return _blueprint_ghost_free.pop_back()
-	var mi := MeshInstance3D.new()
-	mi.mesh = _box_mesh
-	var mat := StandardMaterial3D.new()
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.albedo_color = Color(0.85, 0.9, 1.0, 0.3)
-	mi.material_override = mat
-	add_child(mi)
-	return mi
+		cell_values[cell] = def.cell_value if def != null else 0
+	_blueprint_mesh_instance.mesh = _build_ghost_mesh(cell_values, GHOST_TINT_NEUTRAL)
+	_blueprint_mesh_instance.visible = true
 
 func _cell_center(cell: Vector3i) -> Vector3:
 	return Vector3(cell.x + 0.5, cell.y + 0.5, cell.z + 0.5)

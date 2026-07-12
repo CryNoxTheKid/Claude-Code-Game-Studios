@@ -104,6 +104,8 @@ func _ready() -> void:
 	_moisture_noise.seed = SEED + 7
 	_moisture_noise.frequency = 0.006
 	_material.vertex_color_use_as_albedo = true
+	_material.roughness = 1.0
+	_material.metallic_specular = 0.0  # matte blocks — no plastic gloss on canopies
 	# cull_mode left at default CULL_BACK — winding is authored for correct backface culling
 
 
@@ -251,6 +253,17 @@ func get_region_aabb() -> AABB:
 		float(MAX_Y),
 		float(_region_cell_max.y - _region_cell_min.y))
 	return AABB(pos, size)
+
+
+## Added 2026-07-12 for BuildingSystem's textured ghost previews (see
+## building_system.gd write-up): exposes the atlas texture + a value->UV-rect
+## lookup so ghosts can render the REAL block tile, just translucent, instead
+## of a flat tint. Valid only after setup() (_build_atlas already ran).
+func get_atlas() -> Dictionary:
+	return {
+		"texture": _material.albedo_texture,
+		"uv_rect": Callable(self, "_atlas_uv_rect_for_value"),
+	}
 
 
 func _dist_from_center(x: int, z: int) -> float:
@@ -545,6 +558,13 @@ func _tile_streak_axis(value: int) -> StreakAxis:
 
 func _tile_index_for_value(v: int) -> int:
 	return _value_tile_index.get(v, _unknown_tile_index)
+
+
+func _atlas_uv_rect_for_value(cell_value: int) -> Rect2:
+	var tile_index := _tile_index_for_value(cell_value)
+	var u0 := float(tile_index) / float(_atlas_tile_count)
+	var u1 := float(tile_index + 1) / float(_atlas_tile_count)
+	return Rect2(u0, 0.0, u1 - u0, 1.0)
 
 
 func _vertex_ao(cc: Vector2i, arr: PackedByteArray, lx: int, ly: int, lz: int, face_dir: Vector3i, o1: Vector3i, o2: Vector3i) -> int:

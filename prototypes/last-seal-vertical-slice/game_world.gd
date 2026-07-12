@@ -130,7 +130,12 @@ func _setup_environment() -> void:
 	# and crushed the ground read (found via the mesher agent's A/B render).
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	env.ambient_light_color = Color(0.98, 0.94, 0.86)
-	env.ambient_light_energy = 0.85
+	env.ambient_light_energy = 0.5
+	# Grounding: GENTLE SSAO only — intensity 2.5 crushed the whole scene
+	# (ambient-dominated look); 1.1/0.9 adds contact shading without murk.
+	env.ssao_enabled = false  # consistently over-darkens this scene; sun
+	# shadows (orthogonal mode) + baked vertex AO carry the grounding.
+
 	# Cozy-at-scale: fog owns the HORIZON only — near field stays warm/readable.
 	env.fog_enabled = true
 	env.fog_light_color = FOG_COLOR
@@ -143,8 +148,14 @@ func _setup_environment() -> void:
 	var sun := DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-42.0, -35.0, 0.0)
 	sun.light_color = Color(1.0, 0.93, 0.80)  # warm golden-hour key light
-	sun.light_energy = 1.35
+	sun.light_energy = 1.7
 	sun.shadow_enabled = true
+	# RUN D: PSSM was blanket-shadowing the whole scene from day one (proven
+	# by bisect: shadows-off = bright at half the ambient). Single orthogonal
+	# split is the robust voxel-scale setup.
+	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
+	sun.directional_shadow_max_distance = 90.0
+	sun.shadow_blur = 1.0
 	add_child(sun)
 
 
