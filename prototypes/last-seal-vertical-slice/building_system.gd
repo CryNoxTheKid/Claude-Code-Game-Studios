@@ -132,7 +132,7 @@ func get_blueprint_cells() -> Dictionary:
 func claim_job(villager_id: int) -> Variant:
 	for cell in _blueprint.keys():
 		var entry: Dictionary = _blueprint[cell]
-		if int(entry["claimed_by"]) != 0:
+		if int(entry["claimed_by"]) != 0 or bool(entry.get("ready", false)):
 			continue
 		if bool(entry["needs_support"]):
 			var support_cell: Vector3i = cell + Vector3i(0, -1, 0)
@@ -165,10 +165,12 @@ func report_on_site(cell: Vector3i) -> void:
 	entry["progress_ticks"] = int(entry["progress_ticks"]) + 1
 	if int(entry["progress_ticks"]) < def.build_ticks:
 		return
-	if _occupancy_provider.is_valid() and bool(_occupancy_provider.call(cell)):
-		entry["progress_ticks"] = def.build_ticks  # hold at threshold, retried next report (Edge Case 6)
-		return
-	_blueprint.erase(cell)
+	if bool(entry.get("ready", false)):
+		return  # already queued for write; the flush owns it now
+	# Blueprint entry SURVIVES until the write actually lands (the flush
+	# re-checks occupancy at write time and erases on success) — so
+	# get_blueprint_cells() == empty always means "fully built".
+	entry["ready"] = true
 	_pending_completions.append({
 		"cell": cell,
 		"value": def.cell_value,
@@ -525,8 +527,8 @@ func _remove_built_cell(cell: Vector3i) -> void:
 		invalid_commit.emit(_cell_center(cell), "out of bounds")
 		return
 	var value: int = _voxel_world.get_cell(cell)
-	if value < BUILT_CELL_MIN_VALUE:
-		invalid_commit.emit(_cell_center(cell), "terrain not removable")
+	if value < BUILT_CELL_MIN_VALUE or value >= 30:
+		invalid_commit.emit(_cell_center(cell), "only built cells are removable")
 		return
 	var applied: Array = _voxel_world.set_cells([{"cell": cell, "value": AIR}])
 	var removed: Array[Vector3i] = []
@@ -635,19 +637,32 @@ func _emit_undo_state() -> void:
 func _flush_batched_signals() -> void:
 	if _pending_completions.is_empty():
 		return
+	# RACE CLOSURE (found by loop_test with tick bursts): occupancy must be
+	# re-checked AT WRITE TIME — between report_on_site's tick and this frame
+	# flush the villager can step INTO a completing cell's body column.
+	# Occupied entries stay pending and retry next flush.
 	var writes: Array = []
+	var write_meta: Array = []
+	var still_pending: Array[Dictionary] = []
 	for c in _pending_completions:
+		if _occupancy_provider.is_valid() and bool(_occupancy_provider.call(c["cell"])):
+			still_pending.append(c)
+			continue
 		writes.append({"cell": c["cell"], "value": c["value"]})
+		write_meta.append(c)
+	_pending_completions = still_pending
+	if writes.is_empty():
+		return
 	var applied: Array = _voxel_world.set_cells(writes)
 	var completed_cells: Array[Vector3i] = []
 	for i in applied.size():
 		var res: Dictionary = applied[i]
-		var meta: Dictionary = _pending_completions[i]
+		var meta: Dictionary = write_meta[i]
+		_blueprint.erase(res.cell)
 		completed_cells.append(res.cell)
 		if bool(meta["is_furniture"]):
 			_furniture_cells[res.cell] = meta["item_id"]
 			furniture_placed.emit(res.cell, String(meta["item_id"]))
-	_pending_completions.clear()
 	construction_completed.emit(completed_cells)
 	blueprint_changed.emit()
 

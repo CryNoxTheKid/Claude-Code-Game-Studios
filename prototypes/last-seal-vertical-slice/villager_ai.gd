@@ -232,9 +232,12 @@ func set_shelter_provider(cb: Callable) -> void:
 # world is intentionally untyped (matches CONTRACTS.md's literal signature) —
 # this keeps is_standable/is_step_legal testable against a non-Node mock world
 # double in isolated unit tests, without requiring a full VoxelWorld instance.
+const WATER_VALUE := 40  # biome water — never a walking surface
+
 static func is_standable(world, cell: Vector3i) -> bool:
 	var below := Vector3i(cell.x, cell.y - 1, cell.z)
-	if world.get_cell(below) <= 0:
+	var below_value: int = world.get_cell(below)
+	if below_value <= 0 or below_value == WATER_VALUE:
 		return false
 	for i in range(CLEARANCE):
 		var c := Vector3i(cell.x, cell.y + i, cell.z)

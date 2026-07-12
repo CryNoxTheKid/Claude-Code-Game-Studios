@@ -18,10 +18,20 @@ const SEED := 1337
 # Cell ids (byte values in packed chunks)
 const AIR := 0
 const TERRAIN_BASE := 1               # 1..4 terrain height bands
+const SAND := 5
 const WOOD := 10
 const STONE := 11
 const THATCH := 12
 const BED := 20
+const TRUNK := 30
+const LEAVES := 31
+const WATER := 40
+
+# --- Terracing + biomes (2026-07-12, Stonehearth-style) ---
+const WATER_LEVEL := 6                 # lakes fill terraces below this
+const TREE_CLEARING_DIST := 45.0       # no trees within this ring (matches core+buffer)
+const TREE_MOISTURE_THRESHOLD := 0.15
+const TREE_CANOPY_ORTHOS: Array[Vector2i] = [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
 
 const BAND_COLORS: Array[Color] = [
 	# Art bible §4.3 per-height-band mapping: warm-neutral low -> cool-pale high
@@ -36,9 +46,14 @@ const BAND_COLORS: Array[Color] = [
 # Vertex color no longer carries block hue (the atlas does) — it's now a pure
 # grayscale multiplier: per-face-direction shade * per-vertex AO brightness.
 const ATLAS_TILE_PX := 16
-const ATLAS_VALUES: Array[int] = [TERRAIN_BASE, TERRAIN_BASE + 1, TERRAIN_BASE + 2, TERRAIN_BASE + 3, WOOD, STONE, THATCH, BED]
+const ATLAS_VALUES: Array[int] = [
+	TERRAIN_BASE, TERRAIN_BASE + 1, TERRAIN_BASE + 2, TERRAIN_BASE + 3,
+	WOOD, STONE, THATCH, BED,
+	SAND, TRUNK, LEAVES, WATER,
+]
 
 enum FaceDir { TOP, BOTTOM, RIGHT, LEFT, BACK, FORWARD }
+enum StreakAxis { NONE, HORIZONTAL, VERTICAL }
 
 const FACE_NORMAL: Array[Vector3i] = [
 	Vector3i(0, 1, 0), Vector3i(0, -1, 0), Vector3i(1, 0, 0), Vector3i(-1, 0, 0), Vector3i(0, 0, 1), Vector3i(0, 0, -1),
@@ -67,7 +82,9 @@ signal cell_changed(changes: Array)    # Array of {cell: Vector3i, before: int, 
 
 var _chunk_data: Dictionary[Vector2i, PackedByteArray] = {}    # lazily allocated — only touched chunks
 var _chunk_nodes: Dictionary[Vector2i, MeshInstance3D] = {}    # only chunks with a built mesh
-var _noise: FastNoiseLite = FastNoiseLite.new()
+var _hills_noise: FastNoiseLite = FastNoiseLite.new()      # local roughness (was `_noise`)
+var _continent_noise: FastNoiseLite = FastNoiseLite.new()  # broad elevation -> terraces/mountains
+var _moisture_noise: FastNoiseLite = FastNoiseLite.new()   # forest placement
 var _material: StandardMaterial3D = StandardMaterial3D.new()
 var _center_chunk: Vector2i = Vector2i.ZERO
 var _region_chunk_min: Vector2i = Vector2i.ZERO
@@ -80,8 +97,12 @@ var _atlas_tile_count: int = 0
 
 
 func _ready() -> void:
-	_noise.seed = SEED
-	_noise.frequency = 0.012  # slice tuning: rolling hills, not per-cell speckle (was 0.05)
+	_hills_noise.seed = SEED
+	_hills_noise.frequency = 0.012  # slice tuning: rolling hills, not per-cell speckle (was 0.05)
+	_continent_noise.seed = SEED
+	_continent_noise.frequency = 0.004   # broad elevation driving terrace level
+	_moisture_noise.seed = SEED + 7
+	_moisture_noise.frequency = 0.006
 	_material.vertex_color_use_as_albedo = true
 	# cull_mode left at default CULL_BACK — winding is authored for correct backface culling
 
@@ -232,18 +253,120 @@ func get_region_aabb() -> AABB:
 	return AABB(pos, size)
 
 
-func terrain_height(x: int, z: int) -> int:
-	# Gentle rolling hills (low frequency) with a flattened settlement core:
-	# building on speckle-bumps is miserable, and the core is the play area
-	# (slice tuning 2026-07-12; authored heightmaps are a production option).
-	var n := _noise.get_noise_2d(float(x), float(z))
+func _dist_from_center(x: int, z: int) -> float:
 	var center := Vector2(float(WORLD_SIZE) / 2.0, float(WORLD_SIZE) / 2.0)
-	var dist := Vector2(float(x), float(z)).distance_to(center)
-	var core_blend := smoothstep(40.0, 110.0, dist)  # 0 at core -> 1 outside
-	# Core keeps GENTLE undulation (+-1..2 cells); far terrain rolls fully.
-	var amplitude := lerpf(1.8, 6.0, core_blend)
-	var h := 8.0 + n * amplitude
-	return clampi(int(roundf(h)), 2, MAX_Y - 6)
+	return Vector2(float(x), float(z)).distance_to(center)
+
+
+func terrain_height(x: int, z: int) -> int:
+	# Stonehearth-style TERRACING (2026-07-12, supersedes the smooth-hill
+	# tuning): continent noise (broad elevation -> which terrace/mountains)
+	# blended with hills noise (local roughness within a terrace), quantized
+	# to 4-cell steps. The settlement core stays a single clean plateau at
+	# h=8 (dist<40); the 40..110 ring blends the RAW (pre-quantize) height
+	# from the core's flat value up to full terrain so the first real
+	# terrace edge lands outside the core instead of clipping it.
+	var dist := _dist_from_center(x, z)
+	if dist < 40.0:
+		return 8
+	var continent := _continent_noise.get_noise_2d(float(x), float(z))
+	var hills := _hills_noise.get_noise_2d(float(x), float(z))
+	var raw_h := 8.0 + continent * 14.0 + hills * 3.0
+	var core_blend := smoothstep(40.0, 110.0, dist)  # 0 just outside core -> 1 at dist>=110
+	var blended_raw := lerpf(8.0, raw_h, core_blend)
+	var terraced := int(floor(blended_raw / 4.0)) * 4   # steps at y=..,4,8,12,16,20,24,..
+	return clampi(terraced, 2, MAX_Y - 6)
+
+
+func _terrain_band_value(ly: int) -> int:
+	return TERRAIN_BASE + (ly * 3) / MAX_Y
+
+
+func _is_beach_column(gx: int, gz: int, h: int) -> bool:
+	# Cheap approximation (coordinator-approved): Chebyshev-1 (8 neighbors)
+	# instead of a full Chebyshev-3 search — a low (underwater) neighbor
+	# within the immediate ring is enough to call this column a shoreline.
+	if h > WATER_LEVEL + 1:
+		return false
+	for dz in [-1, 0, 1]:
+		for dx in [-1, 0, 1]:
+			if dx == 0 and dz == 0:
+				continue
+			if terrain_height(gx + dx, gz + dz) < WATER_LEVEL:
+				return true
+	return false
+
+
+func _column_hash01(gx: int, gz: int, salt: int) -> float:
+	var h := absi(hash(Vector3i(gx, gz, SEED + salt)))
+	return float(h % 1000000) / 1000000.0
+
+
+func _is_tree_column(gx: int, gz: int) -> bool:
+	if _dist_from_center(gx, gz) <= TREE_CLEARING_DIST:
+		return false   # settlement core + clearing ring: no trees
+	var h := terrain_height(gx, gz)
+	if h < WATER_LEVEL + 1:
+		return false   # underwater
+	if _is_beach_column(gx, gz, h):
+		return false   # no trees standing in the sand
+	if _terrain_band_value(h - 1) != TERRAIN_BASE:
+		return false   # only the grass band (lowest terraces) grows forest
+	var moisture := _moisture_noise.get_noise_2d(float(gx), float(gz))
+	if moisture <= TREE_MOISTURE_THRESHOLD:
+		return false   # sparse/zero outside forest-moisture pockets
+	var density := remap(moisture, TREE_MOISTURE_THRESHOLD, 1.0, 1.0 / 80.0, 1.0 / 40.0)
+	return _column_hash01(gx, gz, 0) < density
+
+
+func _tree_trunk_height(gx: int, gz: int) -> int:
+	return 3 + int(_column_hash01(gx, gz, 101) * 2.0)   # deterministic 3 or 4
+
+
+func _stamp_cell(cc: Vector2i, arr: PackedByteArray, gx: int, gy: int, gz: int, value: int) -> void:
+	if gy < 0 or gy >= MAX_Y:
+		return
+	var lx := gx - cc.x * CHUNK
+	var lz := gz - cc.y * CHUNK
+	if lx < 0 or lx >= CHUNK or lz < 0 or lz >= CHUNK:
+		return   # outside this chunk — the OWNING chunk stamps it itself
+	var idx := (gy * CHUNK + lz) * CHUNK + lx
+	if arr[idx] == AIR:
+		arr[idx] = value   # never clobber terrain/water — a cliff clips the canopy
+
+
+func _stamp_trees_for_chunk(cc: Vector2i, arr: PackedByteArray) -> void:
+	# Iterate tree-candidate COLUMNS in this chunk's rect expanded by 2 (max
+	# canopy reach is 1 cell out from its base column) so a tree rooted in a
+	# neighboring chunk stamps its overhanging canopy cells into this chunk
+	# identically, without needing that neighbor chunk's data at all — every
+	# input here (terrain_height/_is_beach_column/moisture/hash) is a pure
+	# function of (gx,gz), so both chunks compute the exact same tree.
+	var col_min_x := cc.x * CHUNK - 2
+	var col_max_x := cc.x * CHUNK + CHUNK + 2
+	var col_min_z := cc.y * CHUNK - 2
+	var col_max_z := cc.y * CHUNK + CHUNK + 2
+	for gz in range(col_min_z, col_max_z):
+		for gx in range(col_min_x, col_max_x):
+			if not _is_tree_column(gx, gz):
+				continue
+			var surface_y := terrain_height(gx, gz)
+			var trunk_h := _tree_trunk_height(gx, gz)
+			for i in trunk_h:
+				_stamp_cell(cc, arr, gx, surface_y + i, gz, TRUNK)
+			var top_y := surface_y + trunk_h - 1
+			# canopy layer 0 (trunk-top level): the 4 orthogonal neighbors only
+			# (center is already TRUNK) -- corners skipped for a rounded read.
+			for d in TREE_CANOPY_ORTHOS:
+				_stamp_cell(cc, arr, gx + d.x, top_y, gz + d.y, LEAVES)
+			# canopy layer 1 (top_y+1): full 3x3, the widest/densest layer.
+			for dz2 in range(-1, 2):
+				for dx2 in range(-1, 2):
+					_stamp_cell(cc, arr, gx + dx2, top_y + 1, gz + dz2, LEAVES)
+			# canopy layer 2 (top_y+2): plus-shape cap.
+			_stamp_cell(cc, arr, gx, top_y + 2, gz, LEAVES)
+			for d in TREE_CANOPY_ORTHOS:
+				_stamp_cell(cc, arr, gx + d.x, top_y + 2, gz + d.y, LEAVES)
 
 
 func _fill_chunk_terrain(cc: Vector2i) -> void:
@@ -254,8 +377,16 @@ func _fill_chunk_terrain(cc: Vector2i) -> void:
 		for lx in CHUNK:
 			var gx := cc.x * CHUNK + lx
 			var h := terrain_height(gx, gz)
+			var beach := _is_beach_column(gx, gz, h)
 			for ly in h:
-				arr[(ly * CHUNK + lz) * CHUNK + lx] = TERRAIN_BASE + (ly * 3) / MAX_Y
+				var value := _terrain_band_value(ly)
+				if beach and ly == h - 1:
+					value = SAND   # surface cell only
+				arr[(ly * CHUNK + lz) * CHUNK + lx] = value
+			if h < WATER_LEVEL:
+				for ly in range(h, WATER_LEVEL):
+					arr[(ly * CHUNK + lz) * CHUNK + lx] = WATER
+	_stamp_trees_for_chunk(cc, arr)
 	_chunk_data[cc] = arr
 
 
@@ -352,14 +483,17 @@ func _build_atlas() -> void:
 	for tile_i in _atlas_tile_count:
 		var value := ATLAS_VALUES[tile_i] if tile_i < ATLAS_VALUES.size() else -1
 		var base_color := _base_color_for_tile(value)
-		var streaky := value == WOOD or value == THATCH
+		var noise_amp := _tile_noise_amplitude(value)
+		var streak_axis := _tile_streak_axis(value)
+		var col_streak := PackedFloat32Array()
+		col_streak.resize(ATLAS_TILE_PX)
+		for px in ATLAS_TILE_PX:
+			col_streak[px] = (1.0 + (rng.randf() - 0.5) * 0.14) if streak_axis == StreakAxis.VERTICAL else 1.0
 		for py in ATLAS_TILE_PX:
-			var row_mult := 1.0
-			if streaky:
-				row_mult = 1.0 + (rng.randf() - 0.5) * 0.14   # horizontal plank/straw streaks
+			var row_mult := (1.0 + (rng.randf() - 0.5) * 0.14) if streak_axis == StreakAxis.HORIZONTAL else 1.0   # horizontal plank/straw streaks
 			for px in ATLAS_TILE_PX:
-				var pixel_noise := 1.0 + (rng.randf() - 0.5) * 0.16   # ~0.92..1.08 per-pixel variation
-				var mult := pixel_noise * row_mult
+				var pixel_noise := 1.0 + (rng.randf() - 0.5) * noise_amp   # per-pixel variation, tile-specific amplitude
+				var mult := pixel_noise * row_mult * col_streak[px]   # col_streak carries vertical bark-grain streaks
 				if px == 0 or px == ATLAS_TILE_PX - 1 or py == 0 or py == ATLAS_TILE_PX - 1:
 					mult *= 0.85   # 1px tile border so block boundaries read at a distance
 				img.set_pixel(tile_i * ATLAS_TILE_PX + px, py, Color(
@@ -374,12 +508,39 @@ func _build_atlas() -> void:
 func _base_color_for_tile(value: int) -> Color:
 	if value < 0:
 		return Color.MAGENTA   # reserved "unknown value" tile
-	if value < WOOD:
-		return BAND_COLORS[clampi(value - TERRAIN_BASE, 0, BAND_COLORS.size() - 1)]
+	if value >= TERRAIN_BASE and value < TERRAIN_BASE + BAND_COLORS.size():
+		return BAND_COLORS[value - TERRAIN_BASE]
+	match value:
+		SAND:
+			return Color("D8C9A0")
+		WATER:
+			return Color("4E7D96")
+		TRUNK:
+			return Color("5C4630")
+		LEAVES:
+			return Color("5E7D46")
 	var def: ResourceItemDatabase.ItemDef = ResourceItemDatabase.get_by_cell_value(value)
 	if def == null:
 		return Color.MAGENTA   # visibly wrong instead of a silent crash — unknown built cell value
 	return def.color
+
+
+func _tile_noise_amplitude(value: int) -> float:
+	match value:
+		WATER:
+			return 0.06   # calm, subtle ripple
+		LEAVES:
+			return 0.24   # high-noise mottle
+	return 0.16   # default per-pixel variation (~+-8%)
+
+
+func _tile_streak_axis(value: int) -> StreakAxis:
+	match value:
+		WOOD, THATCH:
+			return StreakAxis.HORIZONTAL
+		TRUNK:
+			return StreakAxis.VERTICAL   # bark grain
+	return StreakAxis.NONE
 
 
 func _tile_index_for_value(v: int) -> int:

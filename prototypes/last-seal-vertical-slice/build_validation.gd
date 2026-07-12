@@ -18,6 +18,7 @@ signal unsheltered_furniture_info(cell: Vector3i, why: String)
 signal shelter_status_changed(cell: Vector3i, sheltered: bool)
 
 const AIR_VALUE := 0
+const LEAVES_VALUE := 31  # tree canopy — transparent to roof analysis
 const BED_ITEM_ID := "bed"
 
 # Slice tuning (deviates from GDD default min_room_cells=2 per explicit task
@@ -283,7 +284,10 @@ func _is_roofed(cell: Vector3i) -> bool:
 		var above_y := cell.y + offset
 		if above_y >= MAX_Y:
 			break
-		if _is_solid(Vector3i(cell.x, above_y, cell.z)):
+		var v: int = _voxel_world.get_cell(Vector3i(cell.x, above_y, cell.z))
+		if v == LEAVES_VALUE:
+			continue  # natural canopy is not shelter and never seals the sky
+		if v > AIR_VALUE and not _furniture_cache.has(Vector3i(cell.x, above_y, cell.z)):
 			return true
 	return false
 
