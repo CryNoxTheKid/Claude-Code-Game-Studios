@@ -74,11 +74,18 @@ const _NEIGHBOR_OFFSETS: Array[Vector2i] = [
 # On-site candidate cells for a job/bed target: the cell itself, then its
 # 6 orthogonal neighbors (incl. directly above/below), in a fixed scan order
 # (GDD Rule 5 / F4-style determinism).
+# On-site stand candidates relative to the job cell. NEVER the job cell itself
+# (standing in your own construction cell deadlocks the occupancy deferral).
+# Order: same-level orthogonals, diagonals, then below levels down to -3
+# (overhead reach for roofs — see _is_onsite slice relaxation).
 const _ONSITE_OFFSETS: Array[Vector3i] = [
-	Vector3i(0, 0, 0),
-	Vector3i(0, 1, 0), Vector3i(0, -1, 0),
-	Vector3i(1, 0, 0), Vector3i(-1, 0, 0),
-	Vector3i(0, 0, 1), Vector3i(0, 0, -1),
+	Vector3i(1, 0, 0), Vector3i(-1, 0, 0), Vector3i(0, 0, 1), Vector3i(0, 0, -1),
+	Vector3i(1, 0, 1), Vector3i(1, 0, -1), Vector3i(-1, 0, 1), Vector3i(-1, 0, -1),
+	Vector3i(0, 1, 0), Vector3i(1, 1, 0), Vector3i(-1, 1, 0), Vector3i(0, 1, 1), Vector3i(0, 1, -1),
+	Vector3i(0, -1, 0), Vector3i(1, -1, 0), Vector3i(-1, -1, 0), Vector3i(0, -1, 1), Vector3i(0, -1, -1),
+	Vector3i(0, -2, 0), Vector3i(1, -2, 0), Vector3i(-1, -2, 0), Vector3i(0, -2, 1), Vector3i(0, -2, -1),
+	Vector3i(0, -3, 0), Vector3i(1, -3, 0), Vector3i(-1, -3, 0), Vector3i(0, -3, 1), Vector3i(0, -3, -1),
+	Vector3i(1, -3, 1), Vector3i(1, -3, -1), Vector3i(-1, -3, 1), Vector3i(-1, -3, -1),
 ]
 
 
@@ -249,8 +256,12 @@ static func is_step_legal(world, from: Vector3i, to: Vector3i) -> bool:
 	if dx == 0 and dz == 0:
 		return false   # not a step
 	if dx != 0 and dz != 0:
-		# Diagonal: legal only when both flanking orthogonal cells are passable
-		# (no corner-cutting through walls) — Rule 9.
+		# Diagonal: same-level only. Flank checks at from.y are ASYMMETRIC for
+		# climbing diagonals (edge legal downhill, illegal uphill -> graph/
+		# predicate divergence, found by loop_test day 1). Climb orthogonally.
+		if dy != 0:
+			return false
+		# Both flanking orthogonal cells passable (no corner-cutting) — Rule 9.
 		var flank_a := Vector3i(to.x, from.y, from.z)
 		var flank_b := Vector3i(from.x, from.y, to.z)
 		if not is_standable(world, flank_a) or not is_standable(world, flank_b):
@@ -457,9 +468,14 @@ func _compute_path(from_cell: Vector3i, to_cell: Vector3i) -> Variant:
 
 # Tries target_cell itself, then its 6 orthogonal neighbors, fixed order.
 func _find_onsite_path(from_cell: Vector3i, target_cell: Vector3i) -> Variant:
+	var blueprint: Dictionary = _building_system.get_blueprint_cells()
 	for offset in _ONSITE_OFFSETS:
 		var candidate := target_cell + offset
 		if not _astar.has_point(_cell_to_id(candidate)):
+			continue
+		# Never stand inside a pending construction cell (own or another's) —
+		# the stand spot itself, or any body-column cell, would deadlock/entomb.
+		if blueprint.has(candidate) or blueprint.has(candidate + Vector3i(0, 1, 0)) 				or blueprint.has(candidate + Vector3i(0, 2, 0)):
 			continue
 		var result: Variant = _compute_path(from_cell, candidate)
 		if result != null:
@@ -478,8 +494,13 @@ func _path_to_onsite(v: Villager, target_cell: Vector3i) -> bool:
 
 
 func _is_onsite(cell: Vector3i, target: Vector3i) -> bool:
+	# SLICE RELAXATION: overhead reach up to 3 cells (roofs are otherwise
+	# unbuildable without scaffolding/ladders — REAL production design gap,
+	# flagged in REPORT.md; GDD rule is Manhattan distance <= 1).
 	var d := cell - target
-	return absi(d.x) + absi(d.y) + absi(d.z) <= 1
+	if absi(d.x) + absi(d.y) + absi(d.z) <= 1:
+		return true
+	return absi(d.x) <= 1 and absi(d.z) <= 1 and d.y >= -3 and d.y <= 1
 
 
 # ---------------------------------------------------------------------------
@@ -585,9 +606,20 @@ func _advance_movement(v: Villager) -> void:
 	v.move_progress += MOVE_BUDGET_PER_TICK
 	while not v.path.is_empty():
 		var next_cell: Vector3i = v.path[0]
+		if next_cell == v.current_cell:
+			v.path.pop_front()  # AStar paths include the start point — free
+			continue
 		var cost := _step_cost(v.current_cell, next_cell)
 		if v.move_progress < cost:
 			break
+		# ADR-0009 race closure, second half: the re-path filter replaces
+		# v.path, but an IN-FLIGHT step must also be re-validated at the
+		# arrival boundary — the target cell may have solidified this tick
+		# (found by loop_test day 1: villager entombed itself in a wall).
+		if not is_step_legal(_voxel_world, v.current_cell, next_cell):
+			v.move_progress = 0.0
+			_handle_repath_failure(v)
+			return
 		v.move_progress -= cost
 		v.current_cell = next_cell
 		v.path.pop_front()
@@ -959,7 +991,10 @@ func _update_distress(v: Villager) -> void:
 # --- BuildingSystem occupancy provider ---
 
 func _is_cell_occupied(cell: Vector3i) -> bool:
+	# Occupied = anywhere in a villager's BODY COLUMN (feet + 2 clearance cells),
+	# not just the feet cell — otherwise walls get built through heads and the
+	# builder ends up entombed (found by loop_test day 1).
 	for v: Villager in _villagers.values():
-		if v.current_cell == cell:
+		if cell.x == v.current_cell.x and cell.z == v.current_cell.z 				and cell.y >= v.current_cell.y and cell.y <= v.current_cell.y + 2:
 			return true
 	return false

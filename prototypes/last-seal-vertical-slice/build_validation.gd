@@ -192,11 +192,29 @@ func _find_candidate_cells(bbox: Dictionary) -> Dictionary:
 				var cell := Vector3i(x, y, z)
 				if not _voxel_world.is_in_region(cell):
 					continue
-				if not _villager_ai_script.is_standable(_voxel_world, cell):
+				if not _is_candidate_standable(cell):
 					continue
 				if _is_roofed(cell):
 					candidates[cell] = true
 	return candidates
+
+
+# Rule 1 / TR-022: furniture occupancy is TRANSPARENT to the analysis — a
+# furniture-occupied cell evaluates as if empty. The villager predicate treats
+# furniture as solid (you can't walk through a bed), so candidacy needs its
+# own standability with furniture-as-air semantics.
+func _is_candidate_standable(cell: Vector3i) -> bool:
+	var below := cell + Vector3i(0, -1, 0)
+	if _voxel_world.get_cell(below) <= AIR_VALUE and not _furniture_cache.has(below):
+		return false
+	for dy in 3:
+		var c := cell + Vector3i(0, dy, 0)
+		var v: int = _voxel_world.get_cell(c)
+		if v > AIR_VALUE and not _furniture_cache.has(c):
+			return false
+		if v < AIR_VALUE:
+			return false
+	return true
 
 
 func _find_regions(candidates: Dictionary) -> Array:
