@@ -71,6 +71,7 @@ func _ready() -> void:
 
 	_wire_optional_providers()
 	_wire_time_actions()
+	_wire_hud_actions()
 	_setup_environment()
 
 	build_validation.room_recognized.connect(_on_room_recognized)
@@ -87,6 +88,17 @@ func _wire_optional_providers() -> void:
 	if needs_mood.has_method("set_distress_provider"):
 		needs_mood.set_distress_provider(func(id: int) -> String:
 			return villager_ai.get_info(id).get("distress", ""))
+
+
+func _wire_hud_actions() -> void:
+	# Day-1 integration gap (user-found): the HUD's click signals were never
+	# routed to the Building System — only the 1-5 key path worked.
+	hud.tool_button_pressed.connect(building_system._set_tool)
+	hud.material_selected.connect(building_system.select_material)
+	hud.formation_selected.connect(building_system.set_formation)
+	hud.wall_height_set.connect(building_system._set_wall_height)
+	hud.undo_pressed.connect(building_system._undo)
+	hud.redo_pressed.connect(building_system._redo)
 
 
 func _wire_time_actions() -> void:

@@ -288,6 +288,19 @@ func _cycle_formation(direction: int) -> void:
 	_formation_index = wrapi(_formation_index + direction, 0, FORMATIONS.size())
 	formation_changed.emit(FORMATIONS[_formation_index])
 
+func select_material(item_id: String) -> void:
+	for i in _materials.size():
+		if _materials[i].id == item_id:
+			_material_index = i
+			palette_changed.emit(item_id)
+			return
+
+func set_formation(formation_name: String) -> void:
+	var idx: int = FORMATIONS.find(formation_name)
+	if idx >= 0:
+		_formation_index = idx
+		formation_changed.emit(formation_name)
+
 func _current_material() -> ResourceItemDatabase.ItemDef:
 	if _materials.is_empty():
 		return null
