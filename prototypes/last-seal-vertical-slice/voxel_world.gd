@@ -359,27 +359,47 @@ func _stamp_trees_for_chunk(cc: Vector2i, arr: PackedByteArray) -> void:
 	var col_max_x := cc.x * CHUNK + CHUNK + 2
 	var col_min_z := cc.y * CHUNK - 2
 	var col_max_z := cc.y * CHUNK + CHUNK + 2
+	var trees: Array[Dictionary] = []
 	for gz in range(col_min_z, col_max_z):
 		for gx in range(col_min_x, col_max_x):
 			if not _is_tree_column(gx, gz):
 				continue
 			var surface_y := terrain_height(gx, gz)
 			var trunk_h := _tree_trunk_height(gx, gz)
-			for i in trunk_h:
-				_stamp_cell(cc, arr, gx, surface_y + i, gz, TRUNK)
-			var top_y := surface_y + trunk_h - 1
-			# canopy layer 0 (trunk-top level): the 4 orthogonal neighbors only
-			# (center is already TRUNK) -- corners skipped for a rounded read.
-			for d in TREE_CANOPY_ORTHOS:
-				_stamp_cell(cc, arr, gx + d.x, top_y, gz + d.y, LEAVES)
-			# canopy layer 1 (top_y+1): full 3x3, the widest/densest layer.
-			for dz2 in range(-1, 2):
-				for dx2 in range(-1, 2):
-					_stamp_cell(cc, arr, gx + dx2, top_y + 1, gz + dz2, LEAVES)
-			# canopy layer 2 (top_y+2): plus-shape cap.
-			_stamp_cell(cc, arr, gx, top_y + 2, gz, LEAVES)
-			for d in TREE_CANOPY_ORTHOS:
-				_stamp_cell(cc, arr, gx + d.x, top_y + 2, gz + d.y, LEAVES)
+			trees.append({"gx": gx, "gz": gz, "surface_y": surface_y, "trunk_h": trunk_h, "top_y": surface_y + trunk_h - 1})
+	# PASS 1 (all trunks first): fixes the 2026-07-12 "hollow trunk" /
+	# "orphan canopy" defect — two trees close enough for canopies to reach
+	# each other always share the same surface_y=8 (only grass terrace that
+	# grows forest), so their top_y values collide often (trunk_h is only
+	# 3 or 4). The OLD single-pass-per-tree order let whichever tree's canopy
+	# was stamped first (by scan order) steal a NEIGHBORING tree's own
+	# top-trunk cell out from under it (air-only guard let LEAVES win the
+	# race). Placing every candidate's full trunk before ANY canopy makes
+	# trunk cells always win that collision, independent of scan order.
+	for t in trees:
+		var gx: int = t["gx"]
+		var gz: int = t["gz"]
+		var surface_y: int = t["surface_y"]
+		var trunk_h: int = t["trunk_h"]
+		for i in trunk_h:
+			_stamp_cell(cc, arr, gx, surface_y + i, gz, TRUNK)
+	# PASS 2: canopies, only landing on cells still air after ALL trunks are placed.
+	for t in trees:
+		var gx: int = t["gx"]
+		var gz: int = t["gz"]
+		var top_y: int = t["top_y"]
+		# canopy layer 0 (trunk-top level): the 4 orthogonal neighbors only
+		# (center is already TRUNK) -- corners skipped for a rounded read.
+		for d in TREE_CANOPY_ORTHOS:
+			_stamp_cell(cc, arr, gx + d.x, top_y, gz + d.y, LEAVES)
+		# canopy layer 1 (top_y+1): full 3x3, the widest/densest layer.
+		for dz2 in range(-1, 2):
+			for dx2 in range(-1, 2):
+				_stamp_cell(cc, arr, gx + dx2, top_y + 1, gz + dz2, LEAVES)
+		# canopy layer 2 (top_y+2): plus-shape cap.
+		_stamp_cell(cc, arr, gx, top_y + 2, gz, LEAVES)
+		for d in TREE_CANOPY_ORTHOS:
+			_stamp_cell(cc, arr, gx + d.x, top_y + 2, gz + d.y, LEAVES)
 
 
 func _fill_chunk_terrain(cc: Vector2i) -> void:
@@ -527,7 +547,7 @@ func _base_color_for_tile(value: int) -> Color:
 		SAND:
 			return Color("D8C9A0")
 		WATER:
-			return Color("4E7D96")
+			return Color("5E93AD")  # brighter calm blue (horizon-band fix)
 		TRUNK:
 			return Color("5C4630")
 		LEAVES:
@@ -601,6 +621,13 @@ func _append_face(verts: PackedVector3Array, normals: PackedVector3Array, colors
 	var m_b := shade * AO_BRIGHTNESS[ao_b]
 	var m_c := shade * AO_BRIGHTNESS[ao_c]
 	var m_d := shade * AO_BRIGHTNESS[ao_d]
+	if arr[(ly * CHUNK + lz) * CHUNK + lx] == WATER:
+		# Lakes sit in pits — full basin-wall AO paints the whole surface
+		# near-black at distance. Water stays calm and bright.
+		m_a = maxf(m_a, shade * 0.9)
+		m_b = maxf(m_b, shade * 0.9)
+		m_c = maxf(m_c, shade * 0.9)
+		m_d = maxf(m_d, shade * 0.9)
 	var base := verts.size()
 	verts.append_array([a, b, c, d])
 	var n := Vector3(face_dir)
