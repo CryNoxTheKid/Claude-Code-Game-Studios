@@ -250,6 +250,10 @@ func _set_tool(t: int) -> void:
 	tool_changed.emit(_tool)
 
 func _on_cancel() -> void:
+	# Heal stale press state (a release can be lost to HUD consumption or
+	# synthetic input): only treat as drag-abort if LMB is REALLY down.
+	if _is_pressed and not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+		_is_pressed = false
 	if _is_pressed:
 		_abort_drag()
 		return

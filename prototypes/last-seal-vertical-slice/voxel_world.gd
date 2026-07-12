@@ -31,6 +31,38 @@ const BAND_COLORS: Array[Color] = [
 	Color("C9D3D8"),  # Peak     — snow, blends into fog
 ]
 
+# --- Procedural texture atlas + classic voxel AO (readability pass 2026-07-12) ---
+# Tiles laid out horizontally: [4 terrain bands][WOOD][STONE][THATCH][BED][unknown].
+# Vertex color no longer carries block hue (the atlas does) — it's now a pure
+# grayscale multiplier: per-face-direction shade * per-vertex AO brightness.
+const ATLAS_TILE_PX := 16
+const ATLAS_VALUES: Array[int] = [TERRAIN_BASE, TERRAIN_BASE + 1, TERRAIN_BASE + 2, TERRAIN_BASE + 3, WOOD, STONE, THATCH, BED]
+
+enum FaceDir { TOP, BOTTOM, RIGHT, LEFT, BACK, FORWARD }
+
+const FACE_NORMAL: Array[Vector3i] = [
+	Vector3i(0, 1, 0), Vector3i(0, -1, 0), Vector3i(1, 0, 0), Vector3i(-1, 0, 0), Vector3i(0, 0, 1), Vector3i(0, 0, -1),
+]
+const FACE_SHADE: Array[float] = [1.0, 1.0, 0.88, 0.88, 0.8, 0.8]  # milder now that AO carries definition
+# Per face, the 4 corners (a,b,c,d matching the mesher's vertex order) each need
+# two tangent "ortho" offsets (the two face-adjacent side cells used for AO).
+# Entry layout per face: [a_side1, a_side2, b_side1, b_side2, c_side1, c_side2, d_side1, d_side2]
+const FACE_ORTHOS: Array[Array] = [
+	# TOP
+	[Vector3i(-1, 0, 0), Vector3i(0, 0, -1), Vector3i(-1, 0, 0), Vector3i(0, 0, 1), Vector3i(1, 0, 0), Vector3i(0, 0, 1), Vector3i(1, 0, 0), Vector3i(0, 0, -1)],
+	# BOTTOM
+	[Vector3i(-1, 0, 0), Vector3i(0, 0, -1), Vector3i(1, 0, 0), Vector3i(0, 0, -1), Vector3i(1, 0, 0), Vector3i(0, 0, 1), Vector3i(-1, 0, 0), Vector3i(0, 0, 1)],
+	# RIGHT (+X)
+	[Vector3i(0, -1, 0), Vector3i(0, 0, -1), Vector3i(0, 1, 0), Vector3i(0, 0, -1), Vector3i(0, 1, 0), Vector3i(0, 0, 1), Vector3i(0, -1, 0), Vector3i(0, 0, 1)],
+	# LEFT (-X)
+	[Vector3i(0, -1, 0), Vector3i(0, 0, -1), Vector3i(0, -1, 0), Vector3i(0, 0, 1), Vector3i(0, 1, 0), Vector3i(0, 0, 1), Vector3i(0, 1, 0), Vector3i(0, 0, -1)],
+	# BACK (+Z)
+	[Vector3i(-1, 0, 0), Vector3i(0, -1, 0), Vector3i(1, 0, 0), Vector3i(0, -1, 0), Vector3i(1, 0, 0), Vector3i(0, 1, 0), Vector3i(-1, 0, 0), Vector3i(0, 1, 0)],
+	# FORWARD (-Z)
+	[Vector3i(-1, 0, 0), Vector3i(0, -1, 0), Vector3i(-1, 0, 0), Vector3i(0, 1, 0), Vector3i(1, 0, 0), Vector3i(0, 1, 0), Vector3i(1, 0, 0), Vector3i(0, -1, 0)],
+]
+const AO_BRIGHTNESS: Array[float] = [1.0, 0.82, 0.68, 0.55]   # 0..3 occluders
+
 signal cell_changed(changes: Array)    # Array of {cell: Vector3i, before: int, after: int} — ONE emission per write call (batched)
 
 var _chunk_data: Dictionary[Vector2i, PackedByteArray] = {}    # lazily allocated — only touched chunks
@@ -42,6 +74,9 @@ var _region_chunk_min: Vector2i = Vector2i.ZERO
 var _region_chunk_max: Vector2i = Vector2i.ZERO   # exclusive
 var _region_cell_min: Vector2i = Vector2i.ZERO
 var _region_cell_max: Vector2i = Vector2i.ZERO    # exclusive
+var _value_tile_index: Dictionary[int, int] = {}   # cell value -> atlas tile index
+var _unknown_tile_index: int = 0
+var _atlas_tile_count: int = 0
 
 
 func _ready() -> void:
@@ -52,6 +87,7 @@ func _ready() -> void:
 
 
 func setup() -> void:
+	_build_atlas()
 	_center_chunk = Vector2i((WORLD_SIZE / 2) / CHUNK, (WORLD_SIZE / 2) / CHUNK)
 	_region_chunk_min = _center_chunk - Vector2i(REGION_RADIUS_CHUNKS, REGION_RADIUS_CHUNKS)
 	_region_chunk_max = _center_chunk + Vector2i(REGION_RADIUS_CHUNKS, REGION_RADIUS_CHUNKS)
@@ -230,6 +266,7 @@ func _rebuild_chunk_mesh(cc: Vector2i) -> void:
 	var verts := PackedVector3Array()
 	var normals := PackedVector3Array()
 	var colors := PackedColorArray()
+	var uvs := PackedVector2Array()
 	var indices := PackedInt32Array()
 	for ly in MAX_Y:
 		var fy := float(ly)
@@ -243,31 +280,31 @@ func _rebuild_chunk_mesh(cc: Vector2i) -> void:
 					continue
 				var gx := cc.x * CHUNK + lx
 				var fx := float(gx)
-				var col := _color_for_value(v)
+				var tile_index := _tile_index_for_value(v)
 				if _neighbor_value(cc, arr, lx, ly + 1, lz) <= AIR:
-					_quad(verts, normals, colors, indices,
+					_append_face(verts, normals, colors, uvs, indices,
 						Vector3(fx, fy1, fz), Vector3(fx, fy1, fz + 1), Vector3(fx + 1, fy1, fz + 1), Vector3(fx + 1, fy1, fz),
-						Vector3.UP, col)
+						FaceDir.TOP, tile_index, cc, arr, lx, ly, lz)
 				if _neighbor_value(cc, arr, lx, ly - 1, lz) <= AIR:
-					_quad(verts, normals, colors, indices,
+					_append_face(verts, normals, colors, uvs, indices,
 						Vector3(fx, fy, fz), Vector3(fx + 1, fy, fz), Vector3(fx + 1, fy, fz + 1), Vector3(fx, fy, fz + 1),
-						Vector3.DOWN, col)
+						FaceDir.BOTTOM, tile_index, cc, arr, lx, ly, lz)
 				if _neighbor_value(cc, arr, lx + 1, ly, lz) <= AIR:
-					_quad(verts, normals, colors, indices,
+					_append_face(verts, normals, colors, uvs, indices,
 						Vector3(fx + 1, fy, fz), Vector3(fx + 1, fy1, fz), Vector3(fx + 1, fy1, fz + 1), Vector3(fx + 1, fy, fz + 1),
-						Vector3.RIGHT, col.darkened(0.2))
+						FaceDir.RIGHT, tile_index, cc, arr, lx, ly, lz)
 				if _neighbor_value(cc, arr, lx - 1, ly, lz) <= AIR:
-					_quad(verts, normals, colors, indices,
+					_append_face(verts, normals, colors, uvs, indices,
 						Vector3(fx, fy, fz), Vector3(fx, fy, fz + 1), Vector3(fx, fy1, fz + 1), Vector3(fx, fy1, fz),
-						Vector3.LEFT, col.darkened(0.2))
+						FaceDir.LEFT, tile_index, cc, arr, lx, ly, lz)
 				if _neighbor_value(cc, arr, lx, ly, lz + 1) <= AIR:
-					_quad(verts, normals, colors, indices,
+					_append_face(verts, normals, colors, uvs, indices,
 						Vector3(fx, fy, fz + 1), Vector3(fx + 1, fy, fz + 1), Vector3(fx + 1, fy1, fz + 1), Vector3(fx, fy1, fz + 1),
-						Vector3.BACK, col.darkened(0.3))
+						FaceDir.BACK, tile_index, cc, arr, lx, ly, lz)
 				if _neighbor_value(cc, arr, lx, ly, lz - 1) <= AIR:
-					_quad(verts, normals, colors, indices,
+					_append_face(verts, normals, colors, uvs, indices,
 						Vector3(fx, fy, fz), Vector3(fx, fy1, fz), Vector3(fx + 1, fy1, fz), Vector3(fx + 1, fy, fz),
-						Vector3.FORWARD, col.darkened(0.3))
+						FaceDir.FORWARD, tile_index, cc, arr, lx, ly, lz)
 	if verts.is_empty():
 		if _chunk_nodes.has(cc):
 			(_chunk_nodes[cc] as MeshInstance3D).mesh = null
@@ -278,6 +315,7 @@ func _rebuild_chunk_mesh(cc: Vector2i) -> void:
 	arrays[Mesh.ARRAY_VERTEX] = verts
 	arrays[Mesh.ARRAY_NORMAL] = normals
 	arrays[Mesh.ARRAY_COLOR] = colors
+	arrays[Mesh.ARRAY_TEX_UV] = uvs
 	arrays[Mesh.ARRAY_INDEX] = indices
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 	mesh.surface_set_material(0, _material)
@@ -301,20 +339,99 @@ func _neighbor_value(cc: Vector2i, arr: PackedByteArray, lx: int, ly: int, lz: i
 	return get_cell(Vector3i(gx, ly, gz))
 
 
-func _color_for_value(v: int) -> Color:
-	if v < WOOD:
-		return BAND_COLORS[clampi(v - TERRAIN_BASE, 0, BAND_COLORS.size() - 1)]
-	var def: ResourceItemDatabase.ItemDef = ResourceItemDatabase.get_by_cell_value(v)
+func _build_atlas() -> void:
+	_value_tile_index.clear()
+	for i in ATLAS_VALUES.size():
+		_value_tile_index[ATLAS_VALUES[i]] = i
+	_unknown_tile_index = ATLAS_VALUES.size()
+	_atlas_tile_count = ATLAS_VALUES.size() + 1
+	var atlas_w := _atlas_tile_count * ATLAS_TILE_PX
+	var img := Image.create(atlas_w, ATLAS_TILE_PX, false, Image.FORMAT_RGB8)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = SEED
+	for tile_i in _atlas_tile_count:
+		var value := ATLAS_VALUES[tile_i] if tile_i < ATLAS_VALUES.size() else -1
+		var base_color := _base_color_for_tile(value)
+		var streaky := value == WOOD or value == THATCH
+		for py in ATLAS_TILE_PX:
+			var row_mult := 1.0
+			if streaky:
+				row_mult = 1.0 + (rng.randf() - 0.5) * 0.14   # horizontal plank/straw streaks
+			for px in ATLAS_TILE_PX:
+				var pixel_noise := 1.0 + (rng.randf() - 0.5) * 0.16   # ~0.92..1.08 per-pixel variation
+				var mult := pixel_noise * row_mult
+				if px == 0 or px == ATLAS_TILE_PX - 1 or py == 0 or py == ATLAS_TILE_PX - 1:
+					mult *= 0.85   # 1px tile border so block boundaries read at a distance
+				img.set_pixel(tile_i * ATLAS_TILE_PX + px, py, Color(
+					clampf(base_color.r * mult, 0.0, 1.0),
+					clampf(base_color.g * mult, 0.0, 1.0),
+					clampf(base_color.b * mult, 0.0, 1.0)))
+	var tex := ImageTexture.create_from_image(img)
+	_material.albedo_texture = tex
+	_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+
+
+func _base_color_for_tile(value: int) -> Color:
+	if value < 0:
+		return Color.MAGENTA   # reserved "unknown value" tile
+	if value < WOOD:
+		return BAND_COLORS[clampi(value - TERRAIN_BASE, 0, BAND_COLORS.size() - 1)]
+	var def: ResourceItemDatabase.ItemDef = ResourceItemDatabase.get_by_cell_value(value)
 	if def == null:
 		return Color.MAGENTA   # visibly wrong instead of a silent crash — unknown built cell value
 	return def.color
 
 
-func _quad(verts: PackedVector3Array, normals: PackedVector3Array, colors: PackedColorArray, indices: PackedInt32Array,
-		a: Vector3, b: Vector3, c: Vector3, d: Vector3, n: Vector3, col: Color) -> void:
+func _tile_index_for_value(v: int) -> int:
+	return _value_tile_index.get(v, _unknown_tile_index)
+
+
+func _vertex_ao(cc: Vector2i, arr: PackedByteArray, lx: int, ly: int, lz: int, face_dir: Vector3i, o1: Vector3i, o2: Vector3i) -> int:
+	# Classic voxel AO (0fps-style): both side-adjacent cells solid always
+	# forces max occlusion regardless of the corner cell (avoids a bright
+	# seam where the corner is empty but both sides already block light).
+	var side1 := _neighbor_value(cc, arr, lx + face_dir.x + o1.x, ly + face_dir.y + o1.y, lz + face_dir.z + o1.z) > AIR
+	var side2 := _neighbor_value(cc, arr, lx + face_dir.x + o2.x, ly + face_dir.y + o2.y, lz + face_dir.z + o2.z) > AIR
+	if side1 and side2:
+		return 3
+	var corner := _neighbor_value(cc, arr,
+		lx + face_dir.x + o1.x + o2.x, ly + face_dir.y + o1.y + o2.y, lz + face_dir.z + o1.z + o2.z) > AIR
+	var count := 0
+	if side1:
+		count += 1
+	if side2:
+		count += 1
+	if corner:
+		count += 1
+	return count
+
+
+func _append_face(verts: PackedVector3Array, normals: PackedVector3Array, colors: PackedColorArray, uvs: PackedVector2Array, indices: PackedInt32Array,
+		a: Vector3, b: Vector3, c: Vector3, d: Vector3, face: int, tile_index: int,
+		cc: Vector2i, arr: PackedByteArray, lx: int, ly: int, lz: int) -> void:
+	var face_dir: Vector3i = FACE_NORMAL[face]
+	var shade: float = FACE_SHADE[face]
+	var orthos: Array = FACE_ORTHOS[face]
+	var ao_a := _vertex_ao(cc, arr, lx, ly, lz, face_dir, orthos[0], orthos[1])
+	var ao_b := _vertex_ao(cc, arr, lx, ly, lz, face_dir, orthos[2], orthos[3])
+	var ao_c := _vertex_ao(cc, arr, lx, ly, lz, face_dir, orthos[4], orthos[5])
+	var ao_d := _vertex_ao(cc, arr, lx, ly, lz, face_dir, orthos[6], orthos[7])
+	var m_a := shade * AO_BRIGHTNESS[ao_a]
+	var m_b := shade * AO_BRIGHTNESS[ao_b]
+	var m_c := shade * AO_BRIGHTNESS[ao_c]
+	var m_d := shade * AO_BRIGHTNESS[ao_d]
 	var base := verts.size()
 	verts.append_array([a, b, c, d])
-	for i in 4:
-		normals.append(n)
-		colors.append(col)
-	indices.append_array([base, base + 1, base + 2, base, base + 2, base + 3])
+	var n := Vector3(face_dir)
+	normals.append_array([n, n, n, n])
+	colors.append_array([Color(m_a, m_a, m_a), Color(m_b, m_b, m_b), Color(m_c, m_c, m_c), Color(m_d, m_d, m_d)])
+	var u0 := float(tile_index) / float(_atlas_tile_count)
+	var u1 := float(tile_index + 1) / float(_atlas_tile_count)
+	uvs.append_array([Vector2(u0, 0.0), Vector2(u1, 0.0), Vector2(u1, 1.0), Vector2(u0, 1.0)])
+	# Standard AO seam fix: flip the triangulation diagonal when the "a-c"
+	# diagonal is more occluded than "b-d", to avoid the classic X-shaped
+	# AO artifact on partially-occluded quads.
+	if ao_a + ao_c > ao_b + ao_d:
+		indices.append_array([base + 1, base + 2, base + 3, base + 1, base + 3, base + 0])
+	else:
+		indices.append_array([base, base + 1, base + 2, base, base + 2, base + 3])

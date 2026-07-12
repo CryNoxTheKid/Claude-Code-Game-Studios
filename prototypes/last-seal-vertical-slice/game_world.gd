@@ -114,13 +114,16 @@ func _setup_environment() -> void:
 	var sky := Sky.new()
 	sky.sky_material = sky_mat
 	env.sky = sky
-	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	env.ambient_light_energy = 0.9
-	# Cozy-at-scale: distance fog keeps the settlement core intimate.
+	# Warm flat ambient — the sky-sourced ambient tinted everything blue-grey
+	# and crushed the ground read (found via the mesher agent's A/B render).
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	env.ambient_light_color = Color(0.98, 0.94, 0.86)
+	env.ambient_light_energy = 0.85
+	# Cozy-at-scale: fog owns the HORIZON only — near field stays warm/readable.
 	env.fog_enabled = true
 	env.fog_light_color = FOG_COLOR
-	env.fog_density = 0.0035  # slice tuning: keep the core warm/readable, fog owns the horizon
-	env.fog_sky_affect = 0.35
+	env.fog_density = 0.0016
+	env.fog_sky_affect = 0.3
 	var world_env := WorldEnvironment.new()
 	world_env.environment = env
 	add_child(world_env)
@@ -128,7 +131,7 @@ func _setup_environment() -> void:
 	var sun := DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-42.0, -35.0, 0.0)
 	sun.light_color = Color(1.0, 0.93, 0.80)  # warm golden-hour key light
-	sun.light_energy = 1.15
+	sun.light_energy = 1.35
 	sun.shadow_enabled = true
 	add_child(sun)
 
