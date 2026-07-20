@@ -40,6 +40,8 @@ func _ready() -> void:
 	camera_input.name = "CameraInput"
 	add_child(camera_input)
 	camera_input.setup(voxel_world.get_region_aabb())
+	if camera_input.has_method("set_height_provider"):
+		camera_input.set_height_provider(voxel_world.terrain_height)
 
 	needs_mood = NeedsMoodScript.new()
 	needs_mood.name = "NeedsMood"

@@ -178,14 +178,43 @@ func _update_pan(delta: float) -> void:
 	_target_z = clamp(_target_z + pan.z, _bounds_min.z, _bounds_max.z)
 
 
+## Terrain height provider (wired by GameWorld). Without it the camera's
+## fixed-height target lets the EYE dive INSIDE hills — a backface-culled
+## voxel world then reads as 'only outer faces render, see through to
+## bedrock' (the user's long-standing report; none of the mesh fixes could
+## ever change it because it was never a mesh problem).
+var _height_provider: Callable = Callable()
+
+
+func set_height_provider(cb: Callable) -> void:
+	_height_provider = cb
+
+
+func _terrain_h(x: float, z: float) -> float:
+	if _height_provider.is_valid():
+		return float(_height_provider.call(int(floor(x)), int(floor(z))))
+	return 0.0
+
+
 func _update_camera_transform() -> void:
 	var offset: Vector3 = Vector3(
 		_distance * sin(_yaw) * cos(_pitch),
 		_distance * sin(_pitch),
 		_distance * cos(_yaw) * cos(_pitch)
 	)
-	var target_pos: Vector3 = Vector3(_target_x, TARGET_Y, _target_z)
-	_camera.position = target_pos + offset
+	# Target rides the terrain surface instead of a fixed height.
+	var target_y: float = TARGET_Y
+	if _height_provider.is_valid():
+		target_y = _terrain_h(_target_x, _target_z) + 1.0
+	var target_pos: Vector3 = Vector3(_target_x, target_y, _target_z)
+	var eye: Vector3 = target_pos + offset
+	# The eye NEVER goes underground: keep it >= 2 cells above the terrain
+	# at its own footprint (cheap sample; exact collision is out of slice scope).
+	if _height_provider.is_valid():
+		var min_eye_y: float = _terrain_h(eye.x, eye.z) + 2.0
+		if eye.y < min_eye_y:
+			eye.y = min_eye_y
+	_camera.position = eye
 	_camera.look_at(target_pos, Vector3.UP)
 
 
