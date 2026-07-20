@@ -12,6 +12,7 @@ const VillagerAIScript := preload("res://villager_ai.gd")
 const NeedsMoodScript := preload("res://needs_mood.gd")
 const BuildValidationScript := preload("res://build_validation.gd")
 const HudScript := preload("res://hud.gd")
+const DebugConsoleScript := preload("res://debug_console.gd")
 
 const ROOM_LIGHT_COLOR := Color(0.96, 0.66, 0.24)  # Hearth Gold family
 const FOG_COLOR := Color("6B8593")                  # Threshold Cool (art bible fog hue)
@@ -70,6 +71,11 @@ func _ready() -> void:
 	needs_mood.setup(build_validation)
 	build_validation.setup(voxel_world, building_system, VillagerAIScript)
 	hud.setup(building_system, camera_input, villager_ai, needs_mood, build_validation)
+
+	var debug_console: CanvasLayer = DebugConsoleScript.new()
+	debug_console.name = "DebugConsole"
+	add_child(debug_console)
+	debug_console.setup(voxel_world, camera_input, building_system, villager_ai, needs_mood, build_validation)
 
 	_wire_optional_providers()
 	_wire_time_actions()
