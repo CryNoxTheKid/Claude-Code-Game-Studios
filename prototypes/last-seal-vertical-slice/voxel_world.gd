@@ -283,11 +283,20 @@ func terrain_height(x: int, z: int) -> int:
 	if dist < 40.0:
 		return 8
 	var continent := _continent_noise.get_noise_2d(float(x), float(z))
-	var hills := _hills_noise.get_noise_2d(float(x), float(z))
-	var raw_h := 8.0 + continent * 14.0 + hills * 3.0
+	# TERRACE ALIASING FIX (2026-07-20): quantize ONLY the smooth continent
+	# field. Feeding the hills noise into the quantizer made single columns
+	# flip between adjacent 4-cell steps along terrace boundaries -> isolated
+	# 4-tall needle pillars that read as detached floating faces (user
+	# screenshots). Hills detail is added AFTER quantization, capped to +-1
+	# cell, so it can never create a step jump.
 	var core_blend := smoothstep(40.0, 110.0, dist)  # 0 just outside core -> 1 at dist>=110
-	var blended_raw := lerpf(8.0, raw_h, core_blend)
-	var terraced := int(floor(blended_raw / 4.0)) * 4   # steps at y=..,4,8,12,16,20,24,..
+	var smooth_raw := lerpf(8.0, 8.0 + continent * 14.0, core_blend)
+	var terraced := int(floor(smooth_raw / 4.0)) * 4   # steps at y=..,4,8,12,16,20,24,..
+	# NO per-column detail on terraces: even +-1-cell noise creates isolated
+	# single-column bumps whose side faces read as floating shards from
+	# grazing angles (their grass tops blend invisibly from above) — the
+	# final form of the user's 'missing faces' reports. True Stonehearth
+	# terraces are FLAT; variation comes from the terrace shapes themselves.
 	return clampi(terraced, 2, MAX_Y - 6)
 
 
@@ -445,6 +454,14 @@ func _rebuild_chunk_mesh(cc: Vector2i) -> void:
 				var gx := cc.x * CHUNK + lx
 				var fx := float(gx)
 				var tile_index := _tile_index_for_value(v)
+				# Minecraft's iconic readability trick: grass shows only on
+				# TOP faces — every grass-band SIDE face renders as earth.
+				# Without this, a 4-cell terrace cliff whose upper lip is
+				# grass-sided visually merges with the grass below and its
+				# sawtooth edge reads as floating shards (user reports).
+				var side_tile := tile_index
+				if v == TERRAIN_BASE:
+					side_tile = _tile_index_for_value(TERRAIN_BASE + 1)
 				if _neighbor_value(cc, arr, lx, ly + 1, lz) <= AIR:
 					_append_face(verts, normals, colors, uvs, indices,
 						Vector3(fx, fy1, fz), Vector3(fx, fy1, fz + 1), Vector3(fx + 1, fy1, fz + 1), Vector3(fx + 1, fy1, fz),
@@ -456,19 +473,19 @@ func _rebuild_chunk_mesh(cc: Vector2i) -> void:
 				if _neighbor_value(cc, arr, lx + 1, ly, lz) <= AIR:
 					_append_face(verts, normals, colors, uvs, indices,
 						Vector3(fx + 1, fy, fz), Vector3(fx + 1, fy1, fz), Vector3(fx + 1, fy1, fz + 1), Vector3(fx + 1, fy, fz + 1),
-						FaceDir.RIGHT, tile_index, cc, arr, lx, ly, lz)
+						FaceDir.RIGHT, side_tile, cc, arr, lx, ly, lz)
 				if _neighbor_value(cc, arr, lx - 1, ly, lz) <= AIR:
 					_append_face(verts, normals, colors, uvs, indices,
 						Vector3(fx, fy, fz), Vector3(fx, fy, fz + 1), Vector3(fx, fy1, fz + 1), Vector3(fx, fy1, fz),
-						FaceDir.LEFT, tile_index, cc, arr, lx, ly, lz)
+						FaceDir.LEFT, side_tile, cc, arr, lx, ly, lz)
 				if _neighbor_value(cc, arr, lx, ly, lz + 1) <= AIR:
 					_append_face(verts, normals, colors, uvs, indices,
 						Vector3(fx, fy, fz + 1), Vector3(fx + 1, fy, fz + 1), Vector3(fx + 1, fy1, fz + 1), Vector3(fx, fy1, fz + 1),
-						FaceDir.BACK, tile_index, cc, arr, lx, ly, lz)
+						FaceDir.BACK, side_tile, cc, arr, lx, ly, lz)
 				if _neighbor_value(cc, arr, lx, ly, lz - 1) <= AIR:
 					_append_face(verts, normals, colors, uvs, indices,
 						Vector3(fx, fy, fz), Vector3(fx, fy1, fz), Vector3(fx + 1, fy1, fz), Vector3(fx + 1, fy, fz),
-						FaceDir.FORWARD, tile_index, cc, arr, lx, ly, lz)
+						FaceDir.FORWARD, side_tile, cc, arr, lx, ly, lz)
 	if verts.is_empty():
 		if _chunk_nodes.has(cc):
 			(_chunk_nodes[cc] as MeshInstance3D).mesh = null
