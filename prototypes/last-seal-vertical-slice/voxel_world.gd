@@ -621,13 +621,21 @@ func _append_face(verts: PackedVector3Array, normals: PackedVector3Array, colors
 	var m_b := shade * AO_BRIGHTNESS[ao_b]
 	var m_c := shade * AO_BRIGHTNESS[ao_c]
 	var m_d := shade * AO_BRIGHTNESS[ao_d]
-	if arr[(ly * CHUNK + lz) * CHUNK + lx] == WATER:
+	var own_value: int = arr[(ly * CHUNK + lz) * CHUNK + lx]
+	if own_value == WATER:
 		# Lakes sit in pits — full basin-wall AO paints the whole surface
 		# near-black at distance. Water stays calm and bright.
 		m_a = maxf(m_a, shade * 0.9)
 		m_b = maxf(m_b, shade * 0.9)
 		m_c = maxf(m_c, shade * 0.9)
 		m_d = maxf(m_d, shade * 0.9)
+	elif own_value == TRUNK:
+		# The canopy above max-occludes every trunk side face (both AO side
+		# samples hit LEAVES) — near-black bark reads as a MISSING face.
+		m_a = maxf(m_a, shade * 0.78)
+		m_b = maxf(m_b, shade * 0.78)
+		m_c = maxf(m_c, shade * 0.78)
+		m_d = maxf(m_d, shade * 0.78)
 	var base := verts.size()
 	verts.append_array([a, b, c, d])
 	var n := Vector3(face_dir)
