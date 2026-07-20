@@ -488,7 +488,6 @@ func _rebuild_chunk_mesh(cc: Vector2i) -> void:
 	else:
 		var mi := MeshInstance3D.new()
 		mi.mesh = mesh
-		mi.visibility_range_end = 600.0
 		add_child(mi)
 		_chunk_nodes[cc] = mi
 
