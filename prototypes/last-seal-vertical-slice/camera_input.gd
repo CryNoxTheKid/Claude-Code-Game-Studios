@@ -11,7 +11,7 @@ extends Node3D
 # tuning-knob table on purpose for this prototype.
 # ---------------------------------------------------------------------------
 
-const DISTANCE_DEFAULT: float = 16.0
+const DISTANCE_DEFAULT: float = 24.0
 const YAW_DEFAULT: float = 0.8
 const PITCH_DEFAULT: float = 1.0  # colony-builder default: look AT the ground
 const PITCH_MIN: float = 0.3

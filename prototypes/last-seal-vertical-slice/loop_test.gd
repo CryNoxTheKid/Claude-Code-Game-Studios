@@ -36,7 +36,7 @@ func _run() -> void:
 	var nm: Node = gw.needs_mood
 
 	var ids: Array = va.get_villager_ids()
-	_check(ids.size() == 1, "exactly one villager spawned")
+	_check(ids.size() == 3, "three villagers spawned (Hilda, Bruno, Mira)")
 	var vid: int = ids[0]
 	var spawn: Vector3i = va.get_info(vid)["cell"]
 	print("TEST villager %s at %s" % [va.get_info(vid)["name"], spawn])

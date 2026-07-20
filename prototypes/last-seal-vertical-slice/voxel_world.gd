@@ -29,7 +29,7 @@ const WATER := 40
 
 # --- Terracing + biomes (2026-07-12, Stonehearth-style) ---
 const WATER_LEVEL := 6                 # lakes fill terraces below this
-const TREE_CLEARING_DIST := 45.0       # no trees within this ring (matches core+buffer)
+const TREE_CLEARING_DIST := 70.0       # no trees within this ring (matches core+buffer)
 const TREE_MOISTURE_THRESHOLD := 0.15
 const TREE_CANOPY_ORTHOS: Array[Vector2i] = [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
 
@@ -100,7 +100,7 @@ func _ready() -> void:
 	_hills_noise.seed = SEED
 	_hills_noise.frequency = 0.012  # slice tuning: rolling hills, not per-cell speckle (was 0.05)
 	_continent_noise.seed = SEED
-	_continent_noise.frequency = 0.004   # broad elevation driving terrace level
+	_continent_noise.frequency = 0.0022  # wider landforms (user: world should read bigger)
 	_moisture_noise.seed = SEED + 7
 	_moisture_noise.frequency = 0.006
 	_material.vertex_color_use_as_albedo = true
@@ -287,7 +287,7 @@ func terrain_height(x: int, z: int) -> int:
 	# from the core's flat value up to full terrain so the first real
 	# terrace edge lands outside the core instead of clipping it.
 	var dist := _dist_from_center(x, z)
-	if dist < 40.0:
+	if dist < 60.0:
 		return 8
 	var continent := _continent_noise.get_noise_2d(float(x), float(z))
 	# TERRACE ALIASING FIX (2026-07-20): quantize ONLY the smooth continent
@@ -296,7 +296,7 @@ func terrain_height(x: int, z: int) -> int:
 	# 4-tall needle pillars that read as detached floating faces (user
 	# screenshots). Hills detail is added AFTER quantization, capped to +-1
 	# cell, so it can never create a step jump.
-	var core_blend := smoothstep(40.0, 110.0, dist)  # 0 just outside core -> 1 at dist>=110
+	var core_blend := smoothstep(60.0, 150.0, dist)  # 0 just outside core -> 1 at dist>=150
 	# 8-CELL STEPS (2026-07-20): 4-cell terraces were visually IMPERCEPTIBLE
 	# from the colony camera (same grass above/below, aligned tile grids, no
 	# depth cues) — the lips read as floating planks, the final root of every
@@ -353,7 +353,7 @@ func _is_tree_column(gx: int, gz: int) -> bool:
 
 
 func _tree_trunk_height(gx: int, gz: int) -> int:
-	return 3 + int(_column_hash01(gx, gz, 101) * 2.0)   # deterministic 3 or 4
+	return 4 + int(_column_hash01(gx, gz, 101) * 3.0)   # deterministic 4..6 (2-block-tall characters)
 
 
 func _stamp_cell(cc: Vector2i, arr: PackedByteArray, gx: int, gy: int, gz: int, value: int) -> void:

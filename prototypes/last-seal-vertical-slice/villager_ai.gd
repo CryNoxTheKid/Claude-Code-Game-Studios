@@ -39,11 +39,11 @@ const WANDER_REPICK_TICKS := 16
 # --- Jobs / life texture ---
 const JOB_RETRY_TICKS := 20
 const MAX_JOB_CLAIM_TRIES_PER_PASS := 3
-const JOBS_BEFORE_BREAK := 4
-const BREATHER_DURATION_TICKS := 90
+const JOBS_BEFORE_BREAK := 8    # user 2026-07-20: 'they should work more'
+const BREATHER_DURATION_TICKS := 40
 const TRAPPED_RETRY_TICKS := 8
 
-const SPAWN_NAME := "Hilda"
+const SPAWN_NAMES: Array[String] = ["Hilda", "Bruno", "Mira"]  # user: more workers
 const RNG_SEED := 1337   # shared project SEED constant (CONTRACTS.md)
 
 # --- AStar3D point-id packing: x | y<<21 | z<<42, masked (ADR-0007) ---
@@ -147,17 +147,17 @@ func setup(voxel_world, building_system, needs_mood) -> void:
 	_build_graph()
 
 	var spawn_cell := _find_spawn_cell()
-	var v := Villager.new()
-	v.id = _next_id
-	_next_id += 1
-	v.display_name = SPAWN_NAME
-	v.current_cell = spawn_cell
-	v.visual_position = _cell_center(spawn_cell)
-	v.state = State.DECIDING
-	_villagers[v.id] = v
-	_build_visual(v)
-
-	_needs_mood.register_villager(v.id)
+	for name in SPAWN_NAMES:
+		var v := Villager.new()
+		v.id = _next_id
+		_next_id += 1
+		v.display_name = name
+		v.current_cell = _nearby_standable(spawn_cell, _next_id)
+		v.visual_position = _cell_center(v.current_cell)
+		v.state = State.DECIDING
+		_villagers[v.id] = v
+		_build_visual(v)
+		_needs_mood.register_villager(v.id)
 	_needs_mood.need_satisfied.connect(_on_need_satisfied)
 
 	_building_system.set_occupancy_provider(Callable(self, "_is_cell_occupied"))
@@ -510,6 +510,16 @@ func _is_onsite(cell: Vector3i, target: Vector3i) -> bool:
 # Spawn placement
 # ---------------------------------------------------------------------------
 
+func _nearby_standable(origin: Vector3i, salt: int) -> Vector3i:
+	# Spread multiple spawns over distinct standable cells near the origin.
+	var offsets: Array[Vector2i] = [Vector2i(0, 0), Vector2i(2, 1), Vector2i(-2, 2), Vector2i(1, -2), Vector2i(3, 3)]
+	var d: Vector2i = offsets[salt % offsets.size()]
+	var c := Vector3i(origin.x + d.x, origin.y, origin.z + d.y)
+	if is_standable(_voxel_world, c):
+		return c
+	return origin
+
+
 func _find_spawn_cell() -> Vector3i:
 	var center := Vector3i(WORLD_SIZE / 2, 0, WORLD_SIZE / 2)
 	for radius in range(0, 32):
@@ -556,9 +566,11 @@ func _build_visual(v: Villager) -> void:
 	var warm_cream := Color(0.93, 0.85, 0.72)
 
 	var body := MeshInstance3D.new()
+	# 2 blocks tall (user 2026-07-20: Minecraft proportions — blocks read
+	# smaller, world reads bigger; walk clearance stays 3, logic unchanged).
 	var capsule := CapsuleMesh.new()
-	capsule.radius = 0.2
-	capsule.height = 0.6
+	capsule.radius = 0.3
+	capsule.height = 1.4
 	body.mesh = capsule
 	var body_mat := StandardMaterial3D.new()
 	body_mat.albedo_color = warm_cream
