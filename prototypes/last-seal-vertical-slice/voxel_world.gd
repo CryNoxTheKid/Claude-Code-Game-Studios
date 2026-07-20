@@ -104,6 +104,13 @@ func _ready() -> void:
 	_moisture_noise.seed = SEED + 7
 	_moisture_noise.frequency = 0.006
 	_material.vertex_color_use_as_albedo = true
+	# DIAGNOSIS CONFIRMED 2026-07-20 (user close-up of a tree canopy rendering
+	# inside-out): faces are wound for the OpenGL front-face convention (CCW),
+	# but Godot fronts are CLOCKWISE — cull_back hid the outside of everything.
+	# Every 'missing faces' report was this. Culling disabled as the immediate
+	# fix (10x frame headroom absorbs the ~2x face cost); proper winding flip
+	# is the follow-up.
+	_material.cull_mode = BaseMaterial3D.CULL_DISABLED
 	_material.roughness = 1.0
 	_material.metallic_specular = 0.0  # matte blocks — no plastic gloss on canopies
 	# cull_mode left at default CULL_BACK — winding is authored for correct backface culling
@@ -290,8 +297,12 @@ func terrain_height(x: int, z: int) -> int:
 	# screenshots). Hills detail is added AFTER quantization, capped to +-1
 	# cell, so it can never create a step jump.
 	var core_blend := smoothstep(40.0, 110.0, dist)  # 0 just outside core -> 1 at dist>=110
-	var smooth_raw := lerpf(8.0, 8.0 + continent * 14.0, core_blend)
-	var terraced := int(floor(smooth_raw / 4.0)) * 4   # steps at y=..,4,8,12,16,20,24,..
+	# 8-CELL STEPS (2026-07-20): 4-cell terraces were visually IMPERCEPTIBLE
+	# from the colony camera (same grass above/below, aligned tile grids, no
+	# depth cues) — the lips read as floating planks, the final root of every
+	# 'missing faces' report. A step must be tall enough to exist perceptually.
+	var smooth_raw := lerpf(8.0, 8.0 + continent * 18.0, core_blend)
+	var terraced := int(floor(smooth_raw / 8.0)) * 8   # steps at y=..,0,8,16,24
 	# NO per-column detail on terraces: even +-1-cell noise creates isolated
 	# single-column bumps whose side faces read as floating shards from
 	# grazing angles (their grass tops blend invisibly from above) — the
