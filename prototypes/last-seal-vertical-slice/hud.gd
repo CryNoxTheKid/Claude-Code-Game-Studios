@@ -84,6 +84,7 @@ var _context_content: VBoxContainer
 
 var _pause_button: Button
 var _speed_buttons: Dictionary = {}      # warp:int -> Button
+var _sim_stats_label: Label
 var _pause_dim: ColorRect
 
 var _toast_container: VBoxContainer
@@ -114,6 +115,19 @@ func _ready() -> void:
 func _process(_delta: float) -> void:
 	_reconcile_toasts()
 	_update_distress_icons()
+	_update_sim_stats()
+
+
+func _update_sim_stats() -> void:
+	if _sim_stats_label == null or _building_system == null:
+		return
+	var sim_seconds: int = TimeTickSystem.total_ticks / int(TimeTickSystem.TICKS_PER_SECOND)
+	var bp: Dictionary = _building_system.get_blueprint_cells()
+	var beds: int = _building_system.get_furniture_cells().size()
+	_sim_stats_label.text = "Sim %02d:%02d  ·  %d Villager  ·  %d Betten  ·  %d Auftraege" % [
+		sim_seconds / 60, sim_seconds % 60,
+		_villager_ai.get_villager_ids().size() if _villager_ai else 0,
+		beds, bp.size()]
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -462,9 +476,19 @@ func _build_time_controls() -> void:
 	panel.mouse_exited.connect(_set_hover.bind("time", false))
 	add_child(panel)
 
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation", 4)
+	panel.add_child(column)
+
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 6)
-	panel.add_child(row)
+	column.add_child(row)
+
+	_sim_stats_label = Label.new()
+	_sim_stats_label.add_theme_font_size_override("font_size", 13)
+	_sim_stats_label.add_theme_color_override("font_color", Color(0.8, 0.78, 0.72))
+	_sim_stats_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	column.add_child(_sim_stats_label)
 
 	_pause_button = Button.new()
 	_pause_button.custom_minimum_size = Vector2(36.0, 32.0)

@@ -118,9 +118,11 @@ func _on_time_action(action: String) -> void:
 		"time_pause":
 			TimeTickSystem.toggle_paused()
 		"time_speed_up":
-			TimeTickSystem.set_warp(mini(TimeTickSystem.get_warp() + 1, 3))
+			var idx_up: int = TimeTickSystem.WARPS.find(TimeTickSystem.get_warp())
+			TimeTickSystem.set_warp(TimeTickSystem.WARPS[mini(idx_up + 1, TimeTickSystem.WARPS.size() - 1)])
 		"time_speed_down":
-			TimeTickSystem.set_warp(maxi(TimeTickSystem.get_warp() - 1, 1))
+			var idx_down: int = TimeTickSystem.WARPS.find(TimeTickSystem.get_warp())
+			TimeTickSystem.set_warp(TimeTickSystem.WARPS[maxi(idx_down - 1, 0)])
 
 
 func _setup_environment() -> void:

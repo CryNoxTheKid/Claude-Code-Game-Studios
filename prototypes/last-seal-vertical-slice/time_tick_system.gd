@@ -11,9 +11,10 @@ signal time_state_changed(paused: bool, warp: int)
 const TICKS_PER_SECOND := 4.0
 const MAX_TICKS_PER_FRAME := 10
 const MAX_RAW_DELTA := 0.1
-const WARPS := [1, 2, 3]
+const WARPS := [1, 2, 3, 10, 20]  # 10x/20x: simulation/testing gears (user 2026-07-21)
 
 var game_delta: float = 0.0
+var total_ticks: int = 0   # lifetime simulated ticks (sim clock)
 
 var _paused := false
 var _warp := 1
@@ -32,6 +33,7 @@ func _physics_process(delta: float) -> void:
 	# Discard excess beyond the cap (never deferred).
 	_accumulator -= float(raw_ticks) * tick_interval
 	for i in ticks_to_fire:
+		total_ticks += 1
 		tick.emit()
 
 
