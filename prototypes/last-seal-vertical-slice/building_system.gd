@@ -12,6 +12,8 @@ extends Node3D
 # --- Global constants (duplicated per file per CONTRACTS.md) ---
 const AIR := 0
 const BUILT_CELL_MIN_VALUE := 10  # WOOD(10)/STONE(11)/THATCH(12)/BED(20) -- player-built; terrain is 1..4
+const TERRAIN_MIN_VALUE := 1      # TERRAIN_BASE per CONTRACTS.md -- 1..4 terrain height bands
+const TERRAIN_MAX_VALUE := 4
 
 enum Tool { NONE = 0, WALL = 1, FLOOR = 2, ROOF = 3, BLOCK = 4, FURNITURE = 5 }
 
@@ -53,8 +55,10 @@ const _QUAD_UV: Array[Vector2] = [Vector2(0, 0), Vector2(1, 0), Vector2(1, 1), V
 
 # Ghost tint (baked into vertex colors, multiplies the atlas texture underneath --
 # see design/gdd/building-system.md Visual Requirements + the textured-ghost fix).
-const GHOST_TINT_NEUTRAL := Color(0.85, 0.92, 1.0, 0.55)  # blueprint + valid drag/single-cell preview
+const GHOST_TINT_NEUTRAL := Color(0.85, 0.92, 1.0, 0.55)  # valid drag/single-cell tool preview
 const GHOST_TINT_INVALID := Color(1.0, 0.6, 0.25, 0.6)    # invalid drag/single-cell preview subset
+const GHOST_TINT_DRAFT := Color(0.85, 0.92, 1.0, 0.30)    # draft blueprint cells -- not yet released
+const GHOST_TINT_RELEASED := Color(0.85, 0.92, 1.0, 0.45) # released-but-unbuilt blueprint cells
 
 signal tool_changed(tool_id: int)
 signal palette_changed(material_id: String)
@@ -67,6 +71,10 @@ signal cells_removed(cells: Array)
 signal blueprint_changed()
 signal furniture_placed(cell: Vector3i, item_id: String)
 signal furniture_removed(cell: Vector3i, item_id: String)
+# CONTRACT ADDITION (FEATURE 1, this task): build/editor mode gate -- tools may
+# only be armed while true; see set_build_mode()/get_build_mode(). Flagged for
+# CONTRACTS.md update.
+signal build_mode_changed(active: bool)
 
 # --- Private state ---
 var _voxel_world: Node3D
@@ -74,6 +82,7 @@ var _camera_input: Node3D
 var _hud: CanvasLayer
 
 var _tool: int = Tool.NONE
+var _build_mode: bool = false  # FEATURE 1: tools may only arm while this is true
 var _wall_height: int = DEFAULT_WALL_HEIGHT
 var _formation_index: int = 0
 var _material_index: int = 0
@@ -103,15 +112,20 @@ var _drag_start_cell: Vector3i = Vector3i.ZERO
 var _drag_current_cell: Vector3i = Vector3i.ZERO
 var _drag_plane_y: int = 0
 var _drag_item_id: String = ""
+var _drag_floor_replace: bool = false  # FEATURE 3: drag started on a terrain top surface
 
 # Ghost rendering: merged, face-culled, TEXTURED meshes (real block tile per cell,
 # translucent) -- one surface per tint, not per cell. Texture source: voxel_world's
 # atlas (see get_atlas() addition, building_system.gd write-up).
 var _atlas_texture: Texture2D
 var _atlas_uv_rect: Callable = Callable()  # (cell_value: int) -> Rect2
-var _mat_ghost_valid: StandardMaterial3D    # blueprint mesh + valid drag/single-cell preview
+var _mat_ghost_valid: StandardMaterial3D    # blueprint meshes + valid drag/single-cell preview
 var _mat_ghost_invalid: StandardMaterial3D  # invalid drag/single-cell preview subset
-var _blueprint_mesh_instance: MeshInstance3D
+# FEATURE 2: blueprint ghosts split into two meshes (tint carries per-vertex, so
+# both share _mat_ghost_valid) -- draft cells render dimmer, released-but-unbuilt
+# cells render stronger so the player can see which cells will start construction.
+var _blueprint_draft_mesh_instance: MeshInstance3D
+var _blueprint_released_mesh_instance: MeshInstance3D
 var _preview_valid_mesh: MeshInstance3D
 var _preview_invalid_mesh: MeshInstance3D
 
@@ -149,6 +163,7 @@ func setup(voxel_world: Node3D, camera_input: Node3D, hud: CanvasLayer) -> void:
 	wall_height_changed.emit(_wall_height)
 	formation_changed.emit(FORMATIONS[_formation_index])
 	tool_changed.emit(_tool)
+	build_mode_changed.emit(_build_mode)
 	_emit_undo_state()
 
 ## Currently armed tool (see Tool enum; 0 = None).
@@ -159,6 +174,49 @@ func get_active_tool() -> int:
 func is_tool_armed() -> bool:
 	return _tool != Tool.NONE
 
+## True while build/editor mode is active (FEATURE 1). Tools may only be armed
+## while this is true; arming a tool while false auto-enables it (see _set_tool).
+func get_build_mode() -> bool:
+	return _build_mode
+
+## Enables/disables build/editor mode. Disabling aborts any in-progress drag,
+## disarms the current tool, and hides all ghosts. Enabling alone does not arm
+## a tool (the toolbar stays available for the player to pick one).
+func set_build_mode(active: bool) -> void:
+	if _build_mode == active:
+		return
+	_build_mode = active
+	if not active:
+		if _is_pressed:
+			_abort_drag()
+		if _tool != Tool.NONE:
+			_tool = Tool.NONE
+			tool_changed.emit(_tool)
+		_hide_all_ghosts()
+	build_mode_changed.emit(_build_mode)
+
+## FEATURE 2: flips every current DRAFT blueprint entry to released (buildable
+## by villagers) and returns how many were flipped. No-op (returns 0) if there
+## are no drafts.
+func release_drafts() -> int:
+	var count: int = 0
+	for cell in _blueprint.keys():
+		var entry: Dictionary = _blueprint[cell]
+		if bool(entry.get("draft", false)):
+			entry["draft"] = false
+			count += 1
+	if count > 0:
+		blueprint_changed.emit()
+	return count
+
+## FEATURE 2: number of blueprint cells still in DRAFT state (not yet released).
+func get_draft_count() -> int:
+	var count: int = 0
+	for entry in _blueprint.values():
+		if bool(entry.get("draft", false)):
+			count += 1
+	return count
+
 ## Combined Planned + UnderConstruction blueprint set. Returns a deep copy (safe to read, not to mutate).
 func get_blueprint_cells() -> Dictionary:
 	return _blueprint.duplicate(true)
@@ -168,6 +226,8 @@ func get_blueprint_cells() -> Dictionary:
 func claim_job(villager_id: int) -> Variant:
 	for cell in _blueprint.keys():
 		var entry: Dictionary = _blueprint[cell]
+		if bool(entry.get("draft", false)):
+			continue  # FEATURE 2: drafts are not yet released for construction
 		if int(entry["claimed_by"]) != 0 or bool(entry.get("ready", false)):
 			continue
 		if bool(entry["needs_support"]):
@@ -279,6 +339,10 @@ func _on_blueprint_changed() -> void:
 # --- Tool / mode state machine ---
 
 func _set_tool(t: int) -> void:
+	# FEATURE 1: arming any tool while build mode is off auto-enables it.
+	if t != Tool.NONE and not _build_mode:
+		_build_mode = true
+		build_mode_changed.emit(true)
 	if _tool == t:
 		return
 	if _is_pressed:
@@ -299,6 +363,11 @@ func _on_cancel() -> void:
 		_tool = Tool.NONE
 		_hide_all_ghosts()
 		tool_changed.emit(_tool)
+		return
+	# FEATURE 1 Esc chain extension: no tool armed but build mode still on ->
+	# exit build mode (the toolbar/context panel closes on the next Esc).
+	if _build_mode:
+		set_build_mode(false)
 
 func _abort_drag() -> void:
 	_is_pressed = false
@@ -393,6 +462,12 @@ func _update_furniture_ghost(hit: Dictionary) -> void:
 
 func _update_single_cell_preview(hit: Dictionary) -> void:
 	var target: Vector3i = hit.cell + hit.normal
+	_drag_floor_replace = false
+	if _tool == Tool.FLOOR and _is_terrain_top_surface(hit):
+		# FEATURE 3: floor picked on a terrain top surface digs INTO that plane
+		# instead of sitting one cell above it (Stonehearth flush floors).
+		target = hit.cell
+		_drag_floor_replace = true
 	var cells: Array[Vector3i] = _rasterize_for_tool(_tool, target, target, target.y)
 	var item: ResourceItemDatabase.ItemDef = _current_material()
 	_render_drag_ghosts(cells, item.cell_value if item != null else 0)
@@ -413,6 +488,13 @@ func _update_drag_shape(hit: Dictionary) -> void:
 	# palette change mid-drag doesn't retexture an in-progress preview.
 	var locked_item: ResourceItemDatabase.ItemDef = ResourceItemDatabase.get_by_id(_drag_item_id)
 	_render_drag_ghosts(clipped, locked_item.cell_value if locked_item != null else 0)
+
+## FEATURE 3: true when a pick hit a raw terrain cell (value 1..4) on its top
+## face (+Y normal) -- the surface the Floor tool digs into rather than
+## building one cell above.
+func _is_terrain_top_surface(hit: Dictionary) -> bool:
+	var value: int = _voxel_world.get_cell(hit.cell)
+	return value >= TERRAIN_MIN_VALUE and value <= TERRAIN_MAX_VALUE and hit.normal == Vector3i(0, 1, 0)
 
 func _rasterize_for_tool(tool_id: int, start: Vector3i, cur: Vector3i, plane_y: int) -> Array[Vector3i]:
 	match tool_id:
@@ -534,7 +616,10 @@ func _handle_drag_press(hit: Dictionary) -> void:
 	_is_pressed = true
 	_is_drag_active = false
 	_press_screen_pos = get_viewport().get_mouse_position()
-	var target: Vector3i = hit.cell + hit.normal
+	# FEATURE 3: floor drags that START on a terrain top surface target that
+	# surface's own plane (dig-in) instead of attaching one cell above it.
+	_drag_floor_replace = _tool == Tool.FLOOR and _is_terrain_top_surface(hit)
+	var target: Vector3i = hit.cell if _drag_floor_replace else hit.cell + hit.normal
 	_drag_start_cell = target
 	_drag_current_cell = target
 	_drag_plane_y = target.y
@@ -560,14 +645,16 @@ func _commit_drag() -> void:
 	if _drag_item_id.is_empty():
 		invalid_commit.emit(_cell_center(_drag_start_cell), "no material selected")
 		return
+	var floor_replace: bool = _tool == Tool.FLOOR and _drag_floor_replace
 	var valid_cells: Array[Vector3i] = []
 	for c in clipped:
-		if _is_cell_valid_for_commit(c, false):
+		var ok: bool = _is_cell_valid_for_floor_replace(c) if floor_replace else _is_cell_valid_for_commit(c, false)
+		if ok:
 			valid_cells.append(c)
 	if valid_cells.is_empty():
 		invalid_commit.emit(_cell_center(_drag_start_cell), "no valid cells")
 		return
-	_create_blueprint_cells(valid_cells, _drag_item_id, false)
+	_create_blueprint_cells(valid_cells, _drag_item_id, false, floor_replace)
 
 func _remove_built_cell(cell: Vector3i) -> void:
 	if not _voxel_world.is_in_region(cell):
@@ -601,23 +688,48 @@ func _is_cell_valid_for_commit(cell: Vector3i, is_furniture: bool) -> bool:
 			return false
 	return true
 
-func _create_blueprint_cells(cells: Array, item_id: String, is_furniture: bool) -> void:
+## FEATURE 3: replace-mode validity for a Floor drag that digs into terrain --
+## a covered cell is buildable if it is raw terrain (1..4, uneven ground gets
+## flattened) OR air (fills dips), and not already claimed by another blueprint.
+func _is_cell_valid_for_floor_replace(cell: Vector3i) -> bool:
+	if not _voxel_world.is_in_region(cell):
+		return false
+	if _blueprint.has(cell):
+		return false
+	var value: int = _voxel_world.get_cell(cell)
+	return value == AIR or (value >= TERRAIN_MIN_VALUE and value <= TERRAIN_MAX_VALUE)
+
+func _create_blueprint_cells(cells: Array, item_id: String, is_furniture: bool, is_floor_replace: bool = false) -> void:
 	var typed_cells: Array[Vector3i] = []
+	var restore_values: Dictionary = {}
 	for c in cells:
 		typed_cells.append(c)
+		# FEATURE 3: capture the cell's PRE-EXISTING value (terrain id for a
+		# floor-replace dig, AIR for every normal build) so undo restores the
+		# correct thing instead of assuming AIR.
+		var restore_value: int = _voxel_world.get_cell(c)
+		restore_values[c] = restore_value
 		_blueprint[c] = {
 			"item_id": item_id,
 			"progress_ticks": 0,
 			"claimed_by": 0,
 			"needs_support": is_furniture,
+			"draft": true,  # FEATURE 2: new blueprint cells start as drafts
+			"restore_value": restore_value,
 		}
-	_push_command(typed_cells, item_id, is_furniture)
+	_push_command(typed_cells, item_id, is_furniture, restore_values, is_floor_replace)
 	blueprint_changed.emit()
 
 # --- Undo / redo ---
 
-func _push_command(cells: Array[Vector3i], item_id: String, is_furniture: bool) -> void:
-	_undo_stack.append({"cells": cells.duplicate(), "item_id": item_id, "is_furniture": is_furniture})
+func _push_command(cells: Array[Vector3i], item_id: String, is_furniture: bool, restore_values: Dictionary, is_floor_replace: bool = false) -> void:
+	_undo_stack.append({
+		"cells": cells.duplicate(),
+		"item_id": item_id,
+		"is_furniture": is_furniture,
+		"restore_values": restore_values.duplicate(),
+		"is_floor_replace": is_floor_replace,
+	})
 	if _undo_stack.size() > UNDO_STACK_DEPTH:
 		_undo_stack.pop_front()  # Edge Case 9: oldest discarded silently
 	_redo_stack.clear()
@@ -629,13 +741,18 @@ func _undo() -> void:
 	var cmd: Dictionary = _undo_stack.pop_back()
 	var built_removals: Array = []
 	var is_furniture: bool = bool(cmd["is_furniture"])
+	var restore_values: Dictionary = cmd.get("restore_values", {})
 	for cell in cmd["cells"]:
 		if _blueprint.has(cell):
 			_blueprint.erase(cell)  # still Planned/UnderConstruction -> cancel
 		else:
+			# Cell was actually completed (blueprint entry already flushed) --
+			# restore its captured pre-existing value (FEATURE 3: terrain for a
+			# floor-replace dig, AIR otherwise) instead of assuming AIR.
+			var restore_to: int = int(restore_values.get(cell, AIR))
 			var v: int = _voxel_world.get_cell(cell)
-			if v != AIR:
-				built_removals.append({"cell": cell, "value": AIR})
+			if v != restore_to:
+				built_removals.append({"cell": cell, "value": restore_to})
 	if not built_removals.is_empty():
 		var applied: Array = _voxel_world.set_cells(built_removals)
 		var removed: Array[Vector3i] = []
@@ -655,22 +772,35 @@ func _redo() -> void:
 		return
 	var cmd: Dictionary = _redo_stack.pop_back()
 	var is_furniture: bool = bool(cmd["is_furniture"])
+	var is_floor_replace: bool = bool(cmd.get("is_floor_replace", false))
 	var valid_cells: Array[Vector3i] = []
 	for cell in cmd["cells"]:
-		if _is_cell_valid_for_commit(cell, is_furniture):
+		var ok: bool = _is_cell_valid_for_floor_replace(cell) if is_floor_replace else _is_cell_valid_for_commit(cell, is_furniture)
+		if ok:
 			valid_cells.append(cell)
 	if valid_cells.is_empty():
 		invalid_commit.emit(_cell_center(cmd["cells"][0]), "redo: no valid cells remain")
 		_emit_undo_state()
 		return
+	var restore_values: Dictionary = {}
 	for cell in valid_cells:
+		var restore_value: int = _voxel_world.get_cell(cell)
+		restore_values[cell] = restore_value
 		_blueprint[cell] = {
 			"item_id": cmd["item_id"],
 			"progress_ticks": 0,
 			"claimed_by": 0,
 			"needs_support": is_furniture,
+			"draft": false,  # redo restores directly to released (see task summary)
+			"restore_value": restore_value,
 		}
-	_undo_stack.append({"cells": valid_cells, "item_id": cmd["item_id"], "is_furniture": is_furniture})
+	_undo_stack.append({
+		"cells": valid_cells,
+		"item_id": cmd["item_id"],
+		"is_furniture": is_furniture,
+		"restore_values": restore_values,
+		"is_floor_replace": is_floor_replace,
+	})
 	if _undo_stack.size() > UNDO_STACK_DEPTH:
 		_undo_stack.pop_front()
 	blueprint_changed.emit()
@@ -726,7 +856,8 @@ func _build_ghost_visuals() -> void:
 	_atlas_uv_rect = atlas.get("uv_rect", Callable())
 	_mat_ghost_valid = _make_textured_ghost_material()
 	_mat_ghost_invalid = _make_textured_ghost_material()
-	_blueprint_mesh_instance = _make_ghost_mesh_instance(_mat_ghost_valid)
+	_blueprint_draft_mesh_instance = _make_ghost_mesh_instance(_mat_ghost_valid)
+	_blueprint_released_mesh_instance = _make_ghost_mesh_instance(_mat_ghost_valid)
 	_preview_valid_mesh = _make_ghost_mesh_instance(_mat_ghost_valid)
 	_preview_invalid_mesh = _make_ghost_mesh_instance(_mat_ghost_invalid)
 
@@ -849,8 +980,11 @@ func _render_drag_ghosts(cells: Array[Vector3i], cell_value: int) -> void:
 		return
 	var valid_cells: Array[Vector3i] = []
 	var invalid_cells: Array[Vector3i] = []
+	var floor_replace: bool = _tool == Tool.FLOOR and _drag_floor_replace
 	for cell in cells:
-		var valid: bool = (not roof_invalid_formation) and _is_cell_valid_for_commit(cell, _tool == Tool.FURNITURE)
+		var valid: bool = false
+		if not roof_invalid_formation:
+			valid = _is_cell_valid_for_floor_replace(cell) if floor_replace else _is_cell_valid_for_commit(cell, _tool == Tool.FURNITURE)
 		if valid:
 			valid_cells.append(cell)
 		else:
@@ -903,22 +1037,34 @@ func _hide_corner_pool() -> void:
 	for mi in _corner_pool:
 		mi.visible = false
 
-## Rebuilds the single merged blueprint mesh from the current cell set (Planned +
-## UnderConstruction combined -- uniform ghost tint for the slice, no per-cell
-## progress-alpha; see design/gdd/building-system.md Visual Requirements). Each
-## cell textures with ITS OWN material (a mixed wood+thatch+bed blueprint renders
-## each cell's real tile), since a command's cells can span multiple past commits.
+## Rebuilds the two merged blueprint meshes (draft / released) from the current
+## cell set (Planned + UnderConstruction combined -- no per-cell progress-alpha;
+## see design/gdd/building-system.md Visual Requirements). Each cell textures
+## with ITS OWN atlas tile (a mixed wood+thatch+bed blueprint renders each
+## cell's real tile), since a command's cells can span multiple past commits.
+## FEATURE 2: split by draft state so players can see what release_drafts()
+## will affect (dim = draft, stronger = released-but-unbuilt).
 func _refresh_blueprint_ghosts() -> void:
-	if _blueprint.is_empty():
-		_blueprint_mesh_instance.visible = false
-		return
-	var cell_values: Dictionary = {}
+	var draft_values: Dictionary = {}
+	var released_values: Dictionary = {}
 	for cell in _blueprint.keys():
 		var entry: Dictionary = _blueprint[cell]
 		var def: ResourceItemDatabase.ItemDef = ResourceItemDatabase.get_by_id(String(entry["item_id"]))
-		cell_values[cell] = def.cell_value if def != null else 0
-	_blueprint_mesh_instance.mesh = _build_ghost_mesh(cell_values, GHOST_TINT_NEUTRAL)
-	_blueprint_mesh_instance.visible = true
+		var value: int = def.cell_value if def != null else 0
+		if bool(entry.get("draft", false)):
+			draft_values[cell] = value
+		else:
+			released_values[cell] = value
+	if draft_values.is_empty():
+		_blueprint_draft_mesh_instance.visible = false
+	else:
+		_blueprint_draft_mesh_instance.mesh = _build_ghost_mesh(draft_values, GHOST_TINT_DRAFT)
+		_blueprint_draft_mesh_instance.visible = true
+	if released_values.is_empty():
+		_blueprint_released_mesh_instance.visible = false
+	else:
+		_blueprint_released_mesh_instance.mesh = _build_ghost_mesh(released_values, GHOST_TINT_RELEASED)
+		_blueprint_released_mesh_instance.visible = true
 
 func _cell_center(cell: Vector3i) -> Vector3:
 	return Vector3(cell.x + 0.5, cell.y + 0.5, cell.z + 0.5)

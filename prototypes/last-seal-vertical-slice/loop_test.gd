@@ -68,6 +68,11 @@ func _run() -> void:
 	_check(bp.size() == wall_cells.size() + roof_cells.size(),
 		"all %d blueprint cells committed (got %d)" % [wall_cells.size() + roof_cells.size(), bp.size()])
 
+	# Drafts would otherwise never build -- release them before driving ticks
+	# (FEATURE 2: blueprint cells start as drafts, ignored by claim_job).
+	var released: int = bs.release_drafts()
+	_check(released == bp.size(), "all %d draft cells released (got %d)" % [bp.size(), released])
+
 	# --- run ticks until construction done ---
 	var ticks := await _run_ticks_until(6000, func() -> bool: return bs.get_blueprint_cells().is_empty())
 	_check(ticks >= 0, "hut fully built by villager (ticks=%d)" % ticks)
@@ -83,6 +88,7 @@ func _run() -> void:
 	# --- place bed inside ---
 	var bed_cell := Vector3i(site.x + 2, h, site.z + 2)
 	bs._create_blueprint_cells([bed_cell], "bed", true)
+	bs.release_drafts()
 	ticks = await _run_ticks_until(1500, func() -> bool: return bs.get_furniture_cells().has(bed_cell))
 	_check(ticks >= 0, "bed built inside the room (ticks=%d)" % ticks)
 	await get_tree().process_frame

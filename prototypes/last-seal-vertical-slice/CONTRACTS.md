@@ -118,6 +118,12 @@ func release_job(cell: Vector3i) -> void
 func report_on_site(cell: Vector3i) -> void       # villager on site: progress++ per tick (called from its tick)
 func is_cell_occupied_planned(cell: Vector3i) -> bool  # blocks + blueprints combined view
 func get_furniture_cells() -> Dictionary          # Vector3i -> item_id (BUILT furniture only)
+# --- Stonehearth build workflow (2026-07-21, user direction) ---
+signal build_mode_changed(active: bool)
+func set_build_mode(active: bool) -> void         # off: aborts drag, disarms, hides ghosts
+func get_build_mode() -> bool                     # tools arm only in build mode (arming auto-enables)
+func release_drafts() -> int                      # blueprints start as DRAFTS; villagers build only after release
+func get_draft_count() -> int
 ```
 
 Pipeline per building GDD: pick(DDA via voxel_world.raycast_cells with

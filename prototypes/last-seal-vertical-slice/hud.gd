@@ -78,6 +78,9 @@ var _current_formation: String = "Flat"
 var _tool_buttons: Dictionary = {}       # tool_id:int -> Button
 var _undo_button: Button
 var _redo_button: Button
+var _build_mode_button: Button           # FEATURE 1: master "Bauen" toggle
+var _release_drafts_button: Button       # FEATURE 2: "Bau starten (N)"
+var _build_mode_active: bool = false
 
 var _context_panel: PanelContainer
 var _context_content: VBoxContainer
@@ -156,11 +159,19 @@ func setup(building_system: Node, camera_input: Node, villager_ai: Node, needs_m
 	_refresh_toolbar_highlight()
 	_refresh_context_panel()
 
+	# FEATURE 1/2: sync the master build-mode toggle and the release-drafts
+	# button to whatever state the building system already booted with.
+	_build_mode_active = building_system.get_build_mode()
+	_apply_active_button_style(_build_mode_button, _build_mode_active)
+	_refresh_release_drafts_button()
+
 	building_system.tool_changed.connect(_on_tool_changed)
 	building_system.palette_changed.connect(_on_palette_changed)
 	building_system.wall_height_changed.connect(_on_wall_height_changed)
 	building_system.formation_changed.connect(_on_formation_changed)
 	building_system.undo_state_changed.connect(_on_undo_state_changed)
+	building_system.build_mode_changed.connect(_on_build_mode_changed)
+	building_system.blueprint_changed.connect(_on_building_blueprint_changed)
 
 	build_validation.sealed_space_warning.connect(_on_sealed_space_warning)
 	build_validation.unsheltered_furniture_info.connect(_on_unsheltered_furniture_info)
@@ -229,6 +240,27 @@ func _build_toolbar() -> void:
 	row.add_theme_constant_override("separation", 6)
 	panel.add_child(row)
 
+	# FEATURE 1: master build/editor mode toggle, LEFT end of the toolbar.
+	_build_mode_button = Button.new()
+	_build_mode_button.text = "Bauen"
+	_build_mode_button.tooltip_text = "Baumodus an/aus (Esc)"
+	_build_mode_button.custom_minimum_size = Vector2(64.0, 40.0)
+	_apply_flat_button_style(_build_mode_button)
+	_build_mode_button.pressed.connect(_on_build_mode_button_pressed)
+	row.add_child(_build_mode_button)
+
+	# FEATURE 2: release-drafts button, next to the master toggle; only shown
+	# while there are draft cells waiting to be started.
+	_release_drafts_button = Button.new()
+	_release_drafts_button.tooltip_text = "Alle geplanten Zellen zum Bau freigeben"
+	_release_drafts_button.custom_minimum_size = Vector2(130.0, 40.0)
+	_apply_flat_button_style(_release_drafts_button)
+	_release_drafts_button.pressed.connect(_on_release_drafts_button_pressed)
+	_release_drafts_button.visible = false
+	row.add_child(_release_drafts_button)
+
+	row.add_child(VSeparator.new())
+
 	for entry: Dictionary in TOOL_BUTTONS:
 		var tool_id: int = entry["id"]
 		var btn := Button.new()
@@ -290,6 +322,33 @@ func _on_tool_changed(tool_id: int) -> void:
 func _on_undo_state_changed(can_undo: bool, can_redo: bool) -> void:
 	_undo_button.disabled = not can_undo
 	_redo_button.disabled = not can_redo
+
+
+func _on_build_mode_button_pressed() -> void:
+	_building_system.set_build_mode(not _build_mode_active)
+
+
+func _on_build_mode_changed(active: bool) -> void:
+	_build_mode_active = active
+	_apply_active_button_style(_build_mode_button, active)
+
+
+func _on_release_drafts_button_pressed() -> void:
+	_building_system.release_drafts()
+
+
+func _on_building_blueprint_changed() -> void:
+	_refresh_release_drafts_button()
+
+
+## FEATURE 2: shows/labels the "Bau starten (N)" button; N = current draft count.
+func _refresh_release_drafts_button() -> void:
+	if _building_system == null or _release_drafts_button == null:
+		return
+	var n: int = _building_system.get_draft_count()
+	_release_drafts_button.visible = n > 0
+	if n > 0:
+		_release_drafts_button.text = "Bau starten (%d)" % n
 
 
 # ---------------------------------------------------------------------------
