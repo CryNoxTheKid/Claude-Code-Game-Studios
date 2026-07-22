@@ -14,6 +14,11 @@ const AIR := 0
 const BUILT_CELL_MIN_VALUE := 10  # WOOD(10)/STONE(11)/THATCH(12)/BED(20) -- player-built; terrain is 1..4
 const TERRAIN_MIN_VALUE := 1      # TERRAIN_BASE per CONTRACTS.md -- 1..4 terrain height bands
 const TERRAIN_MAX_VALUE := 4
+# FEATURE 2 (2026-07-22, terrain dig orders): diggable terrain range -- the 4
+# height bands (1..4) plus SAND(5); NOT water(40)/trunk(30)/leaves(31).
+const DIGGABLE_MIN_VALUE := 1
+const DIGGABLE_MAX_VALUE := 5
+const DIG_BUILD_TICKS := 5  # tuning knob: dig duration, same order of magnitude as material build_ticks (4..8)
 
 enum Tool { NONE = 0, WALL = 1, FLOOR = 2, ROOF = 3, BLOCK = 4, FURNITURE = 5 }
 
@@ -80,6 +85,10 @@ const GHOST_TINT_NEUTRAL := Color(0.85, 0.92, 1.0, 0.55)  # valid drag/single-ce
 const GHOST_TINT_INVALID := Color(1.0, 0.6, 0.25, 0.6)    # invalid drag/single-cell preview subset
 const GHOST_TINT_DRAFT := Color(0.85, 0.92, 1.0, 0.30)    # draft blueprint cells -- not yet released
 const GHOST_TINT_RELEASED := Color(0.85, 0.92, 1.0, 0.45) # released-but-unbuilt blueprint cells
+# FEATURE 2 (2026-07-22, terrain dig orders): reddish tint so a planned
+# demolition/dig reads distinctly from a planned build at a glance.
+const GHOST_TINT_DIG_DRAFT := Color(0.85, 0.3, 0.2, 0.30)
+const GHOST_TINT_DIG_RELEASED := Color(0.85, 0.3, 0.2, 0.45)
 
 signal tool_changed(tool_id: int)
 signal palette_changed(material_id: String)
@@ -150,6 +159,17 @@ var _drag_plane_y: int = 0
 var _drag_item_id: String = ""
 var _drag_floor_replace: bool = false  # FEATURE 3: drag started on a terrain top surface
 
+# FEATURE 1/2 (2026-07-22): removal-tool press/drag state -- Block tool +
+# Ctrl. A box between start/current cell (axis-aligned, any of the 3 axes)
+# is the "drag rect" the task spec calls for; a plain click is just a 1-cell
+# box. Kept separate from _is_pressed/_is_drag_active (the WALL/FLOOR/ROOF
+# build-drag state) since the removal tool's press handler runs its own path.
+var _is_erase_pressed: bool = false
+var _erase_drag_active: bool = false
+var _erase_press_screen_pos: Vector2 = Vector2.ZERO
+var _erase_start_cell: Vector3i = Vector3i.ZERO
+var _erase_current_cell: Vector3i = Vector3i.ZERO
+
 # Ghost rendering: merged, face-culled, TEXTURED meshes (real block tile per cell,
 # translucent) -- one surface per tint, not per cell. Texture source: voxel_world's
 # atlas (see get_atlas() addition, building_system.gd write-up).
@@ -162,6 +182,9 @@ var _mat_ghost_invalid: StandardMaterial3D  # invalid drag/single-cell preview s
 # cells render stronger so the player can see which cells will start construction.
 var _blueprint_draft_mesh_instance: MeshInstance3D
 var _blueprint_released_mesh_instance: MeshInstance3D
+# FEATURE 2: dig orders get their own draft/released mesh pair (reddish tint).
+var _blueprint_dig_draft_mesh_instance: MeshInstance3D
+var _blueprint_dig_released_mesh_instance: MeshInstance3D
 var _preview_valid_mesh: MeshInstance3D
 var _preview_invalid_mesh: MeshInstance3D
 
@@ -225,6 +248,8 @@ func set_build_mode(active: bool) -> void:
 	if not active:
 		if _is_pressed:
 			_abort_drag()
+		if _is_erase_pressed:
+			_abort_erase_drag()
 		if _tool != Tool.NONE:
 			_tool = Tool.NONE
 			tool_changed.emit(_tool)
@@ -298,15 +323,27 @@ func report_on_site(cell: Vector3i) -> void:
 	if not _blueprint.has(cell):
 		return
 	var entry: Dictionary = _blueprint[cell]
-	if bool(entry["needs_support"]):
+	var is_dig: bool = bool(entry.get("dig", false))
+	if not is_dig and bool(entry["needs_support"]):
 		var support_cell: Vector3i = cell + Vector3i(0, -1, 0)
 		if _voxel_world.get_cell(support_cell) == AIR:
 			return  # TR-building-system-050: construction cannot start until support is Built
-	var def: ResourceItemDatabase.ItemDef = ResourceItemDatabase.get_by_id(String(entry["item_id"]))
-	if def == null:
-		return
+	var build_ticks: int
+	var write_value: int = AIR
+	var write_item_id: String = ""
+	if is_dig:
+		# FEATURE 2: dig orders have no material/def -- fixed duration, always
+		# completes to AIR (the block is removed, not replaced).
+		build_ticks = DIG_BUILD_TICKS
+	else:
+		var def: ResourceItemDatabase.ItemDef = ResourceItemDatabase.get_by_id(String(entry["item_id"]))
+		if def == null:
+			return
+		build_ticks = def.build_ticks
+		write_value = def.cell_value
+		write_item_id = def.id
 	entry["progress_ticks"] = int(entry["progress_ticks"]) + 1
-	if int(entry["progress_ticks"]) < def.build_ticks:
+	if int(entry["progress_ticks"]) < build_ticks:
 		return
 	if bool(entry.get("ready", false)):
 		return  # already queued for write; the flush owns it now
@@ -316,9 +353,10 @@ func report_on_site(cell: Vector3i) -> void:
 	entry["ready"] = true
 	_pending_completions.append({
 		"cell": cell,
-		"value": def.cell_value,
-		"item_id": def.id,
+		"value": write_value,
+		"item_id": write_item_id,
 		"is_furniture": bool(entry["needs_support"]),
+		"is_dig": is_dig,
 	})
 
 ## Combined Voxel World blocks + blueprint view (TR-building-system-060).
@@ -495,6 +533,8 @@ func _set_tool(t: int) -> void:
 		return
 	if _is_pressed:
 		_abort_drag()
+	if _is_erase_pressed:
+		_abort_erase_drag()
 	_tool = t
 	_hide_all_ghosts()
 	tool_changed.emit(_tool)
@@ -504,8 +544,13 @@ func _on_cancel() -> void:
 	# synthetic input): only treat as drag-abort if LMB is REALLY down.
 	if _is_pressed and not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
 		_is_pressed = false
+	if _is_erase_pressed and not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+		_is_erase_pressed = false
 	if _is_pressed:
 		_abort_drag()
+		return
+	if _is_erase_pressed:
+		_abort_erase_drag()
 		return
 	if _tool != Tool.NONE:
 		_tool = Tool.NONE
@@ -520,6 +565,11 @@ func _on_cancel() -> void:
 func _abort_drag() -> void:
 	_is_pressed = false
 	_is_drag_active = false
+	_hide_all_ghosts()
+
+func _abort_erase_drag() -> void:
+	_is_erase_pressed = false
+	_erase_drag_active = false
 	_hide_all_ghosts()
 
 func _set_wall_height(h: int) -> void:
@@ -567,7 +617,12 @@ func _current_furniture() -> ResourceItemDatabase.ItemDef:
 
 func _update_pick() -> void:
 	var ray: Dictionary = _camera_input.get_world_ray()
-	var hit: Dictionary = _voxel_world.raycast_cells(ray.origin, ray.dir)
+	# FEATURE 3 (ghost snapping): while build mode is active, the pick ray also
+	# stops at blueprint cells (any state, but NOT dig-orders -- those are
+	# holes-to-be) as if they were solid, so a new drag can anchor/stack on a
+	# drafted wall/floor before it's actually built.
+	var extra_solid: Callable = Callable(self, "_is_blueprint_solid_for_pick") if _build_mode else Callable()
+	var hit: Dictionary = _voxel_world.raycast_cells(ray.origin, ray.dir, 200.0, extra_solid)
 	if hit.is_empty():
 		_last_hit_valid = false
 		_hide_all_ghosts()
@@ -588,11 +643,15 @@ func _update_pick() -> void:
 func _update_block_ghost(hit: Dictionary) -> void:
 	_hide_corner_pool()
 	if _camera_input.remove_modifier_held:
+		if _is_erase_pressed:
+			_update_erase_drag_preview(hit)
+			return
 		var cell: Vector3i = hit.cell
-		var existing_value: int = _voxel_world.get_cell(cell)
-		var valid: bool = existing_value >= BUILT_CELL_MIN_VALUE
-		# Removal preview textures with the REAL existing block, not a selection.
-		_render_tool_preview([cell] if valid else [], [] if valid else [cell], existing_value)
+		# FEATURE 1/2: the removal tool now also erases draft blueprint cells
+		# and queues terrain dig orders, not just built cells -- see _is_erasable_cell.
+		var valid: bool = _is_erasable_cell(cell)
+		# Removal preview textures with the REAL existing block/terrain, not a selection.
+		_render_tool_preview([cell] if valid else [], [] if valid else [cell], _erase_preview_value(cell))
 	else:
 		var target: Vector3i = hit.cell + hit.normal
 		var item: ResourceItemDatabase.ItemDef = _current_material()
@@ -643,6 +702,16 @@ func _update_drag_shape(hit: Dictionary) -> void:
 func _is_terrain_top_surface(hit: Dictionary) -> bool:
 	var value: int = _voxel_world.get_cell(hit.cell)
 	return value >= TERRAIN_MIN_VALUE and value <= TERRAIN_MAX_VALUE and hit.normal == Vector3i(0, 1, 0)
+
+## FEATURE 3: extra-solid predicate threaded into voxel_world.raycast_cells
+## while build mode is active. Dig-order cells are excluded (they're going to
+## become holes, not solid) -- though in practice they still sit on real
+## terrain that's already solid via the normal voxel check regardless.
+func _is_blueprint_solid_for_pick(cell: Vector3i) -> bool:
+	var entry: Dictionary = _blueprint.get(cell, {})
+	if entry.is_empty():
+		return false
+	return not bool(entry.get("dig", false))
 
 func _rasterize_for_tool(tool_id: int, start: Vector3i, cur: Vector3i, plane_y: int) -> Array[Vector3i]:
 	match tool_id:
@@ -722,6 +791,12 @@ func _on_press() -> void:
 			_handle_drag_press(_last_hit)
 
 func _on_release() -> void:
+	if _is_erase_pressed:
+		_commit_erase_drag()
+		_is_erase_pressed = false
+		_erase_drag_active = false
+		_hide_all_ghosts()
+		return
 	if not _is_pressed:
 		return
 	match _tool:
@@ -735,7 +810,14 @@ func _on_release() -> void:
 
 func _handle_block_press(hit: Dictionary) -> void:
 	if _camera_input.remove_modifier_held:
-		_remove_built_cell(hit.cell)
+		# FEATURE 1/2: removal is now a press+optional-drag (box) instead of an
+		# instant single-cell action, so a drag rect can batch-erase multiple
+		# cells (e.g. a whole door-gap column) -- see _commit_erase_drag.
+		_is_erase_pressed = true
+		_erase_drag_active = false
+		_erase_press_screen_pos = get_viewport().get_mouse_position()
+		_erase_start_cell = hit.cell
+		_erase_current_cell = hit.cell
 		return
 	var item: ResourceItemDatabase.ItemDef = _current_material()
 	if item == null:
@@ -812,7 +894,20 @@ func _remove_built_cell(cell: Vector3i) -> void:
 	if value < BUILT_CELL_MIN_VALUE or value >= 30:
 		invalid_commit.emit(_cell_center(cell), "only built cells are removable")
 		return
-	var applied: Array = _voxel_world.set_cells([{"cell": cell, "value": AIR}])
+	# BUG B fix (2026-07-22, user report: removing a block leaves an invisible
+	# hole / "no ground"): a Floor-tool commit REPLACES terrain (floor_replace)
+	# -- its restore_value is the original terrain band, not AIR. This path
+	# used to always write AIR, carving a hole down to nothing instead of
+	# restoring the ground. Reuses the exact restore semantics undo/
+	# cancel_project already rely on: the project's restore_values, looked up
+	# via the cell's still-live _cell_project reverse index (built cells keep
+	# their project entry until untracked below).
+	var restore_to: int = AIR
+	if _cell_project.has(cell):
+		var owning_pid: int = int(_cell_project[cell])
+		if _projects.has(owning_pid):
+			restore_to = int(_projects[owning_pid]["restore_values"].get(cell, AIR))
+	var applied: Array = _voxel_world.set_cells([{"cell": cell, "value": restore_to}])
 	var removed: Array[Vector3i] = []
 	for entry in applied:
 		removed.append(entry.cell)
@@ -850,22 +945,169 @@ func _is_cell_valid_for_floor_replace(cell: Vector3i) -> bool:
 	var value: int = _voxel_world.get_cell(cell)
 	return value == AIR or (value >= TERRAIN_MIN_VALUE and value <= TERRAIN_MAX_VALUE)
 
-func _create_blueprint_cells(cells: Array, item_id: String, is_furniture: bool, is_floor_replace: bool = false) -> void:
+## FEATURE 2: true if `cell` is a legal dig-order target right now -- in
+## region, not already planned (build OR dig), raw diggable terrain (1..5),
+## and not currently occupied by a villager's body column (same occupancy
+## provider construction uses; reused here per task spec).
+func _is_cell_valid_for_dig(cell: Vector3i) -> bool:
+	if not _voxel_world.is_in_region(cell):
+		return false
+	if _blueprint.has(cell):
+		return false
+	var value: int = _voxel_world.get_cell(cell)
+	if value < DIGGABLE_MIN_VALUE or value > DIGGABLE_MAX_VALUE:
+		return false
+	if _occupancy_provider.is_valid() and bool(_occupancy_provider.call(cell)):
+		return false
+	return true
+
+# --- FEATURE 1/2: removal tool (draft erase / built removal / dig orders) ---
+
+## Axis-aligned inclusive box between two corner cells (the "drag rect" the
+## task spec calls for; a plain click is just a/a 1-cell box).
+func _erase_box_cells(a: Vector3i, b: Vector3i) -> Array[Vector3i]:
+	var min_c := Vector3i(mini(a.x, b.x), mini(a.y, b.y), mini(a.z, b.z))
+	var max_c := Vector3i(maxi(a.x, b.x), maxi(a.y, b.y), maxi(a.z, b.z))
+	var cells: Array[Vector3i] = []
+	for x in range(min_c.x, max_c.x + 1):
+		for y in range(min_c.y, max_c.y + 1):
+			for z in range(min_c.z, max_c.z + 1):
+				cells.append(Vector3i(x, y, z))
+	return cells
+
+## True while `cell` is something the removal tool can act on right now: a
+## DRAFT blueprint entry (erased instantly), a BUILT cell (10..29, queued for
+## the existing removal-job path), or legal diggable terrain (1..5, queued as
+## a dig order). False for AIR, water, trunk/leaves, non-draft blueprint
+## entries, and occupied dig targets.
+func _is_erasable_cell(cell: Vector3i) -> bool:
+	if not _voxel_world.is_in_region(cell):
+		return false
+	if _blueprint.has(cell):
+		var entry: Dictionary = _blueprint[cell]
+		return bool(entry.get("draft", false))
+	var value: int = _voxel_world.get_cell(cell)
+	if value >= BUILT_CELL_MIN_VALUE and value < 30:
+		return true
+	if value >= DIGGABLE_MIN_VALUE and value <= DIGGABLE_MAX_VALUE:
+		return _is_cell_valid_for_dig(cell)
+	return false
+
+## The real value the removal-tool ghost should texture with: a draft's own
+## material (or the terrain it will remove, for a dig entry), else whatever's
+## actually in the voxel world.
+func _erase_preview_value(cell: Vector3i) -> int:
+	if _blueprint.has(cell):
+		var entry: Dictionary = _blueprint[cell]
+		if bool(entry.get("dig", false)):
+			return int(entry.get("restore_value", AIR))
+		var def: ResourceItemDatabase.ItemDef = ResourceItemDatabase.get_by_id(String(entry.get("item_id", "")))
+		return def.cell_value if def != null else 0
+	return _voxel_world.get_cell(cell)
+
+func _update_erase_drag_preview(hit: Dictionary) -> void:
+	var mouse_pos: Vector2 = get_viewport().get_mouse_position()
+	if not _erase_drag_active and mouse_pos.distance_to(_erase_press_screen_pos) >= DRAG_THRESHOLD_PX:
+		_erase_drag_active = true
+	_erase_current_cell = hit.cell
+	var box_cells: Array[Vector3i] = _erase_box_cells(_erase_start_cell, _erase_current_cell)
+	var valid_values: Dictionary = {}
+	var invalid_cells: Array[Vector3i] = []
+	for c in box_cells:
+		if _is_erasable_cell(c):
+			valid_values[c] = _erase_preview_value(c)
+		else:
+			invalid_cells.append(c)
+	if valid_values.is_empty():
+		_preview_valid_mesh.visible = false
+	else:
+		_preview_valid_mesh.mesh = _build_ghost_mesh(valid_values, GHOST_TINT_NEUTRAL)
+		_preview_valid_mesh.visible = true
+	if invalid_cells.is_empty():
+		_preview_invalid_mesh.visible = false
+	else:
+		_preview_invalid_mesh.mesh = _build_ghost_mesh(_uniform_cell_values(invalid_cells, 0), GHOST_TINT_INVALID)
+		_preview_invalid_mesh.visible = true
+
+func _commit_erase_drag() -> void:
+	var box_cells: Array[Vector3i] = _erase_box_cells(_erase_start_cell, _erase_current_cell)
+	var single: bool = box_cells.size() == 1
+	for c in box_cells:
+		_apply_erase_at(c, single)
+
+## Single entry point for the removal tool (single click OR drag box):
+## drafts erase instantly (no job, FEATURE 1), built cells queue the existing
+## removal-job path, raw terrain queues a dig order (FEATURE 2).
+## `emit_invalid` is only true for the single-cell (non-drag) case, matching
+## the old click UX -- a multi-cell drag silently skips cells it can't act on
+## instead of spamming toasts.
+func _apply_erase_at(cell: Vector3i, emit_invalid: bool) -> void:
+	if _erase_blueprint_draft_cell(cell):
+		return
+	if not _voxel_world.is_in_region(cell):
+		if emit_invalid:
+			invalid_commit.emit(_cell_center(cell), "out of bounds")
+		return
+	var value: int = _voxel_world.get_cell(cell)
+	if value >= BUILT_CELL_MIN_VALUE and value < 30:
+		_remove_built_cell(cell)
+		return
+	if value >= DIGGABLE_MIN_VALUE and value <= DIGGABLE_MAX_VALUE:
+		if _create_dig_order(cell):
+			return
+		if emit_invalid:
+			invalid_commit.emit(_cell_center(cell), "cell occupied or already planned")
+		return
+	if emit_invalid:
+		invalid_commit.emit(_cell_center(cell), "nothing to remove")
+
+## FEATURE 1: erases a single DRAFT-state blueprint cell immediately -- no
+## villager job, it's a plan edit, not a demolition. Updates the owning
+## project's totals/reverse index (via _untrack_cell) and drops the project
+## entirely once it owns zero cells. Returns false (no-op) if `cell` isn't a
+## draft blueprint entry -- callers fall through to the BUILT-cell removal /
+## dig-order paths. Released/BUILDING/PAUSED cells are NEVER touched by this
+## path (their entries have draft == false).
+func _erase_blueprint_draft_cell(cell: Vector3i) -> bool:
+	if not _blueprint.has(cell):
+		return false
+	var entry: Dictionary = _blueprint[cell]
+	if not bool(entry.get("draft", false)):
+		return false
+	_blueprint.erase(cell)
+	_untrack_cell(cell)
+	blueprint_changed.emit()
+	projects_changed.emit()
+	return true
+
+## FEATURE 2: queues `cell` (raw terrain, 1..5) as a dig order -- a blueprint
+## entry marked "dig":true, grouped into its own DRAFT project ("Abbau %d",
+## 26-neighborhood rule, never merged with build projects). Returns false if
+## the cell isn't a legal dig target right now (see _is_cell_valid_for_dig).
+func _create_dig_order(cell: Vector3i) -> bool:
+	if not _is_cell_valid_for_dig(cell):
+		return false
+	_create_blueprint_cells([cell], "", false, false, true)
+	return true
+
+func _create_blueprint_cells(cells: Array, item_id: String, is_furniture: bool, is_floor_replace: bool = false, is_dig: bool = false) -> void:
 	var typed_cells: Array[Vector3i] = []
 	for c in cells:
 		typed_cells.append(c)
 	# Build projects (2026-07-22): the WHOLE batch shares one project -- merges
 	# into an existing DRAFT project if any cell in the batch touches one,
-	# otherwise starts a fresh project. See _assign_project.
-	var project_id: int = _assign_project(typed_cells, is_furniture, item_id)
+	# otherwise starts a fresh project. See _assign_project. FEATURE 2: dig
+	# cells only ever merge with other DRAFT dig projects, never build ones.
+	var project_id: int = _assign_project(typed_cells, is_furniture, item_id, is_dig)
 	var project: Dictionary = _projects[project_id]
 	var restore_values: Dictionary = {}
 	for c in typed_cells:
-		# FEATURE 3: capture the cell's PRE-EXISTING value (terrain id for a
-		# floor-replace dig, AIR for every normal build) so undo restores the
-		# correct thing instead of assuming AIR. Also banked on the project
-		# (restore_values survives past the blueprint entry being erased on
-		# completion -- needed by cancel_project to un-build later).
+		# FEATURE 3 (floor-replace) / FEATURE 2 (dig): capture the cell's
+		# PRE-EXISTING value (terrain id for a floor-replace or dig, AIR for
+		# every normal build) so undo/cancel restores the correct thing
+		# instead of assuming AIR. Also banked on the project (restore_values
+		# survives past the blueprint entry being erased on completion --
+		# needed by cancel_project to un-build/un-dig later).
 		var restore_value: int = _voxel_world.get_cell(c)
 		restore_values[c] = restore_value
 		project["restore_values"][c] = restore_value
@@ -877,8 +1119,9 @@ func _create_blueprint_cells(cells: Array, item_id: String, is_furniture: bool, 
 			"draft": true,  # FEATURE 2: new blueprint cells start as drafts
 			"restore_value": restore_value,
 			"project_id": project_id,
+			"dig": is_dig,
 		}
-	_push_command(typed_cells, item_id, is_furniture, restore_values, is_floor_replace, project_id)
+	_push_command(typed_cells, item_id, is_furniture, restore_values, is_floor_replace, project_id, is_dig)
 	blueprint_changed.emit()
 
 # --- Build projects (2026-07-22) ---
@@ -889,7 +1132,10 @@ func _create_blueprint_cells(cells: Array, item_id: String, is_furniture: bool, 
 ## projects are merged into one first. Otherwise starts a fresh project.
 ## Released/BUILDING/PAUSED/DONE projects never match (they never absorb new
 ## drafts -- an adjacent new commit starts its own fresh project instead).
-func _assign_project(cells: Array[Vector3i], is_furniture: bool, item_id: String) -> int:
+## `is_dig` (FEATURE 2): dig cells only match/merge with other DRAFT projects
+## that are ALSO dig projects -- a build wall and an adjacent dig order never
+## fold into the same project even if they touch.
+func _assign_project(cells: Array[Vector3i], is_furniture: bool, item_id: String, is_dig: bool = false) -> int:
 	var matched: Dictionary = {}  # project_id -> true
 	for c in cells:
 		for offset in _NEIGHBORHOOD_26:
@@ -897,7 +1143,7 @@ func _assign_project(cells: Array[Vector3i], is_furniture: bool, item_id: String
 			if not _cell_project.has(n):
 				continue
 			var pid: int = int(_cell_project[n])
-			if _projects.has(pid) and int(_projects[pid]["state"]) == ProjectState.DRAFT:
+			if _projects.has(pid) and int(_projects[pid]["state"]) == ProjectState.DRAFT and bool(_projects[pid].get("is_dig", false)) == is_dig:
 				matched[pid] = true
 	var survivor_id: int = -1
 	if not matched.is_empty():
@@ -907,7 +1153,7 @@ func _assign_project(cells: Array[Vector3i], is_furniture: bool, item_id: String
 		for i in range(1, ids.size()):
 			_merge_project_into(survivor_id, int(ids[i]))
 	if survivor_id == -1:
-		survivor_id = _create_project(is_furniture, item_id)
+		survivor_id = _create_project(is_furniture, item_id, is_dig)
 	var survivor: Dictionary = _projects[survivor_id]
 	for c in cells:
 		survivor["all_cells"][c] = true
@@ -916,12 +1162,19 @@ func _assign_project(cells: Array[Vector3i], is_furniture: bool, item_id: String
 	return survivor_id
 
 ## Naming: buildings get "Projekt %d"; a furniture-only NEW project (bed) names
-## itself after the item ("Bett %d") -- trivial-detection heuristic, only
-## applies when the placement doesn't merge into an existing project.
-func _create_project(is_furniture: bool, item_id: String) -> int:
+## itself after the item ("Bett %d"); a dig order gets "Abbau %d" (FEATURE 2)
+## -- trivial-detection heuristic, only applies when the placement doesn't
+## merge into an existing project.
+func _create_project(is_furniture: bool, item_id: String, is_dig: bool = false) -> int:
 	var id: int = _next_project_id
 	_next_project_id += 1
-	var name: String = ("Bett %d" % id) if (is_furniture and item_id == "bed") else ("Projekt %d" % id)
+	var name: String
+	if is_dig:
+		name = "Abbau %d" % id
+	elif is_furniture and item_id == "bed":
+		name = "Bett %d" % id
+	else:
+		name = "Projekt %d" % id
 	_projects[id] = {
 		"id": id,
 		"name": name,
@@ -930,6 +1183,7 @@ func _create_project(is_furniture: bool, item_id: String) -> int:
 		"built_cells": {},
 		"claims": {},
 		"restore_values": {},
+		"is_dig": is_dig,
 	}
 	return id
 
@@ -985,7 +1239,7 @@ func _project_has_pending_entries(pid: int) -> bool:
 
 # --- Undo / redo ---
 
-func _push_command(cells: Array[Vector3i], item_id: String, is_furniture: bool, restore_values: Dictionary, is_floor_replace: bool = false, project_id: int = -1) -> void:
+func _push_command(cells: Array[Vector3i], item_id: String, is_furniture: bool, restore_values: Dictionary, is_floor_replace: bool = false, project_id: int = -1, is_dig: bool = false) -> void:
 	_undo_stack.append({
 		"cells": cells.duplicate(),
 		"item_id": item_id,
@@ -993,6 +1247,7 @@ func _push_command(cells: Array[Vector3i], item_id: String, is_furniture: bool, 
 		"restore_values": restore_values.duplicate(),
 		"is_floor_replace": is_floor_replace,
 		"project_id": project_id,
+		"is_dig": is_dig,
 	})
 	if _undo_stack.size() > UNDO_STACK_DEPTH:
 		_undo_stack.pop_front()  # Edge Case 9: oldest discarded silently
@@ -1041,9 +1296,16 @@ func _redo() -> void:
 	var cmd: Dictionary = _redo_stack.pop_back()
 	var is_furniture: bool = bool(cmd["is_furniture"])
 	var is_floor_replace: bool = bool(cmd.get("is_floor_replace", false))
+	var is_dig: bool = bool(cmd.get("is_dig", false))
 	var valid_cells: Array[Vector3i] = []
 	for cell in cmd["cells"]:
-		var ok: bool = _is_cell_valid_for_floor_replace(cell) if is_floor_replace else _is_cell_valid_for_commit(cell, is_furniture)
+		var ok: bool
+		if is_dig:
+			ok = _is_cell_valid_for_dig(cell)
+		elif is_floor_replace:
+			ok = _is_cell_valid_for_floor_replace(cell)
+		else:
+			ok = _is_cell_valid_for_commit(cell, is_furniture)
 		if ok:
 			valid_cells.append(cell)
 	if valid_cells.is_empty():
@@ -1053,7 +1315,7 @@ func _redo() -> void:
 	# Build projects (2026-07-22): redo re-releases directly (draft:false), so
 	# it gets its OWN fresh project already in BUILDING state rather than going
 	# through the DRAFT-only merge rule in _assign_project.
-	var project_id: int = _create_project(is_furniture, String(cmd["item_id"]))
+	var project_id: int = _create_project(is_furniture, String(cmd["item_id"]), is_dig)
 	_projects[project_id]["state"] = ProjectState.BUILDING
 	var project: Dictionary = _projects[project_id]
 	var restore_values: Dictionary = {}
@@ -1071,6 +1333,7 @@ func _redo() -> void:
 			"draft": false,  # redo restores directly to released (see task summary)
 			"restore_value": restore_value,
 			"project_id": project_id,
+			"dig": is_dig,
 		}
 	_undo_stack.append({
 		"cells": valid_cells,
@@ -1079,6 +1342,7 @@ func _redo() -> void:
 		"restore_values": restore_values,
 		"is_floor_replace": is_floor_replace,
 		"project_id": project_id,
+		"is_dig": is_dig,
 	})
 	if _undo_stack.size() > UNDO_STACK_DEPTH:
 		_undo_stack.pop_front()
@@ -1111,15 +1375,20 @@ func _flush_batched_signals() -> void:
 	if writes.is_empty():
 		return
 	var applied: Array = _voxel_world.set_cells(writes)
-	var completed_cells: Array[Vector3i] = []
+	var completed_build_cells: Array[Vector3i] = []
+	var completed_dig_cells: Array[Vector3i] = []
 	var touched_projects: Dictionary = {}
 	for i in applied.size():
 		var res: Dictionary = applied[i]
 		var meta: Dictionary = write_meta[i]
 		var entry: Dictionary = _blueprint.get(res.cell, {})
 		var project_id: int = int(entry.get("project_id", -1))
+		var is_dig: bool = bool(meta.get("is_dig", false))
 		_blueprint.erase(res.cell)
-		completed_cells.append(res.cell)
+		if is_dig:
+			completed_dig_cells.append(res.cell)
+		else:
+			completed_build_cells.append(res.cell)
 		if bool(meta["is_furniture"]):
 			_furniture_cells[res.cell] = meta["item_id"]
 			furniture_placed.emit(res.cell, String(meta["item_id"]))
@@ -1129,12 +1398,18 @@ func _flush_batched_signals() -> void:
 			p["claims"].erase(res.cell)
 			touched_projects[project_id] = true
 	# Build projects (2026-07-22): a project is DONE once every cell it ever
-	# owned is built and no blueprint entry still points at it.
+	# owned is built/dug and no blueprint entry still points at it.
 	for pid in touched_projects.keys():
 		var p2: Dictionary = _projects[pid]
 		if int(p2["state"]) != ProjectState.DONE and not _project_has_pending_entries(pid):
 			p2["state"] = ProjectState.DONE
-	construction_completed.emit(completed_cells)
+	if not completed_build_cells.is_empty():
+		construction_completed.emit(completed_build_cells)
+	# FEATURE 2: dig completions fire cells_removed (not construction_completed)
+	# so build_validation's room/shelter analysis re-runs around the new hole,
+	# exactly as it does for a manual block removal.
+	if not completed_dig_cells.is_empty():
+		cells_removed.emit(completed_dig_cells)
 	blueprint_changed.emit()
 	if not touched_projects.is_empty():
 		projects_changed.emit()
@@ -1154,6 +1429,9 @@ func _build_ghost_visuals() -> void:
 	_mat_ghost_invalid = _make_textured_ghost_material()
 	_blueprint_draft_mesh_instance = _make_ghost_mesh_instance(_mat_ghost_valid)
 	_blueprint_released_mesh_instance = _make_ghost_mesh_instance(_mat_ghost_valid)
+	# FEATURE 2: dig-order ghosts share the same material (tint is per-vertex).
+	_blueprint_dig_draft_mesh_instance = _make_ghost_mesh_instance(_mat_ghost_valid)
+	_blueprint_dig_released_mesh_instance = _make_ghost_mesh_instance(_mat_ghost_valid)
 	_preview_valid_mesh = _make_ghost_mesh_instance(_mat_ghost_valid)
 	_preview_invalid_mesh = _make_ghost_mesh_instance(_mat_ghost_invalid)
 
@@ -1343,11 +1621,24 @@ func _hide_corner_pool() -> void:
 func _refresh_blueprint_ghosts() -> void:
 	var draft_values: Dictionary = {}
 	var released_values: Dictionary = {}
+	var dig_draft_values: Dictionary = {}
+	var dig_released_values: Dictionary = {}
 	for cell in _blueprint.keys():
 		var entry: Dictionary = _blueprint[cell]
-		var def: ResourceItemDatabase.ItemDef = ResourceItemDatabase.get_by_id(String(entry["item_id"]))
-		var value: int = def.cell_value if def != null else 0
-		if bool(entry.get("draft", false)):
+		var is_dig: bool = bool(entry.get("dig", false))
+		var value: int
+		if is_dig:
+			value = int(entry.get("restore_value", AIR))  # show the real terrain block about to be removed
+		else:
+			var def: ResourceItemDatabase.ItemDef = ResourceItemDatabase.get_by_id(String(entry["item_id"]))
+			value = def.cell_value if def != null else 0
+		var draft: bool = bool(entry.get("draft", false))
+		if is_dig:
+			if draft:
+				dig_draft_values[cell] = value
+			else:
+				dig_released_values[cell] = value
+		elif draft:
 			draft_values[cell] = value
 		else:
 			released_values[cell] = value
@@ -1361,6 +1652,16 @@ func _refresh_blueprint_ghosts() -> void:
 	else:
 		_blueprint_released_mesh_instance.mesh = _build_ghost_mesh(released_values, GHOST_TINT_RELEASED)
 		_blueprint_released_mesh_instance.visible = true
+	if dig_draft_values.is_empty():
+		_blueprint_dig_draft_mesh_instance.visible = false
+	else:
+		_blueprint_dig_draft_mesh_instance.mesh = _build_ghost_mesh(dig_draft_values, GHOST_TINT_DIG_DRAFT)
+		_blueprint_dig_draft_mesh_instance.visible = true
+	if dig_released_values.is_empty():
+		_blueprint_dig_released_mesh_instance.visible = false
+	else:
+		_blueprint_dig_released_mesh_instance.mesh = _build_ghost_mesh(dig_released_values, GHOST_TINT_DIG_RELEASED)
+		_blueprint_dig_released_mesh_instance.visible = true
 
 func _cell_center(cell: Vector3i) -> Vector3:
 	return Vector3(cell.x + 0.5, cell.y + 0.5, cell.z + 0.5)

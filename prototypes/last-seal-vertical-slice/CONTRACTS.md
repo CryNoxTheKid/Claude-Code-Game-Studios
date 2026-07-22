@@ -65,8 +65,13 @@ signal cell_changed(changes: Array)    # Array of {cell: Vector3i, before: int, 
 func setup() -> void                   # terrain gen (region window only) + initial mesh build; SYNCHRONOUS
 func get_cell(cell: Vector3i) -> int   # 0 = air / out of bounds handled: returns -1 out of world bounds
 func set_cells(changes: Array) -> Array          # [{cell, value}] -> returns [{cell, before, after}]; ONE cell_changed emission; remeshes affected chunks
-func raycast_cells(origin: Vector3, dir: Vector3, max_dist := 200.0) -> Dictionary
-    # DDA. {} on miss; else {cell: Vector3i, normal: Vector3i} (normal = face stepped through, for attach-placement)
+func raycast_cells(origin: Vector3, dir: Vector3, max_dist := 200.0, extra_solid := Callable()) -> Dictionary
+    # DDA. {} on miss; else {cell: Vector3i, normal: Vector3i} (normal = face stepped through, for attach-placement).
+    # extra_solid (2026-07-22, FEATURE 3 ghost snapping), if valid: Callable(cell: Vector3i) -> bool,
+    # an additional solidity predicate checked alongside real voxel data (building_system threads its
+    # blueprint-cell lookup through this while build mode is active, so the ray also stops on ghosts).
+    # Solidity itself (2026-07-22, BUG A fix) now excludes WATER(40) -- every other non-air value
+    # (terrain 1..5, built 10..29, trunk/leaves 30/31) was already solid and still is.
 func is_in_region(cell: Vector3i) -> bool        # inside the playable window AND 0 <= y < MAX_Y
 func get_region_aabb() -> AABB                   # playable region in world units (for camera clamp)
 func terrain_height(x: int, z: int) -> int      # deterministic noise height (for spawn placement)
@@ -146,6 +151,51 @@ cells (bridging multiple DRAFT projects merges them into one); otherwise a
 fresh project is created. Released/BUILDING/PAUSED/DONE projects never absorb
 new drafts. `claim_job` only serves BUILDING-state projects and records the
 claiming villager per project (surfaced via `worker_ids`).
+
+### Removal tool: draft eraser + terrain dig orders (2026-07-22, this task)
+
+The removal tool (Block tool + Ctrl) is now press+drag (a plain click is a
+1-cell box; dragging forms an axis-aligned inclusive box between press and
+release cells, any of the 3 axes). For every cell in the box:
+1. A DRAFT blueprint entry (any project) is erased immediately -- no
+   villager job, it's a plan edit. Released/BUILDING/PAUSED entries are
+   untouched by this path (existing removal-job path still applies to them
+   once built).
+2. A BUILT cell (10..29) queues the existing removal-job path (writes the
+   cell's tracked `restore_value`, not always AIR -- see BUG B below).
+3. Raw diggable terrain (1..5: the 4 height bands + SAND) queues a **dig
+   order**: a blueprint entry with `"dig": true`, grouped into its own DRAFT
+   project (name `"Abbau %d"`, 26-neighborhood rule, NEVER merges with build
+   projects even if adjacent). Invalid if a villager currently occupies the
+   cell's body column (same occupancy provider construction uses).
+
+Dig orders flow through the exact same DRAFT -> `release_project` ->
+`claim_job` -> `report_on_site` -> batched write pipeline as builds; a dig
+job has no material (fixed duration, `DIG_BUILD_TICKS`) and always completes
+to AIR. Dig completions fire `cells_removed` (not `construction_completed`),
+same restore-on-cancel/undo semantics as builds (the pre-dig terrain value is
+banked as `restore_value`/the project's `restore_values`). Ghosts: dig cells
+render with a distinct reddish tint (`GHOST_TINT_DIG_DRAFT`/`_RELEASED`).
+
+`get_blueprint_cells()` entries also carry `dig: bool` (default false).
+
+### Addendum bug fixes (2026-07-22, this task)
+
+- **Picking (voxel_world.raycast_cells)**: audited -- built cells (10..29)
+  were ALREADY hit by the pre-existing uniform `v > AIR` solidity check; the
+  real picking gap was DRAFT blueprint cells (AIR in real voxel data until
+  built), now fixed by the `extra_solid` predicate above. Water(40) is now
+  explicitly EXCLUDED from pick solidity (it previously registered as a
+  solid hit, which read wrong for a decorative lake surface).
+- **`_remove_built_cell`**: previously always wrote AIR, which meant
+  removing a Floor-tool (terrain-replace) block carved a hole down to
+  nothing instead of restoring the ground. Now looks up the cell's owning
+  project (via the still-live `_cell_project` reverse index) and writes its
+  tracked `restore_value`, matching the semantics `_undo()`/`cancel_project`
+  already used. NOTE: audited voxel_world's chunk remeshing on cell writes --
+  it is horizontal-only chunking (one full-height PackedByteArray per XZ
+  chunk, no vertical chunk boundary exists) and already remeshes the correct
+  adjacent chunk(s) on an X/Z chunk-edge write; no bug found there.
 
 Pipeline per building GDD: pick(DDA via voxel_world.raycast_cells with
 camera_input.get_world_ray()) -> ghost preview (pooled MeshInstance3D,

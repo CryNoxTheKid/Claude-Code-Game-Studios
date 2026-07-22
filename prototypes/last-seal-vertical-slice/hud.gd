@@ -279,7 +279,12 @@ func _build_toolbar() -> void:
 		var tool_id: int = entry["id"]
 		var btn := Button.new()
 		btn.text = String(entry["label"])
-		btn.tooltip_text = "Key %d" % tool_id
+		if tool_id == TOOL_BLOCK:
+			# FEATURE 1/2 (2026-07-22): the Block tool + Ctrl is also the
+			# draft-eraser and terrain-dig tool -- call that out explicitly.
+			btn.tooltip_text = "Key %d — Strg+Klick: Abbau: Blöcke/Entwürfe entfernen, Terrain abbauen" % tool_id
+		else:
+			btn.tooltip_text = "Key %d" % tool_id
 		btn.custom_minimum_size = Vector2(64.0, 40.0)
 		_apply_flat_button_style(btn)
 		btn.pressed.connect(_on_tool_button_pressed.bind(tool_id))

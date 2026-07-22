@@ -147,8 +147,145 @@ func _run() -> void:
 	_check(display["sleep"] >= 85.0, "sleep need recovered (%.0f)" % display["sleep"])
 	_check(display["why"] == "" or display["band_label"] == "Happy", "why-slot empty when content (why='%s')" % display["why"])
 
+	# ==========================================================================
+	# NEW FEATURE TESTS (2026-07-22): draft eraser, terrain dig orders, +
+	# addendum bug-fix regressions (picking, floor-removal terrain restore).
+	# ==========================================================================
+
+	# --- FEATURE 1: draft eraser -- commit a 3-cell wall draft, erase the
+	# middle cell via the same internal function the removal tool uses ---
+	var eraser_base := Vector3i(site.x - 15, h, site.z - 15)
+	var eraser_wall: Array[Vector3i] = []
+	for i in 3:
+		eraser_wall.append(Vector3i(eraser_base.x, eraser_base.y + i, eraser_base.z))
+	bs._create_blueprint_cells(eraser_wall, "wood_block", false)
+	var bp_before_erase: int = bs.get_blueprint_cells().size()
+	var eraser_projects: Array = bs.get_projects().filter(func(p: Dictionary) -> bool:
+		return int(p["state"]) == 0 and int(p["total_cells"]) == 3)
+	_check(eraser_projects.size() >= 1, "3-cell eraser test wall drafted as its own DRAFT project")
+	var eraser_project_id: int = int(eraser_projects[0]["id"]) if not eraser_projects.is_empty() else -1
+	var erased: bool = bs._erase_blueprint_draft_cell(eraser_wall[1])
+	_check(erased, "eraser removed the middle draft cell")
+	var bp_after_erase: int = bs.get_blueprint_cells().size()
+	_check(bp_after_erase == bp_before_erase - 1,
+		"blueprint size shrank by exactly 1 (before=%d after=%d)" % [bp_before_erase, bp_after_erase])
+	var eraser_project_after: Dictionary = {}
+	for p: Dictionary in bs.get_projects():
+		if int(p["id"]) == eraser_project_id:
+			eraser_project_after = p
+	_check(not eraser_project_after.is_empty() and int(eraser_project_after["total_cells"]) == 2,
+		"eraser project's total_cells updated to 2 (got %s)" % eraser_project_after.get("total_cells"))
+
+	# --- FEATURE 2: terrain dig orders -- 2x2 patch, DRAFT project separate
+	# from build projects, release, run to completion, project DONE ---
+	var dig_near := Vector3i(site.x + 10, 0, site.z + 10)
+	var dig_cells: Array = _find_flat_dig_patch(vw, va, dig_near, site, Vector3i(site.x + 4, h, site.z + 4))
+	_check(dig_cells.size() == 4, "found a flat 2x2 unoccupied terrain patch for dig orders (got %d cells)" % dig_cells.size())
+	if dig_cells.size() == 4:
+		var dig_created := 0
+		for c: Vector3i in dig_cells:
+			if bs._create_dig_order(c):
+				dig_created += 1
+		_check(dig_created == 4, "all 4 dig orders created (got %d)" % dig_created)
+		var dig_drafts: Array = bs.get_projects().filter(func(p: Dictionary) -> bool:
+			return String(p["name"]).begins_with("Abbau") and int(p["state"]) == 0)
+		_check(dig_drafts.size() == 1 and int(dig_drafts[0]["total_cells"]) == 4,
+			"4 dig cells merged into exactly 1 DRAFT dig project, separate from build projects (got %d dig drafts, cells=%s)" \
+				% [dig_drafts.size(), (dig_drafts[0]["total_cells"] if not dig_drafts.is_empty() else -1)])
+		var dig_project_id: int = int(dig_drafts[0]["id"]) if not dig_drafts.is_empty() else -1
+		if dig_project_id != -1:
+			bs.release_project(dig_project_id)
+			var dig_ticks := await _run_ticks_until(3000, func() -> bool:
+				for c2: Vector3i in dig_cells:
+					if vw.get_cell(c2) != 0:
+						return false
+				return true)
+			_check(dig_ticks >= 0, "all 4 dig cells reached AIR (ticks=%d)" % dig_ticks)
+			var dig_final: Dictionary = {}
+			for p: Dictionary in bs.get_projects():
+				if int(p["id"]) == dig_project_id:
+					dig_final = p
+			_check(not dig_final.is_empty() and int(dig_final.get("state", -1)) == 3,
+				"dig project reports DONE (state=%s)" % dig_final.get("state"))
+
+	# --- BUG A regression (addendum, 2026-07-22): picking must hit a lone
+	# BUILT block (10..29), not just terrain -- manually place one in open air
+	# and raycast straight down onto it ---
+	var pick_xz := Vector3i(site.x + 8, 0, site.z - 10)
+	var pick_h: int = vw.terrain_height(pick_xz.x, pick_xz.z)
+	var pick_cell := Vector3i(pick_xz.x, pick_h + 3, pick_xz.z)  # floating, isolated
+	vw.set_cells([{"cell": pick_cell, "value": 11}])  # STONE
+	var pick_hit: Dictionary = vw.raycast_cells(Vector3(pick_cell.x + 0.5, pick_cell.y + 10.0, pick_cell.z + 0.5), Vector3(0, -1, 0))
+	_check(pick_hit.get("cell", Vector3i(-999, -999, -999)) == pick_cell,
+		"BUG A: picking hits a lone built block (got %s want %s)" % [pick_hit.get("cell"), pick_cell])
+
+	# --- BUG B regression (addendum, 2026-07-22): removing a Floor-tool
+	# (terrain-replace) block must restore the original terrain, not carve a
+	# hole down to AIR ---
+	var floor_test_xz := Vector3i(site.x + 8, 0, site.z - 8)
+	var floor_test_h: int = vw.terrain_height(floor_test_xz.x, floor_test_xz.z)
+	var floor_test_cell := Vector3i(floor_test_xz.x, floor_test_h - 1, floor_test_xz.z)
+	var floor_orig_value: int = vw.get_cell(floor_test_cell)
+	bs._create_blueprint_cells([floor_test_cell], "wood_block", false, true)  # is_floor_replace
+	vw.set_cells([{"cell": floor_test_cell, "value": 10}])  # simulate the villager's WOOD write landing
+	bs._remove_built_cell(floor_test_cell)
+	_check(vw.get_cell(floor_test_cell) == floor_orig_value,
+		"BUG B: removing a floor-replace block restores the original terrain (got %d want %d)" % [vw.get_cell(floor_test_cell), floor_orig_value])
+
 	print("LOOP_TEST %s" % ("PASS" if not _fail else "FAIL"))
 	get_tree().quit(1 if _fail else 0)
+
+
+## FEATURE 2 test helper: finds a flat, unoccupied, in-region 2x2 patch of
+## terrain surface cells for dig-order testing, searching outward from `near`.
+## `exclude_min`/`exclude_max` (+2 margin) is skipped (keeps the patch clear
+## of the hut footprint). Returns an Array of 4 Vector3i (the top-solid cell
+## per column) or [] if none found within the search bound.
+func _find_flat_dig_patch(vw: Node3D, va: Node3D, near: Vector3i, exclude_min: Vector3i, exclude_max: Vector3i) -> Array:
+	var villager_cells: Array = []
+	for id in va.get_villager_ids():
+		villager_cells.append(va.get_info(id)["cell"])
+	for r in range(0, 40):
+		for dz in range(-r, r + 1):
+			for dx in range(-r, r + 1):
+				if maxi(absi(dx), absi(dz)) != r:
+					continue
+				var x := near.x + dx
+				var z := near.z + dz
+				if x >= exclude_min.x - 2 and x <= exclude_max.x + 2 and z >= exclude_min.z - 2 and z <= exclude_max.z + 2:
+					continue
+				var col_h: int = vw.terrain_height(x, z)
+				var flat := true
+				for i in 2:
+					for j in 2:
+						if vw.terrain_height(x + i, z + j) != col_h:
+							flat = false
+							break
+					if not flat:
+						break
+				if not flat:
+					continue
+				var cells: Array = []
+				var ok := true
+				for i in 2:
+					for j in 2:
+						var c := Vector3i(x + i, col_h - 1, z + j)
+						if not vw.is_in_region(c):
+							ok = false
+							break
+						for vc in villager_cells:
+							var vcell: Vector3i = vc
+							if c.x == vcell.x and c.z == vcell.z and c.y >= vcell.y and c.y <= vcell.y + 2:
+								ok = false
+								break
+						if not ok:
+							break
+						cells.append(c)
+					if not ok:
+						break
+				if ok and cells.size() == 4:
+					return cells
+	return []
 
 
 func _find_flat_site(vw: Node3D, near: Vector3i) -> Vector3i:

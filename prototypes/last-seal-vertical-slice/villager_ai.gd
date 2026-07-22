@@ -472,7 +472,19 @@ func _compute_path(from_cell: Vector3i, to_cell: Vector3i) -> Variant:
 # Tries target_cell itself, then its 6 orthogonal neighbors, fixed order.
 func _find_onsite_path(from_cell: Vector3i, target_cell: Vector3i) -> Variant:
 	var blueprint: Dictionary = _building_system.get_blueprint_cells()
+	# FEATURE 2 safety (2026-07-22, found by loop_test): a dig job must never
+	# let the villager stand directly ON TOP of the cell it's digging -- once
+	# it completes, that's the villager's own footing gone, is_standable(own
+	# current_cell) goes false, and _has_any_legal_step(from) then fails for
+	# EVERY candidate step (is_standable(from) is checked first) -> permanent
+	# "trapped" distress with no way out. Standing beside/diagonal-above (a
+	# DIFFERENT column) or reaching up from below are all still fine -- only
+	# the exact "directly above the target" offset is excluded, and only for
+	# digs (a roof build legitimately stands on top of its own target).
+	var is_dig: bool = bool(blueprint.get(target_cell, {}).get("dig", false))
 	for offset in _ONSITE_OFFSETS:
+		if is_dig and offset == Vector3i(0, 1, 0):
+			continue
 		var candidate := target_cell + offset
 		if not _astar.has_point(_cell_to_id(candidate)):
 			continue

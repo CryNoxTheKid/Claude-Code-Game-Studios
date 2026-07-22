@@ -195,12 +195,23 @@ func set_cells(changes: Array) -> Array:
 	return results
 
 
-func raycast_cells(origin: Vector3, dir: Vector3, max_dist: float = 200.0) -> Dictionary:
+## FEATURE 3 (2026-07-22, ghost snapping) + BUG A fix (user report: aiming at a
+## built block showed no preview -- root cause was actually that DRAFT
+## blueprint cells are AIR in real voxel data, so the pick ray passed straight
+## through them; built cells 10..29 already hit via the uniform solidity check
+## below and needed no fix). `extra_solid`, if valid, is an additional
+## predicate (Callable(cell: Vector3i) -> bool) checked alongside the real
+## voxel data -- building_system threads its blueprint-cell lookup through
+## this while build mode is active, so the ray also stops on ghosts (any
+## state except dig-orders) as if they were solid. Water is explicitly
+## EXCLUDED from solidity here (BUG A follow-up) -- it read as clickable
+## solid before this fix, which is wrong for a decorative lake surface.
+func raycast_cells(origin: Vector3, dir: Vector3, max_dist: float = 200.0, extra_solid: Callable = Callable()) -> Dictionary:
 	var d := dir.normalized()
 	if d.length_squared() == 0.0:
 		return {}
 	var cell := Vector3i(floori(origin.x), floori(origin.y), floori(origin.z))
-	if get_cell(cell) > AIR:
+	if _is_pick_solid(get_cell(cell)) or (extra_solid.is_valid() and bool(extra_solid.call(cell))):
 		return {"cell": cell, "normal": Vector3i.ZERO}   # ray origin embedded in solid geometry
 	var step := Vector3i(
 		1 if d.x > 0.0 else (-1 if d.x < 0.0 else 0),
@@ -241,9 +252,18 @@ func raycast_cells(origin: Vector3, dir: Vector3, max_dist: float = 200.0) -> Di
 		if t > max_dist:
 			break
 		var v := get_cell(cell)
-		if v > AIR:
+		if _is_pick_solid(v) or (extra_solid.is_valid() and bool(extra_solid.call(cell))):
 			return {"cell": cell, "normal": last_normal}
 	return {}
+
+
+## BUG A fix: solidity predicate for picking only -- every non-air cell value
+## is solid (terrain 1..5, built blocks 10..29, trunk/leaves 30/31) EXCEPT
+## water, which is a decorative surface the pick ray should pass through to
+## whatever's beneath it (debatable per task discussion; this is the chosen
+## behavior).
+func _is_pick_solid(v: int) -> bool:
+	return v > AIR and v != WATER
 
 
 func is_in_region(cell: Vector3i) -> bool:
