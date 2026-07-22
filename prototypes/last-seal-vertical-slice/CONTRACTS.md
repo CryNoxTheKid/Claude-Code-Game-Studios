@@ -122,9 +122,30 @@ func get_furniture_cells() -> Dictionary          # Vector3i -> item_id (BUILT f
 signal build_mode_changed(active: bool)
 func set_build_mode(active: bool) -> void         # off: aborts drag, disarms, hides ghosts
 func get_build_mode() -> bool                     # tools arm only in build mode (arming auto-enables)
-func release_drafts() -> int                      # blueprints start as DRAFTS; villagers build only after release
+func release_drafts() -> int                      # thin compat wrapper (2026-07-22): releases every DRAFT project, returns total cell count released
 func get_draft_count() -> int
+# --- Stonehearth build PROJECTS (2026-07-22, user direction) ---
+signal projects_changed()                          # created/merged/state change/claim change/cancelled
+func get_projects() -> Array
+    # Array of {id:int, name:String, state:int (0 DRAFT/1 BUILDING/2 PAUSED/3 DONE),
+    #   state_label:String, total_cells:int, built_cells:int, worker_ids:Array[int]}
+func release_project(id: int) -> void             # DRAFT -> BUILDING
+func pause_project(id: int) -> void                # BUILDING -> PAUSED; no NEW claims, but a job a
+                                                    #   villager already claimed is allowed to finish
+func resume_project(id: int) -> void               # PAUSED -> BUILDING
+func cancel_project(id: int) -> void               # any state -> gone: cancels pending blueprint
+                                                    #   entries, un-builds already-built cells
+                                                    #   (restore_value else AIR), drops built furniture
+                                                    #   from the registry, removes the project
 ```
+
+Every blueprint entry also carries a `project_id: int`. Grouping rule: a
+drag/placement's WHOLE cell batch merges into an existing DRAFT-state project
+if any cell in the batch is within the 26-neighborhood of that project's
+cells (bridging multiple DRAFT projects merges them into one); otherwise a
+fresh project is created. Released/BUILDING/PAUSED/DONE projects never absorb
+new drafts. `claim_job` only serves BUILDING-state projects and records the
+claiming villager per project (surfaced via `worker_ids`).
 
 Pipeline per building GDD: pick(DDA via voxel_world.raycast_cells with
 camera_input.get_world_ray()) -> ghost preview (pooled MeshInstance3D,

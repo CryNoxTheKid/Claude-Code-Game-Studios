@@ -79,11 +79,30 @@ var _tool_buttons: Dictionary = {}       # tool_id:int -> Button
 var _undo_button: Button
 var _redo_button: Button
 var _build_mode_button: Button           # FEATURE 1: master "Bauen" toggle
-var _release_drafts_button: Button       # FEATURE 2: "Bau starten (N)"
 var _build_mode_active: bool = false
 
 var _context_panel: PanelContainer
 var _context_content: VBoxContainer
+
+# --- Build projects (2026-07-22, replaces the single "Bau starten (N)" button) ---
+const PROJECT_STATE_DRAFT := 0
+const PROJECT_STATE_BUILDING := 1
+const PROJECT_STATE_PAUSED := 2
+const PROJECT_STATE_DONE := 3
+const PROJECT_STATE_LABELS_DE := {
+	0: "Entwurf",
+	1: "Im Bau",
+	2: "Pausiert",
+	3: "Fertig",
+}
+const PROJECTS_PANEL_WIDTH := 260.0
+const PROJECTS_PANEL_MAX_HEIGHT := 320.0
+const PROJECTS_REFRESH_INTERVAL := 0.5  # light periodic refresh for progress/workers
+
+var _projects_panel: PanelContainer
+var _projects_list: VBoxContainer
+var _project_row_refs: Dictionary = {}   # project_id:int -> {progress, count_label, workers_label, state}
+var _projects_refresh_accum: float = 0.0
 
 var _pause_button: Button
 var _speed_buttons: Dictionary = {}      # warp:int -> Button
@@ -113,12 +132,17 @@ func _ready() -> void:
 	_build_toast_zone()
 	_build_anchor()
 	_build_villager_panel()
+	_build_projects_panel()
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	_reconcile_toasts()
 	_update_distress_icons()
 	_update_sim_stats()
+	_projects_refresh_accum += delta
+	if _projects_refresh_accum >= PROJECTS_REFRESH_INTERVAL:
+		_projects_refresh_accum = 0.0
+		_refresh_projects_progress()
 
 
 func _update_sim_stats() -> void:
@@ -159,11 +183,11 @@ func setup(building_system: Node, camera_input: Node, villager_ai: Node, needs_m
 	_refresh_toolbar_highlight()
 	_refresh_context_panel()
 
-	# FEATURE 1/2: sync the master build-mode toggle and the release-drafts
-	# button to whatever state the building system already booted with.
+	# FEATURE 1: sync the master build-mode toggle to whatever state the
+	# building system already booted with.
 	_build_mode_active = building_system.get_build_mode()
 	_apply_active_button_style(_build_mode_button, _build_mode_active)
-	_refresh_release_drafts_button()
+	_refresh_projects_panel()
 
 	building_system.tool_changed.connect(_on_tool_changed)
 	building_system.palette_changed.connect(_on_palette_changed)
@@ -171,7 +195,7 @@ func setup(building_system: Node, camera_input: Node, villager_ai: Node, needs_m
 	building_system.formation_changed.connect(_on_formation_changed)
 	building_system.undo_state_changed.connect(_on_undo_state_changed)
 	building_system.build_mode_changed.connect(_on_build_mode_changed)
-	building_system.blueprint_changed.connect(_on_building_blueprint_changed)
+	building_system.projects_changed.connect(_on_projects_changed)
 
 	build_validation.sealed_space_warning.connect(_on_sealed_space_warning)
 	build_validation.unsheltered_furniture_info.connect(_on_unsheltered_furniture_info)
@@ -249,16 +273,6 @@ func _build_toolbar() -> void:
 	_build_mode_button.pressed.connect(_on_build_mode_button_pressed)
 	row.add_child(_build_mode_button)
 
-	# FEATURE 2: release-drafts button, next to the master toggle; only shown
-	# while there are draft cells waiting to be started.
-	_release_drafts_button = Button.new()
-	_release_drafts_button.tooltip_text = "Alle geplanten Zellen zum Bau freigeben"
-	_release_drafts_button.custom_minimum_size = Vector2(130.0, 40.0)
-	_apply_flat_button_style(_release_drafts_button)
-	_release_drafts_button.pressed.connect(_on_release_drafts_button_pressed)
-	_release_drafts_button.visible = false
-	row.add_child(_release_drafts_button)
-
 	row.add_child(VSeparator.new())
 
 	for entry: Dictionary in TOOL_BUTTONS:
@@ -333,22 +347,224 @@ func _on_build_mode_changed(active: bool) -> void:
 	_apply_active_button_style(_build_mode_button, active)
 
 
-func _on_release_drafts_button_pressed() -> void:
-	_building_system.release_drafts()
+func _on_projects_changed() -> void:
+	_refresh_projects_panel()
 
 
-func _on_building_blueprint_changed() -> void:
-	_refresh_release_drafts_button()
+# ---------------------------------------------------------------------------
+# Z7 - Build projects panel (2026-07-22: Stonehearth-style build projects,
+# replaces the single global "Bau starten (N)" button)
+# ---------------------------------------------------------------------------
+
+func _build_projects_panel() -> void:
+	_projects_panel = PanelContainer.new()
+	_projects_panel.name = "Z7_Projects"
+	_projects_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	_projects_panel.add_theme_stylebox_override("panel", _make_panel_style())
+	_projects_panel.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	_projects_panel.grow_horizontal = Control.GROW_DIRECTION_END
+	_projects_panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	_projects_panel.offset_left = EDGE_MARGIN
+	_projects_panel.offset_right = EDGE_MARGIN + PROJECTS_PANEL_WIDTH
+	_projects_panel.offset_bottom = -EDGE_MARGIN
+	_projects_panel.offset_top = _projects_panel.offset_bottom - PROJECTS_PANEL_MAX_HEIGHT
+	_projects_panel.visible = false
+	_projects_panel.mouse_entered.connect(_set_hover.bind("projects", true))
+	_projects_panel.mouse_exited.connect(_set_hover.bind("projects", false))
+	add_child(_projects_panel)
+
+	var outer := VBoxContainer.new()
+	outer.add_theme_constant_override("separation", 6)
+	_projects_panel.add_child(outer)
+
+	var title := Label.new()
+	title.text = "Projekte"
+	title.add_theme_color_override("font_color", COLOR_TEXT)
+	title.add_theme_font_size_override("font_size", 16)
+	outer.add_child(title)
+
+	var scroll := ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(PROJECTS_PANEL_WIDTH - 16.0, PROJECTS_PANEL_MAX_HEIGHT - 48.0)
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	outer.add_child(scroll)
+
+	_projects_list = VBoxContainer.new()
+	_projects_list.add_theme_constant_override("separation", 8)
+	_projects_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(_projects_list)
 
 
-## FEATURE 2: shows/labels the "Bau starten (N)" button; N = current draft count.
-func _refresh_release_drafts_button() -> void:
-	if _building_system == null or _release_drafts_button == null:
+## Full structural rebuild: called on projects_changed (creation, merge, state
+## transitions, cancellation) and once from setup(). Cheap at this scale (a
+## handful of projects at most in this slice).
+func _refresh_projects_panel() -> void:
+	if _building_system == null or _projects_list == null:
 		return
-	var n: int = _building_system.get_draft_count()
-	_release_drafts_button.visible = n > 0
-	if n > 0:
-		_release_drafts_button.text = "Bau starten (%d)" % n
+	for child in _projects_list.get_children():
+		child.queue_free()
+	_project_row_refs.clear()
+
+	var projects: Array = _building_system.get_projects()
+	_projects_panel.visible = not projects.is_empty()
+	for p: Dictionary in projects:
+		_projects_list.add_child(_make_project_row(p))
+
+
+## Light periodic refresh (progress bar / cell count / worker names) that does
+## NOT rebuild buttons -- avoids flicker while a project is actively building.
+func _refresh_projects_progress() -> void:
+	if _building_system == null or _project_row_refs.is_empty():
+		return
+	var by_id: Dictionary = {}
+	for p: Dictionary in _building_system.get_projects():
+		by_id[int(p["id"])] = p
+	for id in _project_row_refs.keys():
+		if not by_id.has(id):
+			continue  # structural change pending -- projects_changed will rebuild
+		var p: Dictionary = by_id[id]
+		var refs: Dictionary = _project_row_refs[id]
+		var progress: ProgressBar = refs["progress"]
+		var count_label: Label = refs["count_label"]
+		var workers_label: Label = refs["workers_label"]
+		progress.max_value = maxf(1.0, float(p["total_cells"]))
+		progress.value = float(p["built_cells"])
+		count_label.text = "%d/%d" % [int(p["built_cells"]), int(p["total_cells"])]
+		if int(refs["state"]) == PROJECT_STATE_BUILDING:
+			workers_label.text = _worker_names_text(p["worker_ids"])
+
+
+func _project_state_label(state: int) -> String:
+	return String(PROJECT_STATE_LABELS_DE.get(state, "?"))
+
+
+func _worker_names_text(worker_ids: Array) -> String:
+	if _villager_ai == null or worker_ids.is_empty():
+		return "Niemand zugewiesen"
+	var names: Array = []
+	for wid in worker_ids:
+		var info: Dictionary = _villager_ai.get_info(int(wid))
+		names.append(String(info.get("name", "?")))
+	return ", ".join(names)
+
+
+func _make_project_row(p: Dictionary) -> PanelContainer:
+	var id: int = int(p["id"])
+	var state: int = int(p["state"])
+
+	var row := PanelContainer.new()
+	row.add_theme_stylebox_override("panel", _make_panel_style(COLOR_CHROME.lightened(0.06)))
+
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 4)
+	row.add_child(col)
+
+	var header := HBoxContainer.new()
+	header.add_theme_constant_override("separation", 6)
+	col.add_child(header)
+
+	var name_label := Label.new()
+	name_label.text = String(p["name"])
+	name_label.add_theme_color_override("font_color", COLOR_TEXT)
+	name_label.add_theme_font_size_override("font_size", 15)
+	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header.add_child(name_label)
+
+	var status_label := Label.new()
+	status_label.text = _project_state_label(state)
+	status_label.add_theme_color_override("font_color", COLOR_GOLD if state == PROJECT_STATE_BUILDING else COLOR_TEXT)
+	status_label.add_theme_font_size_override("font_size", 13)
+	header.add_child(status_label)
+
+	var progress := ProgressBar.new()
+	progress.min_value = 0.0
+	progress.max_value = maxf(1.0, float(p["total_cells"]))
+	progress.value = float(p["built_cells"])
+	progress.show_percentage = false
+	progress.custom_minimum_size = Vector2(0.0, 12.0)
+	col.add_child(progress)
+
+	var count_label := Label.new()
+	count_label.text = "%d/%d" % [int(p["built_cells"]), int(p["total_cells"])]
+	count_label.add_theme_color_override("font_color", Color(0.8, 0.78, 0.72))
+	count_label.add_theme_font_size_override("font_size", 13)
+	col.add_child(count_label)
+
+	var workers_label := Label.new()
+	workers_label.add_theme_color_override("font_color", Color(0.8, 0.78, 0.72))
+	workers_label.add_theme_font_size_override("font_size", 13)
+	workers_label.autowrap_mode = TextServer.AUTOWRAP_WORD
+	workers_label.visible = state == PROJECT_STATE_BUILDING
+	if state == PROJECT_STATE_BUILDING:
+		workers_label.text = _worker_names_text(p["worker_ids"])
+	col.add_child(workers_label)
+
+	var button_row := HBoxContainer.new()
+	button_row.add_theme_constant_override("separation", 6)
+	col.add_child(button_row)
+
+	match state:
+		PROJECT_STATE_DRAFT:
+			var start_btn := Button.new()
+			start_btn.text = "Bau starten"
+			_apply_flat_button_style(start_btn)
+			start_btn.pressed.connect(_on_project_release_pressed.bind(id))
+			button_row.add_child(start_btn)
+			var discard_btn := Button.new()
+			discard_btn.text = "Verwerfen"
+			_apply_flat_button_style(discard_btn)
+			discard_btn.pressed.connect(_on_project_cancel_pressed.bind(id))
+			button_row.add_child(discard_btn)
+		PROJECT_STATE_BUILDING:
+			var pause_btn := Button.new()
+			pause_btn.text = "Pause"
+			_apply_flat_button_style(pause_btn)
+			pause_btn.pressed.connect(_on_project_pause_pressed.bind(id))
+			button_row.add_child(pause_btn)
+			var cancel_btn := Button.new()
+			cancel_btn.text = "Abbrechen"
+			_apply_flat_button_style(cancel_btn)
+			cancel_btn.pressed.connect(_on_project_cancel_pressed.bind(id))
+			button_row.add_child(cancel_btn)
+		PROJECT_STATE_PAUSED:
+			var resume_btn := Button.new()
+			resume_btn.text = "Fortsetzen"
+			_apply_flat_button_style(resume_btn)
+			resume_btn.pressed.connect(_on_project_resume_pressed.bind(id))
+			button_row.add_child(resume_btn)
+			var cancel_btn2 := Button.new()
+			cancel_btn2.text = "Abbrechen"
+			_apply_flat_button_style(cancel_btn2)
+			cancel_btn2.pressed.connect(_on_project_cancel_pressed.bind(id))
+			button_row.add_child(cancel_btn2)
+		PROJECT_STATE_DONE:
+			var done_label := Label.new()
+			done_label.text = "Fertig"
+			done_label.add_theme_color_override("font_color", COLOR_GOLD)
+			button_row.add_child(done_label)
+			var demolish_btn := Button.new()
+			demolish_btn.text = "Abriss"
+			_apply_flat_button_style(demolish_btn)
+			demolish_btn.pressed.connect(_on_project_cancel_pressed.bind(id))
+			button_row.add_child(demolish_btn)
+
+	_project_row_refs[id] = {"progress": progress, "count_label": count_label, "workers_label": workers_label, "state": state}
+	return row
+
+
+func _on_project_release_pressed(id: int) -> void:
+	_building_system.release_project(id)
+
+
+func _on_project_pause_pressed(id: int) -> void:
+	_building_system.pause_project(id)
+
+
+func _on_project_resume_pressed(id: int) -> void:
+	_building_system.resume_project(id)
+
+
+func _on_project_cancel_pressed(id: int) -> void:
+	_building_system.cancel_project(id)
 
 
 # ---------------------------------------------------------------------------

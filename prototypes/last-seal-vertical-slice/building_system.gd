@@ -17,6 +17,27 @@ const TERRAIN_MAX_VALUE := 4
 
 enum Tool { NONE = 0, WALL = 1, FLOOR = 2, ROOF = 3, BLOCK = 4, FURNITURE = 5 }
 
+# --- Build projects (2026-07-22, user direction: Stonehearth-style build projects) ---
+enum ProjectState { DRAFT = 0, BUILDING = 1, PAUSED = 2, DONE = 3 }
+const PROJECT_STATE_LABELS := {
+	ProjectState.DRAFT: "DRAFT",
+	ProjectState.BUILDING: "BUILDING",
+	ProjectState.PAUSED: "PAUSED",
+	ProjectState.DONE: "DONE",
+}
+# 26-neighborhood offsets (incl. self) used to test cell adjacency for project grouping.
+const _NEIGHBORHOOD_26: Array[Vector3i] = [
+	Vector3i(-1, -1, -1), Vector3i(0, -1, -1), Vector3i(1, -1, -1),
+	Vector3i(-1, 0, -1), Vector3i(0, 0, -1), Vector3i(1, 0, -1),
+	Vector3i(-1, 1, -1), Vector3i(0, 1, -1), Vector3i(1, 1, -1),
+	Vector3i(-1, -1, 0), Vector3i(0, -1, 0), Vector3i(1, -1, 0),
+	Vector3i(-1, 0, 0), Vector3i(0, 0, 0), Vector3i(1, 0, 0),
+	Vector3i(-1, 1, 0), Vector3i(0, 1, 0), Vector3i(1, 1, 0),
+	Vector3i(-1, -1, 1), Vector3i(0, -1, 1), Vector3i(1, -1, 1),
+	Vector3i(-1, 0, 1), Vector3i(0, 0, 1), Vector3i(1, 0, 1),
+	Vector3i(-1, 1, 1), Vector3i(0, 1, 1), Vector3i(1, 1, 1),
+]
+
 const FORMATIONS: Array[String] = ["Flat", "Gable", "Hip", "Shed"]  # only Flat commits (VS scope)
 
 # Tuning knobs (design/gdd/building-system.md Tuning Knobs)
@@ -75,6 +96,10 @@ signal furniture_removed(cell: Vector3i, item_id: String)
 # only be armed while true; see set_build_mode()/get_build_mode(). Flagged for
 # CONTRACTS.md update.
 signal build_mode_changed(active: bool)
+# CONTRACT ADDITION (2026-07-22, build projects): fires whenever a project is
+# created, merged, renamed-by-merge, changes state, gains/loses a claim, or is
+# cancelled -- HUD's projects panel does a full rebuild on this.
+signal projects_changed()
 
 # --- Private state ---
 var _voxel_world: Node3D
@@ -90,9 +115,20 @@ var _material_index: int = 0
 var _materials: Array = []       # ResourceItemDatabase.ItemDef, category "building_material"
 var _furniture_items: Array = [] # ResourceItemDatabase.ItemDef, category "furniture_fixture"
 
-# blueprint cell record: Vector3i -> {item_id: String, progress_ticks: int, claimed_by: int, needs_support: bool}
+# blueprint cell record: Vector3i -> {item_id: String, progress_ticks: int, claimed_by: int, needs_support: bool, project_id: int}
 var _blueprint: Dictionary = {}
 var _furniture_cells: Dictionary = {}  # Vector3i -> item_id (BUILT furniture only)
+
+# Build projects (2026-07-22): id:int -> {id, name, state:ProjectState, all_cells:
+# Dictionary(Vector3i->true, EVERY cell ever committed to this project, built or
+# not -- the total_cells count), built_cells: Dictionary(Vector3i->true, subset of
+# all_cells already written to voxel_world), claims: Dictionary(Vector3i->int
+# villager_id, currently-claimed UNBUILT cells), restore_values: Dictionary
+# (Vector3i->int, pre-existing value captured at commit time -- survives past the
+# cell's blueprint entry being erased on completion, needed by cancel_project).
+var _projects: Dictionary = {}
+var _next_project_id: int = 1
+var _cell_project: Dictionary = {}  # Vector3i -> project_id; reverse index, single source of truth for "who owns this cell"
 
 var _undo_stack: Array = []  # [{cells: Array[Vector3i], item_id: String, is_furniture: bool}]
 var _redo_stack: Array = []
@@ -195,18 +231,19 @@ func set_build_mode(active: bool) -> void:
 		_hide_all_ghosts()
 	build_mode_changed.emit(_build_mode)
 
-## FEATURE 2: flips every current DRAFT blueprint entry to released (buildable
-## by villagers) and returns how many were flipped. No-op (returns 0) if there
-## are no drafts.
+## Thin compat wrapper (build-projects upgrade, 2026-07-22): releases EVERY
+## DRAFT-state project (see release_project()) and returns the total cell
+## count released. No-op (returns 0) if there are no draft projects.
 func release_drafts() -> int:
+	var draft_ids: Array = []
 	var count: int = 0
-	for cell in _blueprint.keys():
-		var entry: Dictionary = _blueprint[cell]
-		if bool(entry.get("draft", false)):
-			entry["draft"] = false
-			count += 1
-	if count > 0:
-		blueprint_changed.emit()
+	for id in _projects.keys():
+		var p: Dictionary = _projects[id]
+		if int(p["state"]) == ProjectState.DRAFT:
+			draft_ids.append(id)
+			count += p["all_cells"].size()
+	for id in draft_ids:
+		release_project(id)
 	return count
 
 ## FEATURE 2: number of blueprint cells still in DRAFT state (not yet released).
@@ -222,7 +259,9 @@ func get_blueprint_cells() -> Dictionary:
 	return _blueprint.duplicate(true)
 
 ## FIFO-by-commit-order claim of the next open cell whose support (if any) is already Built.
-## Returns the claimed Vector3i cell, or null if nothing is claimable right now.
+## Only serves cells belonging to a BUILDING-state project (build projects, 2026-07-22) --
+## DRAFT/PAUSED/DONE projects never hand out new claims. Returns the claimed
+## Vector3i cell, or null if nothing is claimable right now.
 func claim_job(villager_id: int) -> Variant:
 	for cell in _blueprint.keys():
 		var entry: Dictionary = _blueprint[cell]
@@ -230,11 +269,16 @@ func claim_job(villager_id: int) -> Variant:
 			continue  # FEATURE 2: drafts are not yet released for construction
 		if int(entry["claimed_by"]) != 0 or bool(entry.get("ready", false)):
 			continue
+		var project_id: int = int(entry.get("project_id", -1))
+		if project_id != -1 and _projects.has(project_id) and int(_projects[project_id]["state"]) != ProjectState.BUILDING:
+			continue  # PAUSED (no new claims) / DONE / (DRAFT already caught above)
 		if bool(entry["needs_support"]):
 			var support_cell: Vector3i = cell + Vector3i(0, -1, 0)
 			if _voxel_world.get_cell(support_cell) == AIR:
 				continue  # support not yet Built -- skip, do not block the FIFO scan
 		entry["claimed_by"] = villager_id
+		if project_id != -1 and _projects.has(project_id):
+			_projects[project_id]["claims"][cell] = villager_id
 		return cell
 	return null
 
@@ -244,6 +288,9 @@ func release_job(cell: Vector3i) -> void:
 		return
 	var entry: Dictionary = _blueprint[cell]
 	entry["claimed_by"] = 0
+	var project_id: int = int(entry.get("project_id", -1))
+	if project_id != -1 and _projects.has(project_id):
+		_projects[project_id]["claims"].erase(cell)
 
 ## Called by the villager once per tick while it is on site. Advances progress; on completion
 ## queues the cell for this frame's batched construction_completed flush (deferred if occupied).
@@ -283,6 +330,107 @@ func is_cell_occupied_planned(cell: Vector3i) -> bool:
 ## BUILT furniture only (Vector3i -> item_id). Returns a deep copy.
 func get_furniture_cells() -> Dictionary:
 	return _furniture_cells.duplicate(true)
+
+# --- Build projects (2026-07-22) ---
+
+## Array of project-info Dictionaries: id, name, state:int (ProjectState),
+## state_label:String, total_cells, built_cells, worker_ids:Array[int]
+## (currently-claiming villagers, deduped). Sorted by id (creation order).
+func get_projects() -> Array:
+	var out: Array = []
+	for id in _projects.keys():
+		var p: Dictionary = _projects[id]
+		var worker_ids: Array[int] = []
+		var seen: Dictionary = {}
+		for wid in p["claims"].values():
+			var w: int = int(wid)
+			if not seen.has(w):
+				seen[w] = true
+				worker_ids.append(w)
+		out.append({
+			"id": id,
+			"name": p["name"],
+			"state": int(p["state"]),
+			"state_label": String(PROJECT_STATE_LABELS.get(int(p["state"]), "?")),
+			"total_cells": p["all_cells"].size(),
+			"built_cells": p["built_cells"].size(),
+			"worker_ids": worker_ids,
+		})
+	out.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return int(a["id"]) < int(b["id"]))
+	return out
+
+## DRAFT -> BUILDING: released blueprint entries become claimable by claim_job().
+func release_project(id: int) -> void:
+	if not _projects.has(id):
+		return
+	var p: Dictionary = _projects[id]
+	if int(p["state"]) != ProjectState.DRAFT:
+		return
+	p["state"] = ProjectState.BUILDING
+	for cell in _blueprint.keys():
+		var entry: Dictionary = _blueprint[cell]
+		if int(entry.get("project_id", -1)) == id:
+			entry["draft"] = false
+	blueprint_changed.emit()
+	projects_changed.emit()
+
+## BUILDING -> PAUSED: no NEW claims are handed out (claim_job gates on project
+## state). A job a villager ALREADY claimed before the pause is allowed to
+## finish -- report_on_site/the completion flush don't check project state,
+## only claim_job does. This matches Stonehearth's "let them finish the plank
+## in their hands" feel and avoids yanking a villager mid-swing.
+func pause_project(id: int) -> void:
+	if not _projects.has(id):
+		return
+	var p: Dictionary = _projects[id]
+	if int(p["state"]) != ProjectState.BUILDING:
+		return
+	p["state"] = ProjectState.PAUSED
+	projects_changed.emit()
+
+## PAUSED -> BUILDING: claim_job may resume handing out this project's cells.
+func resume_project(id: int) -> void:
+	if not _projects.has(id):
+		return
+	var p: Dictionary = _projects[id]
+	if int(p["state"]) != ProjectState.PAUSED:
+		return
+	p["state"] = ProjectState.BUILDING
+	projects_changed.emit()
+
+## Any state -> gone: cancels every still-pending blueprint entry (no world
+## write needed), un-builds every already-built cell (restore_value if
+## captured at commit time, else AIR -- reusing the same restore semantics as
+## undo), drops built furniture from the furniture registry, and removes the
+## project entirely. Emits cells_removed/furniture_removed/blueprint_changed/
+## projects_changed so ghosts, the furniture registry, and the HUD all refresh.
+func cancel_project(id: int) -> void:
+	if not _projects.has(id):
+		return
+	var p: Dictionary = _projects[id]
+	var all_cells: Array = p["all_cells"].keys()
+	var writes: Array = []
+	for cell: Vector3i in all_cells:
+		if p["built_cells"].has(cell):
+			var restore_to: int = int(p["restore_values"].get(cell, AIR))
+			writes.append({"cell": cell, "value": restore_to})
+		elif _blueprint.has(cell):
+			_blueprint.erase(cell)
+		_cell_project.erase(cell)
+	_projects.erase(id)
+	var removed: Array[Vector3i] = []
+	if not writes.is_empty():
+		var applied: Array = _voxel_world.set_cells(writes)
+		for entry in applied:
+			removed.append(entry.cell)
+			if _furniture_cells.has(entry.cell):
+				var fid: String = _furniture_cells[entry.cell]
+				_furniture_cells.erase(entry.cell)
+				furniture_removed.emit(entry.cell, fid)
+	if not removed.is_empty():
+		cells_removed.emit(removed)
+	blueprint_changed.emit()
+	projects_changed.emit()
 
 ## Extra API (not in CONTRACTS.md) -- see write-up: lets VillagerAI report whether a character
 ## currently occupies a cell, so construction can defer per Edge Case 6 / TR-building-system-037.
@@ -672,6 +820,9 @@ func _remove_built_cell(cell: Vector3i) -> void:
 		var fid: String = _furniture_cells[cell]
 		_furniture_cells.erase(cell)
 		furniture_removed.emit(cell, fid)
+	if _cell_project.has(cell):
+		_untrack_cell(cell)
+		projects_changed.emit()
 	cells_removed.emit(removed)
 
 func _is_cell_valid_for_commit(cell: Vector3i, is_furniture: bool) -> bool:
@@ -701,14 +852,23 @@ func _is_cell_valid_for_floor_replace(cell: Vector3i) -> bool:
 
 func _create_blueprint_cells(cells: Array, item_id: String, is_furniture: bool, is_floor_replace: bool = false) -> void:
 	var typed_cells: Array[Vector3i] = []
-	var restore_values: Dictionary = {}
 	for c in cells:
 		typed_cells.append(c)
+	# Build projects (2026-07-22): the WHOLE batch shares one project -- merges
+	# into an existing DRAFT project if any cell in the batch touches one,
+	# otherwise starts a fresh project. See _assign_project.
+	var project_id: int = _assign_project(typed_cells, is_furniture, item_id)
+	var project: Dictionary = _projects[project_id]
+	var restore_values: Dictionary = {}
+	for c in typed_cells:
 		# FEATURE 3: capture the cell's PRE-EXISTING value (terrain id for a
 		# floor-replace dig, AIR for every normal build) so undo restores the
-		# correct thing instead of assuming AIR.
+		# correct thing instead of assuming AIR. Also banked on the project
+		# (restore_values survives past the blueprint entry being erased on
+		# completion -- needed by cancel_project to un-build later).
 		var restore_value: int = _voxel_world.get_cell(c)
 		restore_values[c] = restore_value
+		project["restore_values"][c] = restore_value
 		_blueprint[c] = {
 			"item_id": item_id,
 			"progress_ticks": 0,
@@ -716,19 +876,123 @@ func _create_blueprint_cells(cells: Array, item_id: String, is_furniture: bool, 
 			"needs_support": is_furniture,
 			"draft": true,  # FEATURE 2: new blueprint cells start as drafts
 			"restore_value": restore_value,
+			"project_id": project_id,
 		}
-	_push_command(typed_cells, item_id, is_furniture, restore_values, is_floor_replace)
+	_push_command(typed_cells, item_id, is_furniture, restore_values, is_floor_replace, project_id)
 	blueprint_changed.emit()
+
+# --- Build projects (2026-07-22) ---
+
+## Grouping rule: merges the WHOLE incoming batch into an existing DRAFT-state
+## project if ANY cell in the batch is within the 26-neighborhood of that
+## project's cells; if the batch bridges multiple DRAFT projects, those
+## projects are merged into one first. Otherwise starts a fresh project.
+## Released/BUILDING/PAUSED/DONE projects never match (they never absorb new
+## drafts -- an adjacent new commit starts its own fresh project instead).
+func _assign_project(cells: Array[Vector3i], is_furniture: bool, item_id: String) -> int:
+	var matched: Dictionary = {}  # project_id -> true
+	for c in cells:
+		for offset in _NEIGHBORHOOD_26:
+			var n: Vector3i = c + offset
+			if not _cell_project.has(n):
+				continue
+			var pid: int = int(_cell_project[n])
+			if _projects.has(pid) and int(_projects[pid]["state"]) == ProjectState.DRAFT:
+				matched[pid] = true
+	var survivor_id: int = -1
+	if not matched.is_empty():
+		var ids: Array = matched.keys()
+		ids.sort()
+		survivor_id = int(ids[0])
+		for i in range(1, ids.size()):
+			_merge_project_into(survivor_id, int(ids[i]))
+	if survivor_id == -1:
+		survivor_id = _create_project(is_furniture, item_id)
+	var survivor: Dictionary = _projects[survivor_id]
+	for c in cells:
+		survivor["all_cells"][c] = true
+		_cell_project[c] = survivor_id
+	projects_changed.emit()
+	return survivor_id
+
+## Naming: buildings get "Projekt %d"; a furniture-only NEW project (bed) names
+## itself after the item ("Bett %d") -- trivial-detection heuristic, only
+## applies when the placement doesn't merge into an existing project.
+func _create_project(is_furniture: bool, item_id: String) -> int:
+	var id: int = _next_project_id
+	_next_project_id += 1
+	var name: String = ("Bett %d" % id) if (is_furniture and item_id == "bed") else ("Projekt %d" % id)
+	_projects[id] = {
+		"id": id,
+		"name": name,
+		"state": ProjectState.DRAFT,
+		"all_cells": {},
+		"built_cells": {},
+		"claims": {},
+		"restore_values": {},
+	}
+	return id
+
+## Folds absorb_id entirely into keep_id (cell sets, claims, restore_values,
+## reverse index) and retags any surviving blueprint entries that still point
+## at absorb_id. Both are assumed DRAFT (the only state _assign_project matches).
+func _merge_project_into(keep_id: int, absorb_id: int) -> void:
+	if keep_id == absorb_id or not _projects.has(absorb_id) or not _projects.has(keep_id):
+		return
+	var keep: Dictionary = _projects[keep_id]
+	var absorb: Dictionary = _projects[absorb_id]
+	for c in absorb["all_cells"].keys():
+		keep["all_cells"][c] = true
+		_cell_project[c] = keep_id
+	for c in absorb["built_cells"].keys():
+		keep["built_cells"][c] = true
+	for c in absorb["claims"].keys():
+		keep["claims"][c] = absorb["claims"][c]
+	for c in absorb["restore_values"].keys():
+		keep["restore_values"][c] = absorb["restore_values"][c]
+	_projects.erase(absorb_id)
+	for cell in _blueprint.keys():
+		var entry: Dictionary = _blueprint[cell]
+		if int(entry.get("project_id", -1)) == absorb_id:
+			entry["project_id"] = keep_id
+
+## Removes a single cell from whatever project owns it (undo of a still-pending
+## commit, or a manual Ctrl+click removal of a built cell). Drops the project
+## entirely once it owns zero cells.
+func _untrack_cell(cell: Vector3i) -> void:
+	if not _cell_project.has(cell):
+		return
+	var pid: int = _cell_project[cell]
+	_cell_project.erase(cell)
+	if not _projects.has(pid):
+		return
+	var p: Dictionary = _projects[pid]
+	p["all_cells"].erase(cell)
+	p["built_cells"].erase(cell)
+	p["claims"].erase(cell)
+	p["restore_values"].erase(cell)
+	if p["all_cells"].is_empty():
+		_projects.erase(pid)
+
+## True while any blueprint entry (still Planned/UnderConstruction, including
+## "ready" ones awaiting the completion flush) still points at this project --
+## i.e. the project is NOT fully built yet.
+func _project_has_pending_entries(pid: int) -> bool:
+	for entry in _blueprint.values():
+		if int(entry.get("project_id", -1)) == pid:
+			return true
+	return false
 
 # --- Undo / redo ---
 
-func _push_command(cells: Array[Vector3i], item_id: String, is_furniture: bool, restore_values: Dictionary, is_floor_replace: bool = false) -> void:
+func _push_command(cells: Array[Vector3i], item_id: String, is_furniture: bool, restore_values: Dictionary, is_floor_replace: bool = false, project_id: int = -1) -> void:
 	_undo_stack.append({
 		"cells": cells.duplicate(),
 		"item_id": item_id,
 		"is_furniture": is_furniture,
 		"restore_values": restore_values.duplicate(),
 		"is_floor_replace": is_floor_replace,
+		"project_id": project_id,
 	})
 	if _undo_stack.size() > UNDO_STACK_DEPTH:
 		_undo_stack.pop_front()  # Edge Case 9: oldest discarded silently
@@ -753,6 +1017,9 @@ func _undo() -> void:
 			var v: int = _voxel_world.get_cell(cell)
 			if v != restore_to:
 				built_removals.append({"cell": cell, "value": restore_to})
+		# Build projects (2026-07-22): this command's cells are leaving the
+		# blueprint/voxel-world either way -- drop them from project bookkeeping.
+		_untrack_cell(cell)
 	if not built_removals.is_empty():
 		var applied: Array = _voxel_world.set_cells(built_removals)
 		var removed: Array[Vector3i] = []
@@ -766,6 +1033,7 @@ func _undo() -> void:
 	_redo_stack.append(cmd)
 	blueprint_changed.emit()
 	_emit_undo_state()
+	projects_changed.emit()
 
 func _redo() -> void:
 	if _redo_stack.is_empty():
@@ -782,10 +1050,19 @@ func _redo() -> void:
 		invalid_commit.emit(_cell_center(cmd["cells"][0]), "redo: no valid cells remain")
 		_emit_undo_state()
 		return
+	# Build projects (2026-07-22): redo re-releases directly (draft:false), so
+	# it gets its OWN fresh project already in BUILDING state rather than going
+	# through the DRAFT-only merge rule in _assign_project.
+	var project_id: int = _create_project(is_furniture, String(cmd["item_id"]))
+	_projects[project_id]["state"] = ProjectState.BUILDING
+	var project: Dictionary = _projects[project_id]
 	var restore_values: Dictionary = {}
 	for cell in valid_cells:
 		var restore_value: int = _voxel_world.get_cell(cell)
 		restore_values[cell] = restore_value
+		project["restore_values"][cell] = restore_value
+		project["all_cells"][cell] = true
+		_cell_project[cell] = project_id
 		_blueprint[cell] = {
 			"item_id": cmd["item_id"],
 			"progress_ticks": 0,
@@ -793,6 +1070,7 @@ func _redo() -> void:
 			"needs_support": is_furniture,
 			"draft": false,  # redo restores directly to released (see task summary)
 			"restore_value": restore_value,
+			"project_id": project_id,
 		}
 	_undo_stack.append({
 		"cells": valid_cells,
@@ -800,11 +1078,13 @@ func _redo() -> void:
 		"is_furniture": is_furniture,
 		"restore_values": restore_values,
 		"is_floor_replace": is_floor_replace,
+		"project_id": project_id,
 	})
 	if _undo_stack.size() > UNDO_STACK_DEPTH:
 		_undo_stack.pop_front()
 	blueprint_changed.emit()
 	_emit_undo_state()
+	projects_changed.emit()
 
 func _emit_undo_state() -> void:
 	undo_state_changed.emit(not _undo_stack.is_empty(), not _redo_stack.is_empty())
@@ -832,16 +1112,32 @@ func _flush_batched_signals() -> void:
 		return
 	var applied: Array = _voxel_world.set_cells(writes)
 	var completed_cells: Array[Vector3i] = []
+	var touched_projects: Dictionary = {}
 	for i in applied.size():
 		var res: Dictionary = applied[i]
 		var meta: Dictionary = write_meta[i]
+		var entry: Dictionary = _blueprint.get(res.cell, {})
+		var project_id: int = int(entry.get("project_id", -1))
 		_blueprint.erase(res.cell)
 		completed_cells.append(res.cell)
 		if bool(meta["is_furniture"]):
 			_furniture_cells[res.cell] = meta["item_id"]
 			furniture_placed.emit(res.cell, String(meta["item_id"]))
+		if project_id != -1 and _projects.has(project_id):
+			var p: Dictionary = _projects[project_id]
+			p["built_cells"][res.cell] = true
+			p["claims"].erase(res.cell)
+			touched_projects[project_id] = true
+	# Build projects (2026-07-22): a project is DONE once every cell it ever
+	# owned is built and no blueprint entry still points at it.
+	for pid in touched_projects.keys():
+		var p2: Dictionary = _projects[pid]
+		if int(p2["state"]) != ProjectState.DONE and not _project_has_pending_entries(pid):
+			p2["state"] = ProjectState.DONE
 	construction_completed.emit(completed_cells)
 	blueprint_changed.emit()
+	if not touched_projects.is_empty():
+		projects_changed.emit()
 
 # --- Ghost pools (tool preview + blueprint progress) ---
 
