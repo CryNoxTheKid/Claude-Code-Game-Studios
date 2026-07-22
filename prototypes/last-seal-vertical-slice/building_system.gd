@@ -862,7 +862,9 @@ func _render_drag_ghosts(cells: Array[Vector3i], cell_value: int) -> void:
 ## BLOCK/FURNITURE preview (called with a 1-cell array on whichever side is
 ## valid). cell_value is uniform across one call -- only one tool/material is
 ## ever armed at a time (WALL/FLOOR/ROOF lock it at drag-press; see _drag_item_id).
-func _render_tool_preview(valid_cells: Array[Vector3i], invalid_cells: Array[Vector3i], cell_value: int) -> void:
+func _render_tool_preview(valid_cells: Array, invalid_cells: Array, cell_value: int) -> void:
+	# Untyped on purpose: call sites use inline `[x] if cond else []` literals,
+	# which are plain Arrays — typed params raised runtime errors (user crash).
 	if valid_cells.is_empty():
 		_preview_valid_mesh.visible = false
 	else:
