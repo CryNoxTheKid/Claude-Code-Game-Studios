@@ -286,3 +286,101 @@ Boot: RID ready -> voxel_world.setup() -> others' setup() in dependency order ->
 environment (fog per art bible: distance fog to #6B8593 Threshold Cool, warm
 DirectionalLight), warmth-as-reward: OmniLight3D (amber #F5A83C, energy ~1.2)
 spawned at recognized-room center on room_recognized, removed when room lost.
+
+## Addendum: BUILD UX PACKAGE (2026-07-22, this task)
+
+### New tools / keys (BuildingSystem.Tool enum extended)
+
+```gdscript
+enum Tool { NONE = 0, WALL = 1, FLOOR = 2, ROOF = 3, BLOCK = 4, FURNITURE = 5,
+            ROOM = 6, ROOF_AUTO = 7, HOUSE = 8 }
+```
+Keys 6/7/8 (`tool_select_6/7/8`, CameraInput) arm ROOM ("Raum")/ROOF_AUTO
+("Dach")/HOUSE ("Haus") respectively, same auto-enable-build-mode semantics
+as the existing 5 tools. HUD toolbar gained the 3 matching buttons (widened
+`ZONE_HALF_WIDTH` 240->400 to fit).
+
+- **ROOM** (drag, ground rect, min 3x3): perimeter WALLS at the current wall
+  height with a 1-column full-height door gap centered on the edge nearest
+  the camera (fallback: -z edge) — `_rasterize_room()`/`_room_door_column()`.
+  Single project via the existing grouping rule.
+- **ROOF_AUTO** (click-only, no drag): clicking any cell belonging to a
+  project that has wall material (WOOD/STONE, draft or later) adds a flat
+  thatch roof over that project's XZ bounding box at (max cell y + 1),
+  skipping already-occupied cells — `_apply_roof_to_project()`. Joins the
+  SAME project even if it's already BUILDING/PAUSED/DONE (a DONE project is
+  reopened to BUILDING; new cells on a BUILDING project are added
+  already-released so they're claimable immediately; PAUSED/DRAFT keep their
+  existing semantics). No new project is ever created by this tool.
+- **HOUSE** (click-only stamp): fixed 7x7 footprint — flush floor
+  (terrain-replace), perimeter walls 3 high with 1 door gap, thatch roof —
+  shown as a merged moving ghost centered on the cursor, valid only where
+  all 49 columns share one `terrain_height` and the volume is clear.
+  `_house_layout()` computes/validates; `_handle_house_press()` commits the
+  whole stamp as ONE project ("Haus %d") mixing wood_block (floor+walls) and
+  thatch_block (roof). **Known limitation**: the undo/redo command model
+  assumes one material per command — undo restores correctly (per-cell
+  `restore_value` capture is unconditional), but redoing a cancelled/undone
+  House re-creates every cell under the command's single recorded item_id
+  ("wood_block"), so the thatch roof portion will not re-progress after a
+  redo. Accepted for this feature's scope (lowest task priority).
+
+### Hover highlight + build grid (BuildingSystem, feature 1)
+
+Always-on while a tool is armed, driven from the SAME per-frame pick
+`_update_pick()` already computes (no extra raycast): a wireframe box
+(1.02 scale, warm yellow/white, unshaded, `no_depth_test`) on the target
+cell, a brighter quad on the hit face, and a translucent 9x9 line-grid
+following `terrain_height` per column (+0.02 Y offset), rebuilt only when
+the hovered column changes. No new public API — internal to BuildingSystem.
+
+### Slice view (VoxelWorld + VillagerAI + HUD, feature 2)
+
+**Approach chosen: shader clip (option a)**, not mesher-filter/remesh. The
+single chunk `StandardMaterial3D` (shared by every chunk mesh) became a
+`ShaderMaterial` using the new `res://chunk_terrain.gdshader`, which
+replicates the previous look exactly (atlas texture, vertex-color-as-AO
+modulate, `cull_disabled`, roughness 1 / no specular) and adds one `y_cut`
+uniform with a fragment `discard` above it. Chosen over a *global* shader
+uniform because there was already exactly one shared material instance for
+every chunk — a plain per-material uniform gives the same "set once, every
+chunk updates instantly, no remesh" result with less machinery. Open cut (no
+cap faces) is accepted per task spec, since the mesher never emitted a top
+face for a cell covered by real (non-air) terrain regardless of the visual
+cut.
+
+```gdscript
+# VoxelWorld additions
+signal slice_level_changed(level: int)   # fires only when the clamped level actually changes
+func get_slice_level() -> int            # current cutoff cell-y; MAX_Y = off
+func is_slice_active() -> bool           # level < MAX_Y
+func set_slice_level(level: int) -> void # clamped 0..MAX_Y; pushes y_cut = level+1 to the shared material
+func reset_slice_level() -> void         # convenience for Home/reset -> MAX_Y
+```
+
+Ghosts/preview/highlight/build-grid meshes are SEPARATE MeshInstance3D
+materials (not the chunk shader), so they respect the cut via a plain
+**visibility rule** instead: cells with `y > get_slice_level()` are filtered
+out of the cell set before any ghost mesh is built (`_slice_filter_array`/
+`_slice_filter_dict_keys` in building_system.gd).
+
+VillagerAI subscribes to `voxel_world.slice_level_changed` directly in its
+own `setup()` (no GameWorld broker needed) and hides a villager's
+`visual_root` whenever `current_cell.y > _slice_level`.
+
+Keys (CameraInput, runtime InputMap as usual): `slice_up` (PageUp),
+`slice_down` (PageDown), `slice_reset` (Home) — wired in GameWorld directly
+to `voxel_world.set_slice_level()`/`reset_slice_level()`. HUD's "Ebene: N"
+label + ▼/▲ buttons (in the Z1 time-controls panel, which grew a 3rd row —
+`TIME_CONTROLS_HEIGHT_ESTIMATE` 48->84) call `voxel_world.set_slice_level()`
+directly too; the label hides itself when `is_slice_active()` is false.
+
+### CONTRACT ADDITION: HUD.setup() 6th parameter
+
+```gdscript
+func setup(building_system: Node, camera_input: Node, villager_ai: Node,
+           needs_mood: Node, build_validation: Node, voxel_world: Node = null) -> void
+```
+Needed for the slice-view indicator/buttons (`get_slice_level()`/
+`is_slice_active()`/`set_slice_level()`). Defaults to `null` so existing
+call sites without it don't break; GameWorld passes `voxel_world`.

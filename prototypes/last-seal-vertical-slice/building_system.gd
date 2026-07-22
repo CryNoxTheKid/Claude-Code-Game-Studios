@@ -20,7 +20,30 @@ const DIGGABLE_MIN_VALUE := 1
 const DIGGABLE_MAX_VALUE := 5
 const DIG_BUILD_TICKS := 5  # tuning knob: dig duration, same order of magnitude as material build_ticks (4..8)
 
-enum Tool { NONE = 0, WALL = 1, FLOOR = 2, ROOF = 3, BLOCK = 4, FURNITURE = 5 }
+# --- BUILD UX PACKAGE (2026-07-22, user-prioritized) ---
+# Cell values duplicated per file per CONTRACTS.md (voxel_world.gd is the source of truth).
+const _WOOD_VALUE := 10
+const _STONE_VALUE := 11
+const _THATCH_VALUE := 12
+const _WALL_MATERIAL_VALUES: Array[int] = [_WOOD_VALUE, _STONE_VALUE]
+
+# FEATURE 3: Room tool — perimeter walls + one door gap.
+const ROOM_MIN_SIZE := 3
+
+# FEATURE 5: House template — fixed 7x7 starter house stamp.
+const HOUSE_FOOTPRINT := 7
+const HOUSE_WALL_HEIGHT := 3
+
+# FEATURE 1: hover highlight + build grid tuning knobs.
+const HIGHLIGHT_BOX_SCALE := 1.02
+const HIGHLIGHT_BOX_COLOR := Color(1.0, 0.92, 0.55, 0.95)   # warm yellow/white, unshaded
+const HIGHLIGHT_FACE_COLOR := Color(1.0, 0.98, 0.85, 0.55)  # brighter quad on the hit face
+const HIGHLIGHT_FACE_EPSILON := 0.01                        # push out along the normal, avoid z-fighting
+const BUILD_GRID_RADIUS := 4     # 9x9 cells (radius 4 either side of the hovered column)
+const BUILD_GRID_Y_OFFSET := 0.02
+const BUILD_GRID_COLOR := Color(1.0, 0.95, 0.7, 0.35)
+
+enum Tool { NONE = 0, WALL = 1, FLOOR = 2, ROOF = 3, BLOCK = 4, FURNITURE = 5, ROOM = 6, ROOF_AUTO = 7, HOUSE = 8 }
 
 # --- Build projects (2026-07-22, user direction: Stonehearth-style build projects) ---
 enum ProjectState { DRAFT = 0, BUILDING = 1, PAUSED = 2, DONE = 3 }
@@ -194,6 +217,17 @@ var _mat_valid: StandardMaterial3D
 var _mat_invalid: StandardMaterial3D
 var _corner_pool: Array[MeshInstance3D] = []
 
+# FEATURE 1 (2026-07-22): hover highlight (wireframe target-cell box + brighter
+# hit-face quad) and the 9x9 build-grid overlay. Reuses the SAME per-frame pick
+# in _update_pick — no extra raycast.
+var _mat_highlight_box: StandardMaterial3D
+var _highlight_box_instance: MeshInstance3D
+var _mat_highlight_face: StandardMaterial3D
+var _highlight_face_instance: MeshInstance3D
+var _mat_build_grid: StandardMaterial3D
+var _build_grid_instance: MeshInstance3D
+var _last_grid_column: Vector2i = Vector2i(999999, 999999)  # forces a rebuild on first hover
+
 func _process(_delta: float) -> void:
 	if _voxel_world == null or _camera_input == null:
 		return
@@ -212,6 +246,7 @@ func setup(voxel_world: Node3D, camera_input: Node3D, hud: CanvasLayer) -> void:
 	_materials = ResourceItemDatabase.list_by_category("building_material")
 	_furniture_items = ResourceItemDatabase.list_by_category("furniture_fixture")
 	_build_ghost_visuals()
+	_build_highlight_visuals()
 	_camera_input.action_fired.connect(_on_action_fired)
 	_camera_input.build_click.connect(_on_build_click)
 	TimeTickSystem.tick.connect(_on_tick)
@@ -629,16 +664,21 @@ func _update_pick() -> void:
 		return
 	_last_hit_valid = true
 	_last_hit = hit
+	_update_highlight(hit)   # FEATURE 1: reuses this same pick, no extra raycast
 	match _tool:
 		Tool.BLOCK:
 			_update_block_ghost(hit)
 		Tool.FURNITURE:
 			_update_furniture_ghost(hit)
-		Tool.WALL, Tool.FLOOR, Tool.ROOF:
+		Tool.WALL, Tool.FLOOR, Tool.ROOF, Tool.ROOM:
 			if _is_pressed:
 				_update_drag_shape(hit)
 			else:
 				_update_single_cell_preview(hit)
+		Tool.HOUSE:
+			_update_house_ghost(hit)
+		Tool.ROOF_AUTO:
+			pass  # click-only tool -- the shared hover highlight is enough feedback
 
 func _update_block_ghost(hit: Dictionary) -> void:
 	_hide_corner_pool()
@@ -713,6 +753,455 @@ func _is_blueprint_solid_for_pick(cell: Vector3i) -> bool:
 		return false
 	return not bool(entry.get("dig", false))
 
+
+# --- SLICE VIEW (2026-07-22): ghost/highlight visibility filtering ---
+# Chunk terrain itself is clipped by chunk_terrain.gdshader (y_cut uniform,
+# no remesh). Ghosts/previews/highlights are separate MeshInstance3D nodes
+# with their own materials, so they respect the cut via a plain visibility
+# rule instead: any cell above the current slice level is filtered out
+# before its mesh is ever built.
+
+func _is_cell_visible_at_slice(cell: Vector3i) -> bool:
+	if _voxel_world == null:
+		return true
+	return cell.y <= _voxel_world.get_slice_level()
+
+func _slice_filter_array(cells: Array) -> Array:
+	var out: Array = []
+	for c in cells:
+		if _is_cell_visible_at_slice(c):
+			out.append(c)
+	return out
+
+func _slice_filter_dict_keys(d: Dictionary) -> Dictionary:
+	var out: Dictionary = {}
+	for k in d.keys():
+		if _is_cell_visible_at_slice(k):
+			out[k] = d[k]
+	return out
+
+
+# --- FEATURE 1 (2026-07-22): hover highlight + build grid ---
+# Both driven from the SAME per-frame pick _update_pick() already computes —
+# no extra raycast added.
+
+func _build_highlight_visuals() -> void:
+	_mat_highlight_box = StandardMaterial3D.new()
+	_mat_highlight_box.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_mat_highlight_box.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_mat_highlight_box.vertex_color_use_as_albedo = true
+	_mat_highlight_box.albedo_color = Color.WHITE
+	_mat_highlight_box.no_depth_test = true  # a wireframe box should read through the block it targets
+
+	var half: float = HIGHLIGHT_BOX_SCALE * 0.5
+	var corners: Array[Vector3] = [
+		Vector3(-half, -half, -half), Vector3(half, -half, -half), Vector3(half, -half, half), Vector3(-half, -half, half),
+		Vector3(-half, half, -half), Vector3(half, half, -half), Vector3(half, half, half), Vector3(-half, half, half),
+	]
+	var edge_pairs: Array = [[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]]
+	var verts := PackedVector3Array()
+	var colors := PackedColorArray()
+	for pair: Array in edge_pairs:
+		verts.append(corners[pair[0]])
+		verts.append(corners[pair[1]])
+		colors.append(HIGHLIGHT_BOX_COLOR)
+		colors.append(HIGHLIGHT_BOX_COLOR)
+	var box_mesh := ArrayMesh.new()
+	var box_arrays: Array = []
+	box_arrays.resize(Mesh.ARRAY_MAX)
+	box_arrays[Mesh.ARRAY_VERTEX] = verts
+	box_arrays[Mesh.ARRAY_COLOR] = colors
+	box_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_LINES, box_arrays)
+	box_mesh.surface_set_material(0, _mat_highlight_box)
+
+	_highlight_box_instance = MeshInstance3D.new()
+	_highlight_box_instance.mesh = box_mesh
+	_highlight_box_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_highlight_box_instance.visible = false
+	add_child(_highlight_box_instance)
+
+	_mat_highlight_face = StandardMaterial3D.new()
+	_mat_highlight_face.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_mat_highlight_face.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_mat_highlight_face.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_mat_highlight_face.albedo_color = HIGHLIGHT_FACE_COLOR
+
+	_highlight_face_instance = MeshInstance3D.new()
+	_highlight_face_instance.material_override = _mat_highlight_face
+	_highlight_face_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_highlight_face_instance.visible = false
+	add_child(_highlight_face_instance)
+
+	_mat_build_grid = StandardMaterial3D.new()
+	_mat_build_grid.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_mat_build_grid.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_mat_build_grid.vertex_color_use_as_albedo = true
+	_mat_build_grid.albedo_color = Color.WHITE
+
+	_build_grid_instance = MeshInstance3D.new()
+	_build_grid_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_build_grid_instance.visible = false
+	add_child(_build_grid_instance)
+
+
+## Maps the current tool + hit to the cell the click would actually affect
+## (placement: hit cell + face normal; removal/dig: the hit cell itself) --
+## used ONLY for the hover highlight, mirrors each tool's own press logic.
+func _compute_target_cell(hit: Dictionary) -> Vector3i:
+	match _tool:
+		Tool.BLOCK:
+			if _camera_input.remove_modifier_held:
+				return hit.cell
+			return hit.cell + hit.normal
+		Tool.FURNITURE, Tool.WALL, Tool.ROOF, Tool.ROOM:
+			return hit.cell + hit.normal
+		Tool.FLOOR:
+			if _is_terrain_top_surface(hit):
+				return hit.cell
+			return hit.cell + hit.normal
+		Tool.ROOF_AUTO, Tool.HOUSE:
+			return hit.cell
+		_:
+			return hit.cell
+
+
+func _update_highlight(hit: Dictionary) -> void:
+	var target: Vector3i = _compute_target_cell(hit)
+	if not _is_cell_visible_at_slice(target):
+		_highlight_box_instance.visible = false
+		_highlight_face_instance.visible = false
+	else:
+		_highlight_box_instance.global_position = _cell_center(target)
+		_highlight_box_instance.visible = true
+		if hit.normal != Vector3i.ZERO and _is_cell_visible_at_slice(hit.cell):
+			_rebuild_highlight_face_quad(hit.cell, hit.normal)
+			_highlight_face_instance.visible = true
+		else:
+			_highlight_face_instance.visible = false
+
+	var column := Vector2i(target.x, target.z)
+	if column != _last_grid_column:
+		_last_grid_column = column
+		_rebuild_build_grid(target)
+
+
+## Brighter quad exactly on the hit face, pushed out along the normal by a
+## small epsilon to avoid z-fighting with the terrain/block surface. Reuses
+## the ghost mesher's own _FACE_DIRS/_FACE_VERTS tables (already CCW-wound for
+## the outward-facing convention).
+func _rebuild_highlight_face_quad(cell: Vector3i, normal: Vector3i) -> void:
+	var face_index: int = _FACE_DIRS.find(normal)
+	if face_index == -1:
+		_highlight_face_instance.visible = false
+		return
+	var origin: Vector3 = Vector3(cell.x, cell.y, cell.z) + Vector3(normal) * HIGHLIGHT_FACE_EPSILON
+	var face_verts: Array = _FACE_VERTS[face_index]
+	var verts := PackedVector3Array()
+	var normals := PackedVector3Array()
+	var n := Vector3(normal)
+	for v: Vector3 in face_verts:
+		verts.append(origin + v)
+		normals.append(n)
+	var indices := PackedInt32Array([0, 1, 2, 0, 2, 3])
+	var mesh := ArrayMesh.new()
+	var arrays: Array = []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = verts
+	arrays[Mesh.ARRAY_NORMAL] = normals
+	arrays[Mesh.ARRAY_INDEX] = indices
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	_highlight_face_instance.mesh = mesh
+
+
+## BUILD GRID: translucent cell-grid overlay following terrain_height per
+## column, floating BUILD_GRID_Y_OFFSET above the surface. Rebuilt only when
+## the hovered cell's column changes (not every frame).
+func _rebuild_build_grid(center_cell: Vector3i) -> void:
+	var verts := PackedVector3Array()
+	var colors := PackedColorArray()
+	for dz in range(-BUILD_GRID_RADIUS, BUILD_GRID_RADIUS + 1):
+		for dx in range(-BUILD_GRID_RADIUS, BUILD_GRID_RADIUS + 1):
+			var gx: int = center_cell.x + dx
+			var gz: int = center_cell.z + dz
+			if not _is_cell_visible_at_slice(Vector3i(gx, center_cell.y, gz)):
+				continue
+			var h: int = _voxel_world.terrain_height(gx, gz)
+			var y: float = float(h) + BUILD_GRID_Y_OFFSET
+			var p0 := Vector3(gx, y, gz)
+			var p1 := Vector3(gx + 1, y, gz)
+			var p2 := Vector3(gx + 1, y, gz + 1)
+			var p3 := Vector3(gx, y, gz + 1)
+			for pair: Array in [[p0, p1], [p1, p2], [p2, p3], [p3, p0]]:
+				verts.append(pair[0])
+				verts.append(pair[1])
+				colors.append(BUILD_GRID_COLOR)
+				colors.append(BUILD_GRID_COLOR)
+	if verts.is_empty():
+		_build_grid_instance.visible = false
+		return
+	var mesh := ArrayMesh.new()
+	var arrays: Array = []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = verts
+	arrays[Mesh.ARRAY_COLOR] = colors
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_LINES, arrays)
+	mesh.surface_set_material(0, _mat_build_grid)
+	_build_grid_instance.mesh = mesh
+	_build_grid_instance.visible = true
+
+
+# --- FEATURE 4 (2026-07-22): Auto-Roof ("Dach") ---
+# Click-only tool: clicking a cell belonging to ANY project that already has
+# walls (draft or later) adds a flat thatch roof over that project's XZ
+# bounding box, one cell above its highest cell (built or still-planned).
+# Cells already occupied (blueprint or solid) are skipped.
+
+func _handle_roof_auto_press(hit: Dictionary) -> void:
+	var cell: Vector3i = hit.cell
+	if not _cell_project.has(cell):
+		invalid_commit.emit(_cell_center(cell), "keine Projekt-Zelle")
+		return
+	var project_id: int = int(_cell_project[cell])
+	if not _project_has_walls(project_id):
+		invalid_commit.emit(_cell_center(cell), "Projekt hat keine Waende")
+		return
+	if not _apply_roof_to_project(project_id):
+		invalid_commit.emit(_cell_center(cell), "Dach: nichts zu bauen")
+
+
+func _project_has_walls(project_id: int) -> bool:
+	if not _projects.has(project_id):
+		return false
+	var p: Dictionary = _projects[project_id]
+	for c: Vector3i in p["all_cells"].keys():
+		var value: int
+		if _blueprint.has(c):
+			var def: ResourceItemDatabase.ItemDef = ResourceItemDatabase.get_by_id(String(_blueprint[c].get("item_id", "")))
+			value = def.cell_value if def != null else AIR
+		else:
+			value = _voxel_world.get_cell(c)
+		if _WALL_MATERIAL_VALUES.has(value):
+			return true
+	return false
+
+
+func _project_xz_bbox(project: Dictionary) -> Dictionary:
+	var cells: Array = project["all_cells"].keys()
+	if cells.is_empty():
+		return {}
+	var first: Vector3i = cells[0]
+	var x0: int = first.x
+	var x1: int = first.x
+	var z0: int = first.z
+	var z1: int = first.z
+	for c: Vector3i in cells:
+		x0 = mini(x0, c.x)
+		x1 = maxi(x1, c.x)
+		z0 = mini(z0, c.z)
+		z1 = maxi(z1, c.z)
+	return {"x0": x0, "x1": x1, "z0": z0, "z1": z1}
+
+
+func _project_max_cell_y(project: Dictionary) -> int:
+	var max_y: int = -999999
+	for c: Vector3i in project["all_cells"].keys():
+		max_y = maxi(max_y, c.y)
+	return max_y
+
+
+## Adds a flat thatch roof over `project_id`'s XZ bounding box, one cell above
+## its current highest cell. Judgment call (documented in CONTRACTS.md): if
+## the project is DONE, this re-opens it (state -> BUILDING) since it once
+## again has pending work; if DRAFT, the new cells join as drafts (released
+## together later); if BUILDING, the new cells are added already-released
+## (draft:false) so claim_job serves them immediately; if PAUSED, they're
+## added released but won't be claimed until the project is resumed (matches
+## existing pause semantics). Returns false if there is nothing new to roof
+## (bbox fully occupied already, or the project doesn't exist).
+func _apply_roof_to_project(project_id: int) -> bool:
+	if not _projects.has(project_id):
+		return false
+	var project: Dictionary = _projects[project_id]
+	var bbox: Dictionary = _project_xz_bbox(project)
+	if bbox.is_empty():
+		return false
+	var roof_y: int = _project_max_cell_y(project) + 1
+	var roof_cells: Array[Vector3i] = []
+	for x in range(int(bbox["x0"]), int(bbox["x1"]) + 1):
+		for z in range(int(bbox["z0"]), int(bbox["z1"]) + 1):
+			var c := Vector3i(x, roof_y, z)
+			if not _voxel_world.is_in_region(c):
+				continue
+			if _blueprint.has(c):
+				continue
+			if _voxel_world.get_cell(c) != AIR:
+				continue
+			roof_cells.append(c)
+	if roof_cells.is_empty():
+		return false
+	var release_now: bool = int(project["state"]) == ProjectState.BUILDING or int(project["state"]) == ProjectState.DONE
+	if int(project["state"]) == ProjectState.DONE:
+		project["state"] = ProjectState.BUILDING
+	var restore_values: Dictionary = {}
+	for c: Vector3i in roof_cells:
+		var restore_value: int = _voxel_world.get_cell(c)
+		restore_values[c] = restore_value
+		project["restore_values"][c] = restore_value
+		project["all_cells"][c] = true
+		_cell_project[c] = project_id
+		_blueprint[c] = {
+			"item_id": "thatch_block",
+			"progress_ticks": 0,
+			"claimed_by": 0,
+			"needs_support": false,
+			"draft": not release_now,
+			"restore_value": restore_value,
+			"project_id": project_id,
+			"dig": false,
+		}
+	_push_command(roof_cells, "thatch_block", false, restore_values, false, project_id, false)
+	blueprint_changed.emit()
+	projects_changed.emit()
+	return true
+
+
+# --- FEATURE 5 (2026-07-22): House template ("Haus") ---
+# Fixed 7x7 starter house stamp: flush floor (terrain-replace), perimeter
+# walls 3 high with 1 door gap, thatch roof on top. Valid only where all 49
+# columns share the same terrain_height and the volume is clear.
+
+## Computes the full house layout anchored so the given XZ is the house's
+## MIN corner (_update_house_ghost/_handle_house_press center it on the
+## cursor by subtracting HOUSE_FOOTPRINT/2 first). Returns
+## {"valid": bool, "h": int, "floor": Array[Vector3i], "walls": Array[Vector3i],
+## "roof": Array[Vector3i], "door_col": Vector2i}; "valid" false means every
+## other key is a placeholder.
+func _house_layout(anchor_min: Vector2i) -> Dictionary:
+	var invalid_result: Dictionary = {"valid": false, "h": 0, "floor": [], "walls": [], "roof": [], "door_col": Vector2i.ZERO}
+	var x0: int = anchor_min.x
+	var z0: int = anchor_min.y
+	var x1: int = x0 + HOUSE_FOOTPRINT - 1
+	var z1: int = z0 + HOUSE_FOOTPRINT - 1
+	if not _voxel_world.is_in_region(Vector3i(x0, 0, z0)) or not _voxel_world.is_in_region(Vector3i(x1, 0, z1)):
+		return invalid_result
+	var h: int = _voxel_world.terrain_height(x0, z0)
+	for x in range(x0, x1 + 1):
+		for z in range(z0, z1 + 1):
+			if _voxel_world.terrain_height(x, z) != h:
+				return invalid_result
+	for x in range(x0, x1 + 1):
+		for z in range(z0, z1 + 1):
+			var floor_cell := Vector3i(x, h - 1, z)
+			var floor_value: int = _voxel_world.get_cell(floor_cell)
+			if floor_value < TERRAIN_MIN_VALUE or floor_value > TERRAIN_MAX_VALUE:
+				return invalid_result  # not plain terrain -- can't flush-replace safely
+			if _blueprint.has(floor_cell):
+				return invalid_result
+			for dy in range(0, HOUSE_WALL_HEIGHT + 1):  # h..h+2 walls/interior, h+3 roof
+				var c := Vector3i(x, h + dy, z)
+				if _voxel_world.get_cell(c) != AIR or _blueprint.has(c):
+					return invalid_result
+	var door_col: Vector2i = _room_door_column(x0, x1, z0, z1)
+	var floor_cells: Array[Vector3i] = []
+	var wall_cells: Array[Vector3i] = []
+	var roof_cells: Array[Vector3i] = []
+	for x in range(x0, x1 + 1):
+		for z in range(z0, z1 + 1):
+			floor_cells.append(Vector3i(x, h - 1, z))
+			roof_cells.append(Vector3i(x, h + HOUSE_WALL_HEIGHT, z))
+			var edge: bool = x == x0 or x == x1 or z == z0 or z == z1
+			if edge and Vector2i(x, z) != door_col:
+				for dy in range(HOUSE_WALL_HEIGHT):
+					wall_cells.append(Vector3i(x, h + dy, z))
+	return {"valid": true, "h": h, "floor": floor_cells, "walls": wall_cells, "roof": roof_cells, "door_col": door_col}
+
+
+func _update_house_ghost(hit: Dictionary) -> void:
+	_hide_corner_pool()
+	var anchor_min := Vector2i(hit.cell.x - HOUSE_FOOTPRINT / 2, hit.cell.z - HOUSE_FOOTPRINT / 2)
+	var layout: Dictionary = _house_layout(anchor_min)
+	if not bool(layout["valid"]):
+		var footprint_cells: Array[Vector3i] = []
+		var guess_h: int = _voxel_world.terrain_height(hit.cell.x, hit.cell.z)
+		for x in range(anchor_min.x, anchor_min.x + HOUSE_FOOTPRINT):
+			for z in range(anchor_min.y, anchor_min.y + HOUSE_FOOTPRINT):
+				footprint_cells.append(Vector3i(x, guess_h, z))
+		_preview_valid_mesh.visible = false
+		var invalid_values: Dictionary = _slice_filter_dict_keys(_uniform_cell_values(footprint_cells, _WOOD_VALUE))
+		if invalid_values.is_empty():
+			_preview_invalid_mesh.visible = false
+		else:
+			_preview_invalid_mesh.mesh = _build_ghost_mesh(invalid_values, GHOST_TINT_INVALID)
+			_preview_invalid_mesh.visible = true
+		return
+	var values: Dictionary = {}
+	for c: Vector3i in layout["floor"]:
+		values[c] = _WOOD_VALUE
+	for c: Vector3i in layout["walls"]:
+		values[c] = _WOOD_VALUE
+	for c: Vector3i in layout["roof"]:
+		values[c] = _THATCH_VALUE
+	values = _slice_filter_dict_keys(values)
+	_preview_invalid_mesh.visible = false
+	if values.is_empty():
+		_preview_valid_mesh.visible = false
+	else:
+		_preview_valid_mesh.mesh = _build_ghost_mesh(values, GHOST_TINT_NEUTRAL)
+		_preview_valid_mesh.visible = true
+
+
+## Commits the whole house as ONE draft project ("Haus %d"). NOTE (documented
+## limitation, see CONTRACTS.md): the undo/redo command model assumes a
+## single material per command; a House's mixed wood+thatch batch undoes
+## correctly (restore_values are captured per-cell regardless of material)
+## but a REDO of a cancelled/undone House will only recreate cells under the
+## command's single recorded item_id ("wood_block") -- the thatch roof
+## portion will not re-progress on redo. Accepted for this feature's scope.
+func _handle_house_press(hit: Dictionary) -> void:
+	var anchor_min := Vector2i(hit.cell.x - HOUSE_FOOTPRINT / 2, hit.cell.z - HOUSE_FOOTPRINT / 2)
+	var layout: Dictionary = _house_layout(anchor_min)
+	if not bool(layout["valid"]):
+		invalid_commit.emit(_cell_center(hit.cell), "Haus passt hier nicht (Terrain uneben oder Platz belegt)")
+		return
+	_create_house_project(layout)
+
+
+func _create_house_project(layout: Dictionary) -> void:
+	var project_id: int = _create_project(false, "", false)
+	_projects[project_id]["name"] = "Haus %d" % project_id
+	var project: Dictionary = _projects[project_id]
+	var all_typed: Array[Vector3i] = []
+	var restore_values: Dictionary = {}
+
+	var floor_cells: Array = layout["floor"]
+	var wall_cells: Array = layout["walls"]
+	var roof_cells: Array = layout["roof"]
+	var groups: Array = [[floor_cells, "wood_block"], [wall_cells, "wood_block"], [roof_cells, "thatch_block"]]
+	for group: Array in groups:
+		var cells: Array = group[0]
+		var item_id: String = String(group[1])
+		for c: Vector3i in cells:
+			var restore_value: int = _voxel_world.get_cell(c)
+			restore_values[c] = restore_value
+			project["restore_values"][c] = restore_value
+			project["all_cells"][c] = true
+			_cell_project[c] = project_id
+			_blueprint[c] = {
+				"item_id": item_id,
+				"progress_ticks": 0,
+				"claimed_by": 0,
+				"needs_support": false,
+				"draft": true,
+				"restore_value": restore_value,
+				"project_id": project_id,
+				"dig": false,
+			}
+			all_typed.append(c)
+
+	_push_command(all_typed, "wood_block", false, restore_values, true, project_id, false)
+	blueprint_changed.emit()
+	projects_changed.emit()
+
 func _rasterize_for_tool(tool_id: int, start: Vector3i, cur: Vector3i, plane_y: int) -> Array[Vector3i]:
 	match tool_id:
 		Tool.WALL:
@@ -721,6 +1210,8 @@ func _rasterize_for_tool(tool_id: int, start: Vector3i, cur: Vector3i, plane_y: 
 			return _rasterize_floor(start, cur, plane_y)
 		Tool.ROOF:
 			return _rasterize_roof_flat(start, cur, plane_y)
+		Tool.ROOM:
+			return _rasterize_room(start, cur, plane_y, _wall_height)
 		_:
 			return []
 
@@ -748,6 +1239,67 @@ func _rasterize_floor(start: Vector3i, cur: Vector3i, plane_y: int) -> Array[Vec
 func _rasterize_roof_flat(start: Vector3i, cur: Vector3i, plane_y: int) -> Array[Vector3i]:
 	# Flat only (F5); one plane above the picked start surface (slice-reduced from "highest picked").
 	return _rasterize_floor(start, cur, plane_y + 1)
+
+
+## FEATURE 3 (2026-07-22): Room tool -- perimeter WALLS of the dragged ground
+## rectangle at `height` (the existing wall-height setting), with an automatic
+## 1-column full-height door gap centered on the edge nearest the camera
+## (fallback -z edge, see _room_door_column). Empty (invalid) below
+## ROOM_MIN_SIZE in either axis -- too small to fit a gap.
+func _rasterize_room(start: Vector3i, cur: Vector3i, plane_y: int, height: int) -> Array[Vector3i]:
+	var cells: Array[Vector3i] = []
+	var x0: int = mini(start.x, cur.x)
+	var x1: int = maxi(start.x, cur.x)
+	var z0: int = mini(start.z, cur.z)
+	var z1: int = maxi(start.z, cur.z)
+	if (x1 - x0 + 1) < ROOM_MIN_SIZE or (z1 - z0 + 1) < ROOM_MIN_SIZE:
+		return cells
+	var door_col: Vector2i = _room_door_column(x0, x1, z0, z1)
+	for x in range(x0, x1 + 1):
+		for z in range(z0, z1 + 1):
+			var edge: bool = x == x0 or x == x1 or z == z0 or z == z1
+			if not edge:
+				continue
+			if Vector2i(x, z) == door_col:
+				continue  # door gap: full height, skipped entirely
+			for dy in range(height):
+				cells.append(Vector3i(x, plane_y + dy, z))
+	return cells
+
+
+## Picks the perimeter edge nearest the camera's XZ position (fallback: the
+## -z edge, i.e. z == z0, if the camera reference is unavailable) and returns
+## the column centered on that edge -- the Room/House door gap.
+func _room_door_column(x0: int, x1: int, z0: int, z1: int) -> Vector2i:
+	var x_mid: int = x0 + (x1 - x0) / 2
+	var z_mid: int = z0 + (z1 - z0) / 2
+	var best: Vector2i = Vector2i(x_mid, z0)  # fallback: -z edge
+	if _camera_input == null:
+		return best
+	var cam: Camera3D = _camera_input.get_camera()
+	if cam == null:
+		return best
+	var cx: float = cam.global_position.x
+	var cz: float = cam.global_position.z
+	var dists: Dictionary = {
+		"min_x": absf(cx - float(x0)),
+		"max_x": absf(cx - float(x1)),
+		"min_z": absf(cz - float(z0)),
+		"max_z": absf(cz - float(z1)),
+	}
+	var cols: Dictionary = {
+		"min_x": Vector2i(x0, z_mid),
+		"max_x": Vector2i(x1, z_mid),
+		"min_z": Vector2i(x_mid, z0),
+		"max_z": Vector2i(x_mid, z1),
+	}
+	var best_key: String = "min_z"
+	var best_dist: float = float(dists["min_z"])
+	for k in dists.keys():
+		if float(dists[k]) < best_dist:
+			best_dist = float(dists[k])
+			best_key = String(k)
+	return cols[best_key]
 
 func _bresenham_line(a: Vector2i, b: Vector2i) -> Array[Vector2i]:
 	var points: Array[Vector2i] = []
@@ -787,8 +1339,12 @@ func _on_press() -> void:
 			_handle_block_press(_last_hit)
 		Tool.FURNITURE:
 			_handle_furniture_press(_last_hit)
-		Tool.WALL, Tool.FLOOR, Tool.ROOF:
+		Tool.WALL, Tool.FLOOR, Tool.ROOF, Tool.ROOM:
 			_handle_drag_press(_last_hit)
+		Tool.ROOF_AUTO:
+			_handle_roof_auto_press(_last_hit)
+		Tool.HOUSE:
+			_handle_house_press(_last_hit)
 
 func _on_release() -> void:
 	if _is_erase_pressed:
@@ -800,7 +1356,7 @@ func _on_release() -> void:
 	if not _is_pressed:
 		return
 	match _tool:
-		Tool.WALL, Tool.FLOOR, Tool.ROOF:
+		Tool.WALL, Tool.FLOOR, Tool.ROOF, Tool.ROOM:
 			_commit_drag()
 		_:
 			pass
@@ -862,6 +1418,9 @@ func _commit_drag() -> void:
 		return
 	var end_cell: Vector3i = _drag_current_cell if _is_drag_active else _drag_start_cell
 	var raw_cells: Array[Vector3i] = _rasterize_for_tool(_tool, _drag_start_cell, end_cell, _drag_plane_y)
+	if _tool == Tool.ROOM and raw_cells.is_empty():
+		invalid_commit.emit(_cell_center(_drag_start_cell), "Raum zu klein (min. %dx%d)" % [ROOM_MIN_SIZE, ROOM_MIN_SIZE])
+		return
 	var clipped: Array[Vector3i] = []
 	for c in raw_cells:
 		if _voxel_world.is_in_region(c):
@@ -1010,7 +1569,11 @@ func _update_erase_drag_preview(hit: Dictionary) -> void:
 	if not _erase_drag_active and mouse_pos.distance_to(_erase_press_screen_pos) >= DRAG_THRESHOLD_PX:
 		_erase_drag_active = true
 	_erase_current_cell = hit.cell
-	var box_cells: Array[Vector3i] = _erase_box_cells(_erase_start_cell, _erase_current_cell)
+	var raw_box_cells: Array[Vector3i] = _erase_box_cells(_erase_start_cell, _erase_current_cell)
+	var box_cells: Array[Vector3i] = []
+	for bc: Vector3i in raw_box_cells:
+		if _is_cell_visible_at_slice(bc):   # SLICE VIEW: ghosts respect the cut too
+			box_cells.append(bc)
 	var valid_values: Dictionary = {}
 	var invalid_cells: Array[Vector3i] = []
 	for c in box_cells:
@@ -1573,6 +2136,8 @@ func _render_drag_ghosts(cells: Array[Vector3i], cell_value: int) -> void:
 func _render_tool_preview(valid_cells: Array, invalid_cells: Array, cell_value: int) -> void:
 	# Untyped on purpose: call sites use inline `[x] if cond else []` literals,
 	# which are plain Arrays — typed params raised runtime errors (user crash).
+	valid_cells = _slice_filter_array(valid_cells)     # SLICE VIEW: ghosts respect the cut too
+	invalid_cells = _slice_filter_array(invalid_cells)
 	if valid_cells.is_empty():
 		_preview_valid_mesh.visible = false
 	else:
@@ -1606,6 +2171,13 @@ func _hide_all_ghosts() -> void:
 	_preview_valid_mesh.visible = false
 	_preview_invalid_mesh.visible = false
 	_hide_corner_pool()
+	if _highlight_box_instance != null:
+		_highlight_box_instance.visible = false
+	if _highlight_face_instance != null:
+		_highlight_face_instance.visible = false
+	if _build_grid_instance != null:
+		_build_grid_instance.visible = false
+		_last_grid_column = Vector2i(999999, 999999)  # force a rebuild next hover
 
 func _hide_corner_pool() -> void:
 	for mi in _corner_pool:
@@ -1624,6 +2196,8 @@ func _refresh_blueprint_ghosts() -> void:
 	var dig_draft_values: Dictionary = {}
 	var dig_released_values: Dictionary = {}
 	for cell in _blueprint.keys():
+		if not _is_cell_visible_at_slice(cell):   # SLICE VIEW: ghosts respect the cut too
+			continue
 		var entry: Dictionary = _blueprint[cell]
 		var is_dig: bool = bool(entry.get("dig", false))
 		var value: int

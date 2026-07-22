@@ -134,6 +134,12 @@ var _rng := RandomNumberGenerator.new()
 # "unsheltered" when unset (task spec).
 var _shelter_provider: Callable
 
+# SLICE VIEW (2026-07-22, BUILD UX PACKAGE feature 2): mirrors
+# voxel_world's slice_level_changed signal (subscribed in setup()) so a
+# villager's visual root hides once its body cell is above the cut. MAX_Y
+# ("off") means every villager stays visible — matches voxel_world's default.
+var _slice_level: int = MAX_Y
+
 
 # voxel_world/building_system/needs_mood are intentionally untyped, matching
 # CONTRACTS.md's literal signature (mirrors the is_standable/is_step_legal
@@ -143,6 +149,13 @@ func setup(voxel_world, building_system, needs_mood) -> void:
 	_building_system = building_system
 	_needs_mood = needs_mood
 	_rng.seed = RNG_SEED
+
+	# SLICE VIEW: voxel_world is the single source of truth for the cut level;
+	# subscribing here means ANY caller of voxel_world.set_slice_level() (HUD
+	# buttons, PageUp/Down keys via GameWorld) keeps villager visibility in
+	# sync with zero extra wiring at the call site.
+	if _voxel_world.has_signal("slice_level_changed"):
+		_voxel_world.slice_level_changed.connect(_on_slice_level_changed)
 
 	_build_graph()
 
@@ -620,6 +633,12 @@ func _update_visual(v: Villager) -> void:
 	else:
 		v.visual_root.position = v.visual_position
 		v.visual_root.rotation_degrees = Vector3.ZERO
+	# SLICE VIEW: hide the whole villager once their body cell is above the cut.
+	v.visual_root.visible = v.current_cell.y <= _slice_level
+
+
+func _on_slice_level_changed(level: int) -> void:
+	_slice_level = level
 
 
 # ---------------------------------------------------------------------------

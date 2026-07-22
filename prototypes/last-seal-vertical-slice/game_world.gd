@@ -70,7 +70,7 @@ func _ready() -> void:
 	villager_ai.setup(voxel_world, building_system, needs_mood)
 	needs_mood.setup(build_validation)
 	build_validation.setup(voxel_world, building_system, VillagerAIScript)
-	hud.setup(building_system, camera_input, villager_ai, needs_mood, build_validation)
+	hud.setup(building_system, camera_input, villager_ai, needs_mood, build_validation, voxel_world)
 
 	var debug_console: CanvasLayer = DebugConsoleScript.new()
 	debug_console.name = "DebugConsole"
@@ -123,6 +123,17 @@ func _on_time_action(action: String) -> void:
 		"time_speed_down":
 			var idx_down: int = TimeTickSystem.WARPS.find(TimeTickSystem.get_warp())
 			TimeTickSystem.set_warp(TimeTickSystem.WARPS[maxi(idx_down - 1, 0)])
+		# BUILD UX PACKAGE (2026-07-22, feature 2): SLICE VIEW keys. Both the
+		# HUD's slice buttons and these keys call voxel_world.set_slice_level()
+		# directly -- VillagerAI stays in sync via voxel_world's own
+		# slice_level_changed signal (see villager_ai.gd setup()), so there is
+		# only ONE call site needed per trigger, not a broker function here.
+		"slice_up":
+			voxel_world.set_slice_level(voxel_world.get_slice_level() + 1)
+		"slice_down":
+			voxel_world.set_slice_level(voxel_world.get_slice_level() - 1)
+		"slice_reset":
+			voxel_world.reset_slice_level()
 
 
 func _setup_environment() -> void:

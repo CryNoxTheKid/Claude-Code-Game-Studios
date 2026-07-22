@@ -79,13 +79,21 @@ const FACE_ORTHOS: Array[Array] = [
 const AO_BRIGHTNESS: Array[float] = [1.0, 0.82, 0.68, 0.55]   # 0..3 occluders
 
 signal cell_changed(changes: Array)    # Array of {cell: Vector3i, before: int, after: int} — ONE emission per write call (batched)
+# SLICE VIEW (2026-07-22, BUILD UX PACKAGE feature 2): fires whenever
+# set_slice_level() actually changes the level — VillagerAI subscribes to hide
+# villagers above the cut without GameWorld needing to broker every caller.
+signal slice_level_changed(level: int)
 
 var _chunk_data: Dictionary[Vector2i, PackedByteArray] = {}    # lazily allocated — only touched chunks
 var _chunk_nodes: Dictionary[Vector2i, MeshInstance3D] = {}    # only chunks with a built mesh
 var _hills_noise: FastNoiseLite = FastNoiseLite.new()      # local roughness (was `_noise`)
 var _continent_noise: FastNoiseLite = FastNoiseLite.new()  # broad elevation -> terraces/mountains
 var _moisture_noise: FastNoiseLite = FastNoiseLite.new()   # forest placement
-var _material: StandardMaterial3D = StandardMaterial3D.new()
+# SLICE VIEW: ShaderMaterial replaces the old StandardMaterial3D — see _ready()
+# and res://chunk_terrain.gdshader. One shared instance for every chunk (as
+# before), so setting the y_cut uniform once updates every chunk with no remesh.
+var _material: ShaderMaterial = ShaderMaterial.new()
+var _slice_level: int = MAX_Y   # MAX_Y = "off" (Home/reset default per task spec)
 var _center_chunk: Vector2i = Vector2i.ZERO
 var _region_chunk_min: Vector2i = Vector2i.ZERO
 var _region_chunk_max: Vector2i = Vector2i.ZERO   # exclusive
@@ -103,17 +111,19 @@ func _ready() -> void:
 	_continent_noise.frequency = 0.0022  # wider landforms (user: world should read bigger)
 	_moisture_noise.seed = SEED + 7
 	_moisture_noise.frequency = 0.006
-	_material.vertex_color_use_as_albedo = true
+	# SLICE VIEW (2026-07-22): chunk_terrain.gdshader replicates the previous
+	# StandardMaterial3D look exactly (vertex-color-as-AO-modulate, cull
+	# disabled per the winding note below, roughness 1 / no specular) and adds
+	# ONE thing: a y_cut uniform + fragment discard above it (see the shader
+	# file for the full writeup, including why VERTEX.y == world Y here).
 	# DIAGNOSIS CONFIRMED 2026-07-20 (user close-up of a tree canopy rendering
 	# inside-out): faces are wound for the OpenGL front-face convention (CCW),
 	# but Godot fronts are CLOCKWISE — cull_back hid the outside of everything.
-	# Every 'missing faces' report was this. Culling disabled as the immediate
-	# fix (10x frame headroom absorbs the ~2x face cost); proper winding flip
-	# is the follow-up.
-	_material.cull_mode = BaseMaterial3D.CULL_DISABLED
-	_material.roughness = 1.0
-	_material.metallic_specular = 0.0  # matte blocks — no plastic gloss on canopies
-	# cull_mode left at default CULL_BACK — winding is authored for correct backface culling
+	# Every 'missing faces' report was this. Culling disabled (baked into the
+	# shader's render_mode) as the immediate fix (10x frame headroom absorbs
+	# the ~2x face cost); proper winding flip is the follow-up.
+	_material.shader = preload("res://chunk_terrain.gdshader")
+	_material.set_shader_parameter("y_cut", float(_slice_level) + 1.0)
 
 
 func setup() -> void:
@@ -288,9 +298,38 @@ func get_region_aabb() -> AABB:
 ## of a flat tint. Valid only after setup() (_build_atlas already ran).
 func get_atlas() -> Dictionary:
 	return {
-		"texture": _material.albedo_texture,
+		"texture": _material.get_shader_parameter("albedo_texture"),
 		"uv_rect": Callable(self, "_atlas_uv_rect_for_value"),
 	}
+
+
+## SLICE VIEW (2026-07-22): current cutoff cell-y (world cells with y >
+## get_slice_level() are hidden). MAX_Y means "off" (nothing hidden).
+func get_slice_level() -> int:
+	return _slice_level
+
+
+## True while a cut is actually in effect (level < MAX_Y).
+func is_slice_active() -> bool:
+	return _slice_level < MAX_Y
+
+
+## Sets the slice cutoff (clamped 0..MAX_Y) and pushes the new y_cut to the
+## ONE shared chunk material — every chunk updates instantly, no remesh.
+## No-op (no signal) if the clamped value doesn't actually change.
+func set_slice_level(level: int) -> void:
+	var clamped: int = clampi(level, 0, MAX_Y)
+	if clamped == _slice_level:
+		return
+	_slice_level = clamped
+	_material.set_shader_parameter("y_cut", float(_slice_level) + 1.0)
+	slice_level_changed.emit(_slice_level)
+
+
+## Convenience for the Home-key / reset-button case (task spec: "resets to
+## 'off' (MAX_Y)").
+func reset_slice_level() -> void:
+	set_slice_level(MAX_Y)
 
 
 func _dist_from_center(x: int, z: int) -> float:
@@ -581,8 +620,7 @@ func _build_atlas() -> void:
 					clampf(base_color.g * mult, 0.0, 1.0),
 					clampf(base_color.b * mult, 0.0, 1.0)))
 	var tex := ImageTexture.create_from_image(img)
-	_material.albedo_texture = tex
-	_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	_material.set_shader_parameter("albedo_texture", tex)   # sampler filter (nearest) is baked into the shader hint
 
 
 func _base_color_for_tile(value: int) -> Color:

@@ -232,6 +232,79 @@ func _run() -> void:
 	_check(vw.get_cell(floor_test_cell) == floor_orig_value,
 		"BUG B: removing a floor-replace block restores the original terrain (got %d want %d)" % [vw.get_cell(floor_test_cell), floor_orig_value])
 
+	# ==========================================================================
+	# BUILD UX PACKAGE (2026-07-22): Room tool, Auto-roof, House template, Slice view.
+	# ==========================================================================
+
+	# --- FEATURE 3: Room tool internals -- 5x5 rect -> perimeter minus 1 door
+	# column, forms exactly 1 DRAFT project ---
+	var room_base := Vector3i(site.x - 40, h, site.z - 40)
+	var room_end := Vector3i(room_base.x + 4, room_base.y, room_base.z + 4)
+	var room_cells: Array[Vector3i] = bs._rasterize_room(room_base, room_end, room_base.y, 3)
+	var room_perimeter_columns: int = 2 * (5 + 5) - 4  # 16 -- minus the 1 door column = 15
+	_check(room_cells.size() == (room_perimeter_columns - 1) * 3,
+		"room rasterize: 5x5 perimeter minus 1 door column, x3 height (got %d want %d)" \
+			% [room_cells.size(), (room_perimeter_columns - 1) * 3])
+	bs._create_blueprint_cells(room_cells, "wood_block", false)
+	var room_projects: Array = bs.get_projects().filter(func(p: Dictionary) -> bool:
+		return int(p["state"]) == 0 and int(p["total_cells"]) == room_cells.size())
+	_check(room_projects.size() == 1, "room tool: perimeter committed as exactly 1 DRAFT project (got %d matching)" % room_projects.size())
+	var room_project_id: int = int(room_projects[0]["id"]) if not room_projects.is_empty() else -1
+
+	# --- FEATURE 4: Auto-roof -- apply to that same project, roof cell count
+	# matches bbox minus occupied, same project id ---
+	if room_project_id != -1:
+		var before_total: int = room_cells.size()
+		var roofed: bool = bs._apply_roof_to_project(room_project_id)
+		_check(roofed, "auto-roof: applied to the room project")
+		var room_project_after: Dictionary = {}
+		for p: Dictionary in bs.get_projects():
+			if int(p["id"]) == room_project_id:
+				room_project_after = p
+		var expected_roof_cells := 5 * 5  # full 5x5 bbox, nothing pre-occupied
+		_check(not room_project_after.is_empty() and int(room_project_after["id"]) == room_project_id,
+			"auto-roof: roof joined the SAME project (id=%s want %d)" % [room_project_after.get("id"), room_project_id])
+		_check(int(room_project_after.get("total_cells", -1)) == before_total + expected_roof_cells,
+			"auto-roof: roof cell count matches bbox minus occupied (total %s want %d)" \
+				% [room_project_after.get("total_cells"), before_total + expected_roof_cells])
+
+	# --- FEATURE 5: House template -- commit at a flat site, one project with
+	# floor+walls+roof cell counts all > 0 and exactly one door gap column ---
+	var house_anchor: Vector2i = _find_house_anchor(bs, Vector3i(site.x + 40, 0, site.z + 40))
+	_check(house_anchor != Vector2i(999999, 999999), "house template: found a valid 7x7 flat/clear site")
+	if house_anchor != Vector2i(999999, 999999):
+		var house_layout: Dictionary = bs._house_layout(house_anchor)
+		_check(bool(house_layout.get("valid", false)), "house template: layout still valid right before commit")
+		var expected_floor: int = house_layout["floor"].size()
+		var expected_walls: int = house_layout["walls"].size()
+		var expected_roof: int = house_layout["roof"].size()
+		var perimeter_columns: int = 2 * (7 + 7) - 4  # 24 -- minus 1 door column = 23
+		_check(expected_walls == (perimeter_columns - 1) * 3,
+			"house template: exactly one door gap column (wall cells %d want %d)" \
+				% [expected_walls, (perimeter_columns - 1) * 3])
+		var hit_cell := Vector3i(house_anchor.x + 3, 0, house_anchor.y + 3)
+		bs._handle_house_press({"cell": hit_cell, "normal": Vector3i(0, 1, 0)})
+		var house_projects: Array = bs.get_projects().filter(func(p: Dictionary) -> bool: return String(p["name"]).begins_with("Haus"))
+		_check(house_projects.size() == 1, "house template: committed as exactly ONE project (got %d)" % house_projects.size())
+		if not house_projects.is_empty():
+			var house_total: int = int(house_projects[0]["total_cells"])
+			_check(house_total == expected_floor + expected_walls + expected_roof,
+				"house template: total cells match floor+walls+roof sum (total=%d want %d)" \
+					% [house_total, expected_floor + expected_walls + expected_roof])
+			_check(expected_floor > 0 and expected_walls > 0 and expected_roof > 0,
+				"house template: floor/walls/roof each > 0 (floor=%d walls=%d roof=%d)" % [expected_floor, expected_walls, expected_roof])
+
+	# --- Slice view: set/reset via API, assert state only (headless-visual
+	# limits are fine per task spec -- assert state, not pixels) ---
+	var slice_before: int = vw.get_slice_level()
+	vw.set_slice_level(slice_before - 5)
+	_check(vw.is_slice_active(), "slice view: level below MAX_Y reports active")
+	_check(vw.get_slice_level() == slice_before - 5,
+		"slice view: level applied (got %d want %d)" % [vw.get_slice_level(), slice_before - 5])
+	vw.reset_slice_level()
+	_check(not vw.is_slice_active() and vw.get_slice_level() == slice_before,
+		"slice view: reset returns to off/MAX_Y (level=%d active=%s)" % [vw.get_slice_level(), vw.is_slice_active()])
+
 	print("LOOP_TEST %s" % ("PASS" if not _fail else "FAIL"))
 	get_tree().quit(1 if _fail else 0)
 
@@ -286,6 +359,23 @@ func _find_flat_dig_patch(vw: Node3D, va: Node3D, near: Vector3i, exclude_min: V
 				if ok and cells.size() == 4:
 					return cells
 	return []
+
+
+## FEATURE 5 test helper: scans outward from `near` for a 7x7 anchor (XZ min
+## corner) where building_system's OWN _house_layout() reports valid -- reuses
+## production validity logic directly instead of duplicating the flatness/
+## clear-volume checks here.
+func _find_house_anchor(bs: Node, near: Vector3i) -> Vector2i:
+	for r in range(0, 40):
+		for dz in range(-r, r + 1):
+			for dx in range(-r, r + 1):
+				if maxi(absi(dx), absi(dz)) != r:
+					continue
+				var anchor := Vector2i(near.x + dx, near.z + dz)
+				var layout: Dictionary = bs._house_layout(anchor)
+				if bool(layout.get("valid", false)):
+					return anchor
+	return Vector2i(999999, 999999)
 
 
 func _find_flat_site(vw: Node3D, near: Vector3i) -> Vector3i:

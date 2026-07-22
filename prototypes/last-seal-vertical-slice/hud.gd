@@ -23,6 +23,9 @@ const TOOL_FLOOR := 2
 const TOOL_ROOF := 3
 const TOOL_BLOCK := 4
 const TOOL_FURNITURE := 5
+const TOOL_ROOM := 6       # BUILD UX PACKAGE (2026-07-22), feature 3
+const TOOL_ROOF_AUTO := 7  # BUILD UX PACKAGE (2026-07-22), feature 4
+const TOOL_HOUSE := 8      # BUILD UX PACKAGE (2026-07-22), feature 5
 
 const TOOL_BUTTONS: Array[Dictionary] = [
 	{"id": 1, "label": "Wall"},
@@ -30,6 +33,9 @@ const TOOL_BUTTONS: Array[Dictionary] = [
 	{"id": 3, "label": "Roof"},
 	{"id": 4, "label": "Block"},
 	{"id": 5, "label": "Bed"},
+	{"id": 6, "label": "Raum"},
+	{"id": 7, "label": "Dach"},
+	{"id": 8, "label": "Haus"},
 ]
 
 const ROOF_FORMATIONS := ["Flat", "Gable", "Hip", "Shed"]  # only Flat is functional this slice
@@ -44,9 +50,15 @@ const EDGE_MARGIN := 16.0
 const ZONE_GAP := 8.0
 const TOOLBAR_HEIGHT_ESTIMATE := 56.0
 const CONTEXT_PANEL_HEIGHT := 120.0
-const TIME_CONTROLS_HEIGHT_ESTIMATE := 48.0
+# Bumped 48->84 (2026-07-22, BUILD UX PACKAGE feature 2): the slice-view row
+# (Ebene label + 2 buttons) adds a 3rd row to the Z1 time-controls panel; the
+# toast/anchor zones below derive their offsets from this constant.
+const TIME_CONTROLS_HEIGHT_ESTIMATE := 84.0
 const TOAST_HEIGHT_ESTIMATE := 40.0
-const ZONE_HALF_WIDTH := 240.0     # toolbar/context shared width envelope (hud.md E4 rule)
+# ZONE_HALF_WIDTH widened 240->400 (2026-07-22, BUILD UX PACKAGE) -- toolbar
+# grew from 5 to 8 tool buttons + the "Bauen" toggle + undo/redo; the old
+# envelope overflowed. Toolbar/context shared width envelope (hud.md E4 rule).
+const ZONE_HALF_WIDTH := 400.0
 const RIGHT_ZONE_WIDTH := 260.0    # time/toast/anchor column width
 
 const TOAST_MAX_VISIBLE := 3
@@ -67,6 +79,11 @@ var _camera_input: Node
 var _villager_ai: Node
 var _needs_mood: Node
 var _build_validation: Node
+# CONTRACT ADDITION (2026-07-22, BUILD UX PACKAGE feature 2): setup() takes a
+# 6th param `voxel_world`, needed for the "Ebene: N" slice indicator + the two
+# slice buttons (get_slice_level()/set_slice_level()). Same pattern as the
+# camera_input addition already flagged above. Flagged for CONTRACTS.md update.
+var _voxel_world: Node
 
 var _villager_panel: Control
 
@@ -109,6 +126,12 @@ var _speed_buttons: Dictionary = {}      # warp:int -> Button
 var _sim_stats_label: Label
 var _pause_dim: ColorRect
 
+# --- SLICE VIEW (2026-07-22, BUILD UX PACKAGE feature 2) ---
+var _slice_label: Label
+var _slice_minus_btn: Button
+var _slice_plus_btn: Button
+var _last_slice_level_shown: int = -999999  # forces a first refresh
+
 var _toast_container: VBoxContainer
 var _toasts: Dictionary = {}             # key:String -> {severity,text,first_seen,last_seen,dismissed_until}
 var _toast_visible_keys: Array = []
@@ -139,6 +162,7 @@ func _process(delta: float) -> void:
 	_reconcile_toasts()
 	_update_distress_icons()
 	_update_sim_stats()
+	_refresh_slice_indicator()
 	_projects_refresh_accum += delta
 	if _projects_refresh_accum >= PROJECTS_REFRESH_INTERVAL:
 		_projects_refresh_accum = 0.0
@@ -172,12 +196,13 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 ## Wires injected systems. Called once by GameWorld after HUD enters the tree.
-func setup(building_system: Node, camera_input: Node, villager_ai: Node, needs_mood: Node, build_validation: Node) -> void:
+func setup(building_system: Node, camera_input: Node, villager_ai: Node, needs_mood: Node, build_validation: Node, voxel_world: Node = null) -> void:
 	_building_system = building_system
 	_camera_input = camera_input
 	_villager_ai = villager_ai
 	_needs_mood = needs_mood
 	_build_validation = build_validation
+	_voxel_world = voxel_world
 
 	_current_tool = building_system.get_active_tool()
 	_refresh_toolbar_highlight()
@@ -602,16 +627,18 @@ func _refresh_context_panel() -> void:
 	for child in _context_content.get_children():
 		child.queue_free()
 
-	if _current_tool == TOOL_NONE:
+	# TOOL_ROOF_AUTO/TOOL_HOUSE need no material/height context -- click-only
+	# tools (Dach reuses whatever's already built; Haus is a fixed stamp).
+	if _current_tool == TOOL_NONE or _current_tool == TOOL_ROOF_AUTO or _current_tool == TOOL_HOUSE:
 		_context_panel.visible = false
 		return
 
 	_context_panel.visible = true
 
 	match _current_tool:
-		TOOL_WALL, TOOL_FLOOR, TOOL_ROOF, TOOL_BLOCK:
+		TOOL_WALL, TOOL_FLOOR, TOOL_ROOF, TOOL_BLOCK, TOOL_ROOM:
 			_build_material_palette(ResourceItemDatabase.list_by_category("building_material"))
-			if _current_tool == TOOL_WALL:
+			if _current_tool == TOOL_WALL or _current_tool == TOOL_ROOM:
 				_build_height_stepper()
 			if _current_tool == TOOL_ROOF:
 				_build_formation_picker()
@@ -787,6 +814,34 @@ func _build_time_controls() -> void:
 		row.add_child(btn)
 		_speed_buttons[warp] = btn
 
+	var slice_row := HBoxContainer.new()
+	slice_row.add_theme_constant_override("separation", 6)
+	column.add_child(slice_row)
+
+	_slice_minus_btn = Button.new()
+	_slice_minus_btn.text = "▼"
+	_slice_minus_btn.tooltip_text = "Ebene tiefer (PageDown)"
+	_slice_minus_btn.custom_minimum_size = Vector2(32.0, 28.0)
+	_apply_flat_button_style(_slice_minus_btn)
+	_slice_minus_btn.pressed.connect(_on_slice_button_pressed.bind(-1))
+	slice_row.add_child(_slice_minus_btn)
+
+	_slice_label = Label.new()
+	_slice_label.add_theme_font_size_override("font_size", 13)
+	_slice_label.add_theme_color_override("font_color", COLOR_TEXT)
+	_slice_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_slice_label.custom_minimum_size = Vector2(64.0, 0.0)
+	_slice_label.visible = false
+	slice_row.add_child(_slice_label)
+
+	_slice_plus_btn = Button.new()
+	_slice_plus_btn.text = "▲"
+	_slice_plus_btn.tooltip_text = "Ebene hoeher (PageUp)"
+	_slice_plus_btn.custom_minimum_size = Vector2(32.0, 28.0)
+	_apply_flat_button_style(_slice_plus_btn)
+	_slice_plus_btn.pressed.connect(_on_slice_button_pressed.bind(1))
+	slice_row.add_child(_slice_plus_btn)
+
 	_pause_dim = ColorRect.new()
 	_pause_dim.name = "PauseDim"
 	_pause_dim.color = Color(0.0, 0.0, 0.0, 0.15)
@@ -806,6 +861,29 @@ func _on_pause_button_pressed() -> void:
 
 func _on_speed_button_pressed(warp: int) -> void:
 	TimeTickSystem.set_warp(warp)
+
+
+## SLICE VIEW (2026-07-22): the two HUD buttons call voxel_world.set_slice_level()
+## directly (same single source of truth PageUp/PageDown use via GameWorld) --
+## VillagerAI stays in sync via voxel_world's own slice_level_changed signal,
+## no extra plumbing needed here.
+func _on_slice_button_pressed(delta: int) -> void:
+	if _voxel_world == null:
+		return
+	_voxel_world.set_slice_level(_voxel_world.get_slice_level() + delta)
+
+
+func _refresh_slice_indicator() -> void:
+	if _voxel_world == null or _slice_label == null:
+		return
+	var level: int = _voxel_world.get_slice_level()
+	if level == _last_slice_level_shown:
+		return
+	_last_slice_level_shown = level
+	var active: bool = _voxel_world.is_slice_active()
+	_slice_label.visible = active
+	if active:
+		_slice_label.text = "Ebene: %d" % level
 
 
 func _on_time_state_changed(paused: bool, warp: int) -> void:

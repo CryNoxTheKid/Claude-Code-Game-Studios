@@ -28,16 +28,19 @@ const TARGET_Y: float = 10.0
 
 const NAMED_ACTIONS: Array[String] = [
 	"tool_select_1", "tool_select_2", "tool_select_3", "tool_select_4", "tool_select_5",
+	"tool_select_6", "tool_select_7", "tool_select_8",
 	"build_cancel", "undo", "redo",
 	"height_step_up", "height_step_down",
 	"palette_next", "palette_prev",
 	"formation_next", "formation_prev",
 	"time_pause", "time_speed_up", "time_speed_down",
+	"slice_up", "slice_down", "slice_reset",
 ]
 
-signal action_fired(action_name: String)  # tool_select_1..5, build_cancel, undo, redo,
+signal action_fired(action_name: String)  # tool_select_1..8, build_cancel, undo, redo,
 											# height_step_up/down, palette_next/prev,
-											# formation_next/prev, time_pause, time_speed_up/down
+											# formation_next/prev, time_pause, time_speed_up/down,
+											# slice_up/slice_down/slice_reset (BUILD UX PACKAGE, 2026-07-22)
 signal build_click(pressed: bool)         # LMB press/release IN WORLD — _unhandled_input only
 
 var remove_modifier_held: bool = false
@@ -132,7 +135,7 @@ func get_camera() -> Camera3D:
 
 
 func _register_actions() -> void:
-	var tool_keys: Array[Key] = [KEY_1, KEY_2, KEY_3, KEY_4, KEY_5]
+	var tool_keys: Array[Key] = [KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7, KEY_8]
 	for i in range(tool_keys.size()):
 		_add_key_action("tool_select_%d" % (i + 1), tool_keys[i])
 	_add_key_action("build_cancel", KEY_ESCAPE)
@@ -149,6 +152,10 @@ func _register_actions() -> void:
 	_add_key_action("time_speed_up", KEY_KP_ADD)
 	_add_key_action("time_speed_down", KEY_MINUS)
 	_add_key_action("time_speed_down", KEY_KP_SUBTRACT)
+	# BUILD UX PACKAGE (2026-07-22) — SLICE VIEW keys.
+	_add_key_action("slice_up", KEY_PAGEUP)
+	_add_key_action("slice_down", KEY_PAGEDOWN)
+	_add_key_action("slice_reset", KEY_HOME)
 
 
 func _add_key_action(action_name: String, physical_keycode: Key, require_ctrl: bool = false) -> void:
