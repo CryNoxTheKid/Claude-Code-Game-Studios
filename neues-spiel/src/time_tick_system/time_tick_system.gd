@@ -20,12 +20,23 @@
 ## GDD AC9/AC23 require. [method set_warp] already documented (tick-003) that
 ## it never touches the accumulator (TR-time-tick-system-046); that joint
 ## guarantee is now assertable and covered by this story's test, since the
-## accumulator field finally exists. The max-ticks-per-frame safety cap (GDD
-## Formulas, `max_ticks_per_frame`) is explicitly OUT OF SCOPE here -- story
-## tick-005 -- so [method _advance_ticks]'s drain loop is intentionally
-## uncapped: a stall producing a large backlog fires every due tick in the
-## same frame until tick-005's successor lands the cap.
+## accumulator field finally exists. At the time tick-004 landed, the
+## max-ticks-per-frame safety cap (GDD Formulas, `max_ticks_per_frame`) was
+## explicitly OUT OF SCOPE -- story tick-005 -- so [method _advance_ticks]'s
+## drain loop was intentionally uncapped: a stall producing a large backlog
+## fired every due tick in the same frame.
 ##
+## This story (tick-005) lands that cap (GDD Formulas "Max-Ticks-Per-Frame
+## Safety Cap", TR-time-tick-system-035/036/037). [method _advance_ticks] now
+## computes `raw_ticks = floor(_tick_accumulator / _tick_interval)` and fires
+## only `min(raw_ticks, config.max_ticks_per_frame)` ticks; when `raw_ticks`
+## exceeds the cap, the excess accumulated time is DISCARDED, not deferred --
+## [member _tick_accumulator] resets to `0.0` after the capped ticks fire, so
+## a stall never produces a catch-up cascade on a later frame. Below the cap,
+## behavior is bit-for-bit unchanged from tick-004: the same per-tick
+## subtraction drain, same drift-free residue carry-forward (GDD AC23).
+##
+
 ## Registered as one of the project's only two genuinely-global Foundation
 ## Autoloads alongside ResourceItemDatabase (ADR-0001) -- called by its
 ## global singleton name directly in method bodies everywhere
@@ -75,6 +86,14 @@ signal time_state_changed(paused: bool, time_warp: int)
 ## because [member _game_delta] is `0.0` that frame, so the accumulator never
 ## advances far enough to cross [method get_tick_interval] -- no special-case
 ## branch needed.
+##
+## Consumer caveat (TR-time-tick-system-036, story tick-005): [method
+## _advance_ticks]'s max-ticks-per-frame cap can DISCARD accumulated time
+## after a large stall (TR-time-tick-system-035), so "exactly N ticks per
+## game-time interval" invariants hold only barring a discard event. Any
+## downstream duration math must derive elapsed simulated time from tick
+## COUNTS this signal actually delivered, never from wall-clock or
+## game-clock arithmetic that assumes no tick was ever lost.
 signal tick()
 
 ## Tuning-config dependency (ADR-0002). Production leaves this null and
@@ -249,25 +268,38 @@ func get_game_delta() -> float:
 
 
 ## Advances [member _tick_accumulator] by [param game_delta] and fires
-## [signal tick] once per [method get_tick_interval] crossed, draining the
-## accumulator via SUBTRACTION only (GDD Formulas, TR-time-tick-system-032):
-## `tick_accumulator += game_delta; while tick_accumulator >= tick_interval:
-## fire tick(); tick_accumulator -= tick_interval`. The loop (not a single
-## `if`) is what lets one large-but-clamped frame (e.g. a big banked residue
-## plus a high-time-warp frame) fire more than one due tick in a single call
-## without ever discarding banked time. Called every physics frame from
-## [method _physics_process] (TR-time-tick-system-033) with that frame's
-## already-computed [member _game_delta] -- when [member paused] is `true`,
-## [param game_delta] is `0.0` and the loop condition never trips, so no tick
-## fires (TR-time-tick-system-029) with no special-case branch needed.
-## Deliberately UNCAPPED -- the `max_ticks_per_frame` safety cap (GDD
-## Formulas) is story tick-005's scope, not this one's; a large backlog
-## fires every due tick in a single call here.
+## [signal tick] up to [member TimeTickConfig.max_ticks_per_frame] times --
+## the max-ticks-per-frame safety cap (GDD Formulas "Max-Ticks-Per-Frame
+## Safety Cap", TR-time-tick-system-035/037, story tick-005): `raw_ticks =
+## floor(tick_accumulator / tick_interval); ticks_to_fire = min(raw_ticks,
+## max_ticks_per_frame)`. Below the cap (`raw_ticks <= max_ticks_per_frame`),
+## this is bit-for-bit the tick-004 drain: SUBTRACTION only, one
+## [method get_tick_interval] at a time, so sub-tick residue always carries
+## forward -- drift-free (GDD AC23). At or above the cap, only the capped
+## count of ticks fires and [member _tick_accumulator] is reset to `0.0` --
+## the excess accumulated time (both the whole extra ticks' worth AND any
+## sub-tick residue) is DISCARDED, not deferred (TR-time-tick-system-035): a
+## stall never produces a catch-up cascade on a later frame
+## (TR-time-tick-system-037). Repeatedly hitting the cap across consecutive
+## frames gets no special handling here by design -- it is only a
+## performance SIGNAL that the simulation is too slow for the current
+## warp/tick rate, meant to be fixed via profiling, not corrected by this
+## system. Called every physics frame from [method _physics_process]
+## (TR-time-tick-system-033) with that frame's already-computed
+## [member _game_delta] -- when [member paused] is `true`, [param game_delta]
+## is `0.0`, so `raw_ticks` is `0`, no tick fires, and no discard happens
+## either (TR-time-tick-system-029).
 func _advance_ticks(game_delta: float) -> void:
 	_tick_accumulator += game_delta
-	while _tick_accumulator >= _tick_interval:
+	var raw_ticks: int = int(floor(_tick_accumulator / _tick_interval))
+	var ticks_to_fire: int = mini(raw_ticks, config.max_ticks_per_frame)
+	var fired: int = 0
+	while fired < ticks_to_fire:
 		tick.emit()
 		_tick_accumulator -= _tick_interval
+		fired += 1
+	if raw_ticks > config.max_ticks_per_frame:
+		_tick_accumulator = 0.0
 
 
 ## Public query surface for [member _tick_interval] (GDD Formulas:

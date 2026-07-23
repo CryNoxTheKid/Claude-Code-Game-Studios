@@ -1,7 +1,7 @@
 # Story 005: Max-ticks-per-frame safety cap
 
 > **Epic**: Time & Tick System
-> **Status**: Ready
+> **Status: Complete (2026-07-24 — 311/311 suite green, parent-verified)
 > **Layer**: Foundation
 > **Type**: Logic
 > **Estimate**: 0.5 day

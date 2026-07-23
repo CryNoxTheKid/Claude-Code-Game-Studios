@@ -95,7 +95,7 @@ stories:
     name: "Max-ticks-per-frame safety cap"
     file: "production/epics/time-tick-system/story-005-max-ticks-per-frame-cap.md"
     priority: should-have
-    status: backlog
+    status: complete
     owner: "godot-gdscript-specialist"
     estimate_days: 0.5
     blocker: "depends on tick-004 (in-sprint)"
