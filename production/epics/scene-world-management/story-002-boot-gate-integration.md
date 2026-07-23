@@ -1,7 +1,7 @@
 # Story 002: Boot-gate integration — Valley attaches only after RID Ready; DB-failure → terminal HALT
 
 > **Epic**: Scene/World Management
-> **Status**: Ready
+> **Status: Complete (2026-07-23 — 198/198 suite green, parent-verified)
 > **Layer**: Foundation
 > **Type**: Integration
 > **Estimate**: 1 day

@@ -48,13 +48,22 @@
 ## [TR-scene-world-management-035]. [member valley_scene] / [method
 ## _attach_valley] add this story's scene-TOPOLOGY behavior on the SAME node
 ## the Foundation Spine's boot gate already lives on -- a separate concern
-## from the gate, called unconditionally in [method _ready] (gating the
-## attach behind RID Ready is story 002's job, not this one). Scene handoff
-## uses ONLY [method Node.add_child] -- never [code]change_scene_to_file[/code]/
-## [code]change_scene_to_packed[/code]/[code]reload_current_scene[/code], and
-## [member SceneTree.current_scene] is never assigned directly
-## [TR-scene-world-management-037] -- this World Root node itself is never
-## freed [TR-scene-world-management-038].
+## from the gate. Scene handoff uses ONLY [method Node.add_child] -- never
+## [code]change_scene_to_file[/code]/[code]change_scene_to_packed[/code]/
+## [code]reload_current_scene[/code], and [member SceneTree.current_scene] is
+## never assigned directly [TR-scene-world-management-037] -- this World Root
+## node itself is never freed [TR-scene-world-management-038].
+##
+## Scene/World Management Story 002 scope note (ADR-0005 host relationship,
+## AC17a/AC17b): [method _attach_valley] is no longer called unconditionally
+## from [method _ready] -- it is now gated behind the boot gate's SUCCESS
+## path only, invoked from [method _on_database_settled] at the start of
+## WIRING, before the injected-tier [code]setup()[/code] sweep. On a
+## Resource & Item Database `Failed` outcome, the Valley is never attached --
+## no empty-palette Valley [TR-scene-world-management-004]. This is the
+## scene-topology REACTION to the Foundation Spine's gate (story 002 of this
+## epic); it does not re-implement the gate mechanism itself (that remains
+## `foundation-spine` story 002 / [method _on_database_settled]).
 class_name GameWorld
 extends Node3D
 
@@ -113,7 +122,6 @@ var _valley: Node = null
 
 
 func _ready() -> void:
-	_attach_valley()
 	if resource_item_database == null:
 		resource_item_database = get_node_or_null(^"/root/ResourceItemDatabase")
 	assert(
@@ -150,12 +158,17 @@ func get_boot_state() -> BootState:
 ## forbidden, TR-scene-world-management-037) -- this World Root node itself
 ## is never replaced or freed by this call (TR-scene-world-management-038).
 ##
-## Unconditional at this story: called once, always, from [method _ready],
-## regardless of the boot gate's outcome -- gating this behind RID Ready (so
-## a database failure never attaches an empty-palette Valley) is Scene/World
-## Management story 002's job (ADR-0005 host relationship), not this one. A
-## null [member valley_scene] (the existing DI/boot-gate-substrate tests that
-## predate this story) is a no-op, never an error.
+## Gated at story 002 (AC17a/AC17b, ADR-0005 host relationship): called
+## exactly once, from [method _on_database_settled]'s SUCCESS path only, at
+## the start of WIRING -- before the injected-tier [code]setup()[/code] sweep
+## (Implementation Notes: attach the Valley, THEN sweep injected-tier
+## [code]setup()[/code], so Building System / Villager AI initialize only
+## after the Valley exists -- AC17a holds by construction). On a Resource &
+## Item Database `Failed` outcome, [method _on_database_settled] returns
+## before this method is ever called -- no empty-palette Valley is ever
+## attached [TR-scene-world-management-004]. A null [member valley_scene]
+## (the existing DI/boot-gate-substrate tests that predate this story) is a
+## no-op, never an error.
 func _attach_valley() -> void:
 	if valley_scene == null:
 		return
@@ -171,17 +184,21 @@ func get_valley() -> Node:
 
 ## Settles the boot gate on the database dependency's Ready/Failed outcome
 ## (ADR-0005 Decision §3). On failure: HALTED, [signal boot_halted] fires,
-## and NO injected-tier [code]setup()[/code] is ever called -- terminal. On
-## success: WIRING, every injected-tier module's [code]setup()[/code] runs
-## (until/unless one halts on a BLOCKING config invariant -- ADR-0002, see
-## [method _setup_injected_tier]), then ACTIVE -- unless that WIRING pass
-## already settled HALTED, in which case ACTIVE is never reached either.
+## [method _attach_valley] is NEVER called -- no empty-palette Valley
+## (Scene/World Management story 002, AC17b) -- and NO injected-tier
+## [code]setup()[/code] is ever called -- terminal. On success: WIRING, the
+## Valley is attached FIRST (story 002 -- the scene-topology reaction to this
+## gate), THEN every injected-tier module's [code]setup()[/code] runs (until/
+## unless one halts on a BLOCKING config invariant -- ADR-0002, see [method
+## _setup_injected_tier]), then ACTIVE -- unless that WIRING pass already
+## settled HALTED, in which case ACTIVE is never reached either.
 func _on_database_settled(success: bool, issues: Array) -> void:
 	if not success:
 		_boot_state = BootState.HALTED
 		_show_boot_halt_screen(issues)
 		return
 	_boot_state = BootState.WIRING
+	_attach_valley()
 	_setup_injected_tier()
 	if _boot_state != BootState.HALTED:
 		_boot_state = BootState.ACTIVE

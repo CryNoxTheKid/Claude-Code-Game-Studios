@@ -95,7 +95,7 @@ stories:
     name: "Boot-gate integration — Valley attaches only after RID Ready; DB-fail → HALT"
     file: "production/epics/scene-world-management/story-002-boot-gate-integration.md"
     priority: should-have
-    status: backlog
+    status: complete
     owner: "godot-specialist"
     estimate_days: 1
     blocker: "depends on scene-001 (in-sprint); spine-002 DONE (S1)"
