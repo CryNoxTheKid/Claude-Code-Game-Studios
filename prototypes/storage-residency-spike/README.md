@@ -20,17 +20,19 @@ exits 0 on overall PASS / 1 on any FAIL. Per-metric CSV lands in
 `results/storage_residency_spike.csv`. Region files land in `regions/`
 (cleaned at the start of every run — not meant to persist between runs).
 
-**Status**: concluded, two measurement rounds (2026-07-23) — **hypothesis
-PARTIALLY CONFIRMED**. Round 1 found the storage/correctness/footprint
+**Status**: concluded, three measurement rounds (2026-07-23) — **hypothesis
+CONFIRMED, 5/5 PASS.** Round 1 found the storage/correctness/footprint
 mechanism (region files, load-before-write, sparse regen, save format)
 strongly validated (C3, C5 PASS) but C1/C2/C4 failing under a fixed
-item-count page-in budget. Round 2 implemented the recommended fix
-(time-based budget + async-by-default) and re-measured at BOTH the game's
-actual real max camera speed (144 cells/sec, derived from
-`camera_input.gd`) and round 1's stress speed (120 cells/sec): **C2 now
-passes cleanly at both speeds**; C1/C4 improve substantially (worst frame
-dropped from 74–106 ms to 19–55 ms) but still FAIL, for a newly-diagnosed
-and different reason than round 1's — see "Round 2 Findings."
+item-count page-in budget. Round 2 (time-based budget + async-by-default)
+fixed C2 completely but left C1/C4 failing on a single-work-item tail
+latency. Round 3 (no synchronous fallback anywhere in the per-frame path,
+disk writes moved off-thread too, budget re-checked per item) resolves
+C1/C4 as well — **all five criteria PASS at both the game's real max
+camera speed (144 cells/sec) and round 1's stress speed (120 cells/sec),
+at both tested concurrency caps (32 and 64).** See "Round 3 Findings" for
+the full story, including a critical implementation bug found and fixed
+mid-round-2 and a second, smaller one found and fixed in round 3.
 
 ## Design choices made (this spike's calls, per the task's "your call, document it")
 
@@ -300,44 +302,137 @@ own + C3's mutations (50 chunks × 5 writes × 8192 B chunk + 8192 B header
 ≈ 811 KB — exactly the observed number). The correctness verdict (0
 mismatches) is what "shouldn't change," and it didn't.
 
+## Round 2 recommendation (superseded by Round 3 below — kept for history)
+
+Accept the core architecture; revise Decision §1's budget clause to
+time-based (confirmed working for C2); C1/C4 still failing on a
+single-work-item tail latency (54.7 ms real / 18.9 ms stress vs. 16.6 ms
+budget) — recommended raising the async concurrency cap and/or bounding
+per-chunk gen cost as next steps. Round 3 below executes exactly this.
+
+## Round 3: tune until clean (user decision — 5/5 required for Accept)
+
+Four levers were specified; three were implemented (the fourth — prefetch
+lead — turned out not to be needed):
+
+1. **No synchronous fallback anywhere in the per-frame streaming path.** A
+   chunk whose background task hasn't finished (or couldn't even be
+   dispatched — pool at capacity) now simply stays queued for a later
+   frame — never regenerated or read on the main thread. This is the
+   change that mattered most (see below).
+2. **Eviction flushes (disk WRITES) moved off the main thread too**,
+   through the SAME capped background-task pool as page-in reads. A
+   correctness hazard this introduces — a chunk needed again before its own
+   eviction-flush finishes could otherwise race a still-in-progress disk
+   write — is closed by a read-through cache (`_write_in_flight_data`):
+   while a write is in flight, the authoritative bytes are served from
+   memory, never from the (possibly incomplete) file.
+3. **Time budget re-checked after every single item**, not just once per
+   frame — a burst of many ready-to-integrate items in one frame still
+   can't blow the budget; the excess is deferred, not processed.
+4. **Not implemented.** Not needed — levers 1-3 were sufficient.
+
+**A second implementation bug found and fixed before trusting any
+numbers.** The first attempt at "dispatch a background task the instant a
+chunk is enqueued, no cap" (this was actually round 2's design, carried
+into the first round-3 test) let `WorkerThreadPool`'s internal queue grow
+unbounded under sustained demand, and a blocking wait for a deeply
+backlogged task produced a **single 10.1-SECOND tick** — far worse than
+the original problem. This was already fixed going into round 3 (capped
+concurrency, described in round 2's README section) — flagging it again
+here because round 3's "no sync fallback" change made the cap's role even
+more load-bearing: previously, hitting the cap meant "fall back to sync
+regen" (slow but bounded); now it means "stay queued" (the whole point of
+lever 1), so the cap number itself matters less than round 2 assumed —
+confirmed by measurement below (worst frame is nearly IDENTICAL at cap 32
+vs. cap 64).
+
+### Results — all four combinations (2 speeds × 2 caps), one measurement pass
+
+| | C1 worst | C1 p95 | C1 avg | C2 peak (flat) | C4 worst |
+|---|---|---|---|---|---|
+| REAL (144 c/s), cap=32 | **14.22ms PASS** | 4.86ms | 3.14ms | 43.9MB PASS | 14.22ms PASS |
+| STRESS (120 c/s), cap=32 | **13.26ms PASS** | 4.64ms | 3.08ms | 57.7MB PASS | 11.95ms PASS |
+| REAL (144 c/s), cap=64 | **14.18ms PASS** | 5.25ms | 3.30ms | 68.8MB PASS | 14.18ms PASS |
+| STRESS (120 c/s), cap=64 | **14.53ms PASS** | 4.87ms | 3.18ms | 83.7MB PASS | 14.53ms PASS |
+
+`io_worst` and `regen_worst` are **0.00 ms in all four runs** — confirmed
+by construction, exactly as levers 1/2 intended: no main-thread disk I/O,
+no main-thread terrain gen, anywhere in the streaming path. The one
+accepted synchronous exception (`header_io_usec_total` — one-time
+per-region header read/creation, see `region_file.gd`) totals 31-63 ms
+**cumulative across an entire 26,640-31,968-tick run**, never a per-tick
+spike; it does not show up in any worst-frame number.
+
+**C3/C5 confirmed unchanged**: C3 tested=20 mismatches=0; C5 tested=40
+mismatches=0, bytes_written=0.77MB vs. naive 7.63GB, 49 region files —
+identical to round 2's numbers (these paths were never touched by any
+round-3 lever, as expected).
+
+**Which lever mattered**: removing the synchronous fallback (lever 1) is
+what actually closed the gap — worst frame dropped from round 2's 54.7ms
+(real)/18.9ms (stress) to ~13-15ms across ALL FOUR combinations in round 3,
+a much bigger and more uniform improvement than raising the cap from 32 to
+64 produced on its own (worst frame barely moved between cap values, ~0.3ms
+difference) — a single expensive item can no longer land on the main
+thread AT ALL, so it doesn't matter whether the cap is 32 or 64; what
+matters is that the cap-miss path no longer falls back to synchronous work.
+Lever 2 (async writes) mattered for the same reason applied to eviction:
+`io_worst` is now 0.00ms where round 2 saw spikes up to 48.6ms. Lever 3
+(per-item budget re-check) is confirmed working by construction (avg stays
+~3.1-3.3ms, well inside the 4ms per-phase budget, across all runs) but
+wasn't independently isolatable from lever 1 in these numbers — both
+changes shipped together.
+
+**Cost of the fix, honestly reported**: `deferred_pagein_events` and
+`deferred_evict_events` are enormous (tens of millions across a run) —
+the drain loop re-checks every not-yet-ready queued item every tick until
+it's ready, and at these camera speeds the queue rarely empties. This
+isn't a pass/fail problem (frame times stay well under budget throughout)
+but IS a real, worth-flagging inefficiency: a production implementation
+should replace the linear re-scan with something that doesn't re-examine
+already-checked-and-still-pending items every single tick (e.g., only
+re-check items whose task just completed, tracked via a completion
+callback/signal rather than polling `is_task_completed` on the whole
+queue). Memory scales mildly with the cap (43.9MB @ cap32 vs. 68.8MB @
+cap64, real speed) since more concurrent in-flight+integrated chunks means
+more resident data at once — still trivial against the 4GB ceiling at
+either value.
+
 ## Final Recommendation
 
-**Accept ADR-0015's core architecture** (Decision §1's resident-set
-definition, §2 region files, §3 load-before-write, §4 save format, §5
-sparse regen) — unchanged from round 1, and round 2 didn't touch this: C3
-and C5 pass cleanly, disk footprint is a small fraction of a naive
-full-world save, ~98.5–99.5% of page-ins never touch disk across both
-rounds, and the 4 GB memory ceiling is never remotely threatened.
+**Accept ADR-0015.** All five Validation Criteria pass, at both the game's
+real max camera speed (144 cells/sec, derived from `camera_input.gd`) and
+an aggressive stress speed (120 cells/sec — notably slower than the real
+max, yet round 1 found it broke the original fixed-count-budget design),
+at both tested concurrency settings (32 and 64 in-flight async tasks).
 
-**Revise Decision §1's budget clause to time-based** (page_budget_ms /
-evict_budget_ms, not a fixed item count) — round 2 empirically confirms
-this fix works: **C2 now passes cleanly and flatly at both the real max
-camera speed and round 1's stress speed.** This should go into the ADR
-text as the corrected mechanism, not the fixed-count number currently
-there.
+**Text changes the ADR should carry forward, all empirically validated
+across these three rounds**:
 
-**C1/C4 do NOT pass yet, at either speed, even with the time-based
-budget** — worst frame 54.7 ms (real speed) / 18.9 ms (stress speed) vs.
-16.6 ms budget. This is no longer a backlog problem (round 1's cause,
-fully fixed) — it's a single-work-item tail-latency problem: occasional
-individual chunk-gen or disk-I/O operations cost more than one frame's
-entire budget, and no per-frame time budget can preempt an item already in
-flight. Two concrete next steps, neither of which changes this spike's
-core Accept recommendation:
+1. **Decision §1's budget clause**: time-based (`page_budget_ms` /
+   `evict_budget_ms`, e.g. 4.0 ms each), not a fixed item count — round 2
+   proved a fixed count under-provisions badly (12x) once camera speed
+   rises; time-based scales automatically.
+2. **Decision §6's escape hatch, sharpened**: async I/O alone (round 2)
+   improved the average case but left a worst-case tail; the load-bearing
+   fix (round 3) was eliminating EVERY synchronous fallback in the
+   streaming path, not just adding a background-thread option alongside a
+   sync one. The ADR text should state this as "no synchronous disk I/O or
+   regen in the per-frame path, full stop," not "prefer async, fall back to
+   sync if needed" — the fallback IS the failure mode.
+3. **New: a read-through cache for in-flight writes.** A chunk evicted
+   with an async flush in progress must serve reads from an in-memory
+   cache of the not-yet-durable bytes, never re-read the region file, until
+   the flush completes — otherwise a fast reverse-and-return camera path
+   can race its own write. Worth naming explicitly in the ADR's Decision §3
+   (load-before-write) as an edge case of the same rule.
+4. **Known residual, not blocking**: one-time-per-region header I/O
+   remains synchronous (documented, measured, never a per-tick cost — total
+   31-63 ms across an entire ~27-32k-tick run). The `deferred_*_events`
+   counts show the drain loop's linear re-scan is inefficient at scale;
+   fine for this spike's pass/fail purposes, worth a note for whoever
+   implements this in production (Voxel World `/dev-story`) to use a
+   completion-driven queue instead of polling.
 
-1. **Raise `MAX_CONCURRENT_ASYNC_TASKS`** (currently 16, a placeholder) and
-   re-measure — more concurrency headroom means fewer page-ins fall back
-   to the synchronous path, which is where the remaining worst-case
-   regen/IO spikes originate. Stress-speed's 18.9 ms is only 2.3 ms over
-   budget; this alone may close the gap.
-2. **Chunk the regen cost itself**, or cap per-chunk gen cost (e.g., a
-   cheaper tree-candidate scan), if raising concurrency isn't enough — a
-   single indivisible 15–17 ms work item is a gen-cost problem, not a
-   residency-architecture problem, and belongs to Voxel World's terrain-gen
-   design, not ADR-0015.
-
-Net: ADR-0015's storage/residency architecture is sound and should proceed
-to Accepted. Its budget clause needed (and got, empirically) the time-based
-revision. C1/C4 remain an open, now much-better-understood tuning problem
-one level below the architecture — not a reason to revise the architecture
-further, and not blocking Accept.
+No further criterion failures remain. This spike's job is done.

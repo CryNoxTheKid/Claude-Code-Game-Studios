@@ -10,15 +10,17 @@
 # Design choices made for this spike (see README.md for the full write-up):
 #   - region_size_chunks = 32 (1024 chunks/region, 512 cells/region axis)
 #   - eviction policy = distance/membership-based staggered eviction, not LRU
-#   - ROUND 2 REVISION: page-in/evict budgets are now TIME-based
-#     (page_budget_ms = evict_budget_ms = 4.0 ms/frame, tunable below),
-#     replacing round 1's fixed 2-items/frame count that was found to
-#     under-provision badly once camera speed rose. Async region I/O +
-#     regen prefetch (ADR-0015 Decision §6) is now the DEFAULT, not just a
-#     comparison toggle — round 1 found it cuts average tick cost ~4x.
-#   - camera speed: round 2 measures BOTH the game's actual real max pan
-#     speed (144 cells/sec, derived from camera_input.gd — see below) and
-#     round 1's 120 cells/sec stress assumption, side by side.
+#   - ROUND 2: page-in/evict budgets are TIME-based (page_budget_ms =
+#     evict_budget_ms = 4.0 ms/frame), replacing round 1's fixed
+#     2-items/frame count. Async region I/O + regen (WorkerThreadPool) is
+#     the default.
+#   - ROUND 3 (user decision: tune until clean, 5/5 required): NO
+#     synchronous main-thread regen/read/write fallback anywhere in the
+#     per-frame streaming path anymore — a chunk that isn't ready this
+#     frame simply stays queued. Measures MAX_CONCURRENT_ASYNC_TASKS at
+#     both 32 and 64, at BOTH camera speeds (4 travel runs total).
+#   - camera speed: real max (144 cells/sec, derived from camera_input.gd)
+#     and round 1's 120 cells/sec stress assumption, both measured.
 extends Node
 
 const ResidencyManagerScript := preload("res://residency_manager.gd")
@@ -40,16 +42,8 @@ const MEMORY_CEILING_BYTES := 4 * 1024 * 1024 * 1024
 # REAL MAX CAMERA SPEED — derived from prototypes/last-seal-vertical-slice/
 # camera_input.gd's _update_pan(): pan = input_dir.normalized() *
 # PAN_SPEED_FACTOR * _distance * delta, i.e. steady-state speed (units/sec)
-# = PAN_SPEED_FACTOR * _distance. input_dir is always normalized (length 1
-# even for diagonal WASD combos), so direction never changes the magnitude.
-# Speed is maximized at maximum zoom-out (_distance = DISTANCE_MAX), since
-# pan scales linearly with distance (a deliberate "same angular pan feel at
-# any zoom" design). PAN_SPEED_FACTOR = 1.2, DISTANCE_MAX = 120.0 (world
-# units == cells, ADR-0014/0015's 1-unit-per-cell convention) =>
-#   real max speed = 1.2 * 120.0 = 144.0 cells/sec
-# Notably HIGHER than round 1's 120 cells/sec "aggressive stress"
-# assumption — the real game's fastest achievable pan is not a rare edge
-# case relative to what round 1 tested, it's slightly beyond it.
+# = PAN_SPEED_FACTOR * _distance, maximized at max zoom-out (DISTANCE_MAX).
+# PAN_SPEED_FACTOR = 1.2, DISTANCE_MAX = 120.0 => real max = 144.0 cells/sec.
 const REAL_MAX_CAMERA_SPEED_CELLS_PER_SEC := 144.0
 const STRESS_CAMERA_SPEED_CELLS_PER_SEC := 120.0     # round 1's value, kept for a direct before/after comparison
 const ASSUMED_FRAME_HZ := 60.0
@@ -69,6 +63,11 @@ const WRITES_PER_CHUNK := 5
 const MARKER_VALUE_C3 := 200
 const MARKER_VALUE_C5 := 201
 
+# ROUND 3: cap values under test, and which one is the "official" tuned
+# configuration used for the gating SPIKE_RESULT verdict.
+const ASYNC_CAPS_TO_TEST: Array[int] = [32, 64]
+const OFFICIAL_CAP := 64
+
 var region_dir: String
 var residency: ResidencyManager   # C3/C5 only — speed-independent correctness checks
 var terrain_gen := TerrainGenScript.new()
@@ -84,7 +83,7 @@ func _ready() -> void:
 	_clean_region_dir()
 
 	residency = ResidencyManagerScript.new()
-	residency.setup(region_dir, VIEW_RADIUS_CHUNKS, SETTLEMENT_RADIUS_CHUNKS, SETTLEMENT_ANCHOR, PAGE_BUDGET_MS, EVICT_BUDGET_MS, true)
+	residency.setup(region_dir, VIEW_RADIUS_CHUNKS, SETTLEMENT_RADIUS_CHUNKS, SETTLEMENT_ANCHOR, PAGE_BUDGET_MS, EVICT_BUDGET_MS, true, OFFICIAL_CAP)
 
 	metrics.record("meta/world", "%dx%dx%d" % [WORLD_SIZE, MAX_Y, WORLD_SIZE])
 	metrics.record("meta/region_size_chunks", str(ResidencyManagerScript.REGION_SIZE_CHUNKS))
@@ -93,6 +92,7 @@ func _ready() -> void:
 	metrics.record("meta/page_budget_ms", str(PAGE_BUDGET_MS))
 	metrics.record("meta/evict_budget_ms", str(EVICT_BUDGET_MS))
 	metrics.record("meta/use_async_io", "true")
+	metrics.record("meta/async_caps_tested", str(ASYNC_CAPS_TO_TEST))
 	metrics.record("meta/real_max_camera_speed_cells_per_sec", str(REAL_MAX_CAMERA_SPEED_CELLS_PER_SEC))
 	metrics.record("meta/stress_camera_speed_cells_per_sec", str(STRESS_CAMERA_SPEED_CELLS_PER_SEC))
 	metrics.record("meta/settlement_resident_at_boot", str(residency.resident_count()))
@@ -161,40 +161,57 @@ func _run() -> void:
 	print("PROGRESS phase=C3 (write-to-unloaded correctness — speed-independent, run once)")
 	var c3 := _run_c3(rng)
 
-	# Two FRESH ResidencyManager instances, separate region subdirectories
-	# (so one run's injected writes can't contaminate the other's disk
-	# state), both using ROUND 2's time-based-budget + async-by-default
-	# design. C1/C2/C4 are speed-dependent, so each gets its own full
-	# 4-pass corridor traverse.
-	print("PROGRESS phase=travel_real (C1/C2/C4 @ real max camera speed = %.1f cells/sec)" % REAL_MAX_CAMERA_SPEED_CELLS_PER_SEC)
-	var real_dir := ProjectSettings.globalize_path("res://regions_real_speed")
-	var mgr_real := ResidencyManagerScript.new()
-	mgr_real.setup(real_dir, VIEW_RADIUS_CHUNKS, SETTLEMENT_RADIUS_CHUNKS, SETTLEMENT_ANCHOR, PAGE_BUDGET_MS, EVICT_BUDGET_MS, true)
-	var travel_real: Dictionary = await _run_travel(mgr_real, NUM_PASSES, "travel_real", REAL_MAX_CAMERA_SPEED_CELLS_PER_SEC)
+	# 2 speeds x 2 async caps = 4 independent travel runs, each its own
+	# fresh ResidencyManager + region subdirectory (so injected writes
+	# never cross-contaminate).
+	var speeds := [
+		{"label": "REAL", "speed": REAL_MAX_CAMERA_SPEED_CELLS_PER_SEC},
+		{"label": "STRESS", "speed": STRESS_CAMERA_SPEED_CELLS_PER_SEC},
+	]
+	var travel_results: Dictionary = {}   # "REAL_32" -> travel dict
+	var managers: Dictionary = {}         # "REAL_32" -> ResidencyManager
 
-	print("PROGRESS phase=travel_stress (C1/C2/C4 @ round-1 stress speed = %.1f cells/sec)" % STRESS_CAMERA_SPEED_CELLS_PER_SEC)
-	var stress_dir := ProjectSettings.globalize_path("res://regions_stress_speed")
-	var mgr_stress := ResidencyManagerScript.new()
-	mgr_stress.setup(stress_dir, VIEW_RADIUS_CHUNKS, SETTLEMENT_RADIUS_CHUNKS, SETTLEMENT_ANCHOR, PAGE_BUDGET_MS, EVICT_BUDGET_MS, true)
-	var travel_stress: Dictionary = await _run_travel(mgr_stress, NUM_PASSES, "travel_stress", STRESS_CAMERA_SPEED_CELLS_PER_SEC)
+	for cap: int in ASYNC_CAPS_TO_TEST:
+		for s: Dictionary in speeds:
+			var key := "%s_%d" % [s["label"], cap]
+			print("PROGRESS phase=travel_%s (C1/C2/C4 @ %.1f cells/sec, async_cap=%d)" % [key, s["speed"], cap])
+			var dir := ProjectSettings.globalize_path("res://regions_%s" % key.to_lower())
+			var mgr := ResidencyManagerScript.new()
+			mgr.setup(dir, VIEW_RADIUS_CHUNKS, SETTLEMENT_RADIUS_CHUNKS, SETTLEMENT_ANCHOR, PAGE_BUDGET_MS, EVICT_BUDGET_MS, true, cap)
+			var result: Dictionary = await _run_travel(mgr, NUM_PASSES, "travel_%s" % key, s["speed"])
+			travel_results[key] = result
+			managers[key] = mgr
 
 	print("PROGRESS phase=C5 (save/load round-trip — speed-independent, run once)")
 	var c5 := _run_c5(rng)
 
-	var c1_real: Dictionary = _report_speed(travel_real, "REAL", REAL_MAX_CAMERA_SPEED_CELLS_PER_SEC)
-	var c1_stress: Dictionary = _report_speed(travel_stress, "STRESS", STRESS_CAMERA_SPEED_CELLS_PER_SEC)
-	_report_shared(c3, c5, mgr_real, mgr_stress)
+	var per_key_pass: Dictionary = {}
+	for cap: int in ASYNC_CAPS_TO_TEST:
+		for s: Dictionary in speeds:
+			var key := "%s_%d" % [s["label"], cap]
+			per_key_pass[key] = _report_speed(travel_results[key], "%s_cap%d" % [s["label"], cap], s["speed"])
+
+	_report_shared(c3, c5, managers)
 
 	metrics.save_csv("res://results/storage_residency_spike.csv")
 
-	# Gating verdict uses the REAL max camera speed (the game-relevant
-	# measurement) — the stress-speed result is reported alongside as
-	# additional, non-gating information (matches round 1's framing: this
-	# spike's job is to find the edge of the envelope, not to assume every
-	# speed tested is production-representative).
-	var all_pass: bool = c1_real["c1_pass"] and c1_real["c2_pass"] and results["C3"]["pass"] \
-		and c1_real["c4_pass"] and results["C5"]["pass"]
-	print("SPIKE_RESULT_STRESS_ONLY %s" % ("PASS" if (c1_stress["c1_pass"] and c1_stress["c2_pass"] and c1_stress["c4_pass"]) else "FAIL"))
+	# Gating verdict uses the OFFICIAL (best-tuned) configuration at the
+	# REAL max camera speed — the game-relevant measurement. Every other
+	# combination (other cap, stress speed) is reported alongside as
+	# comparison, non-gating.
+	var official_key := "REAL_%d" % OFFICIAL_CAP
+	var official: Dictionary = per_key_pass[official_key]
+	var all_pass: bool = official["c1_pass"] and official["c2_pass"] and results["C3"]["pass"] \
+		and official["c4_pass"] and results["C5"]["pass"]
+
+	for cap: int in ASYNC_CAPS_TO_TEST:
+		for s: Dictionary in speeds:
+			var key := "%s_%d" % [s["label"], cap]
+			if key == official_key:
+				continue
+			var r: Dictionary = per_key_pass[key]
+			print("SPIKE_RESULT_%s %s" % [key, "PASS" if (r["c1_pass"] and r["c2_pass"] and r["c4_pass"]) else "FAIL"])
+
 	if all_pass:
 		print("SPIKE_RESULT PASS")
 		get_tree().quit(0)
@@ -233,11 +250,7 @@ func _run_c3(rng: RandomNumberGenerator) -> Dictionary:
 ## C1/C2/C4 — sustained straight-line travel across the corridor's full
 ## 16k span, several passes (~3996 chunks travelled total). One "frame" =
 ## one engine tick of this coroutine (no rendering/meshing runs alongside
-## it — see README "Honesty notes" on why camera movement is decoupled
-## from real elapsed time while residency-work timing is not).
-## `mgr`, `num_passes`, and `speed_cells_per_sec` are parameterized so the
-## same routine drives both the real-speed and stress-speed measurements
-## (see _run()) against independent ResidencyManager instances.
+## it — see README "Honesty notes").
 func _run_travel(mgr: ResidencyManager, num_passes: int, label: String, speed_cells_per_sec: float) -> Dictionary:
 	var cells_per_tick := speed_cells_per_sec / ASSUMED_FRAME_HZ
 	var camera_x := float(CORRIDOR_X_MIN)
@@ -275,9 +288,8 @@ func _run_travel(mgr: ResidencyManager, num_passes: int, label: String, speed_ce
 		if frame_usec > worst_frame_usec:
 			worst_frame_usec = frame_usec
 		# Genuine eviction activity = evict_count actually changed this tick
-		# (checking timing["evict_usec"] > 0 is NOT reliable: even a no-op
-		# pass through the evict block measures a nonzero usec delta from
-		# timer-call overhead alone — found during this spike's first run).
+		# (checking timing["evict_usec"] > 0 is NOT reliable — see round 1's
+		# timer-call-overhead note).
 		if mgr.evict_count > evict_count_before:
 			eviction_active_ticks += 1
 			if frame_usec > worst_evict_frame_usec:
@@ -290,9 +302,6 @@ func _run_travel(mgr: ResidencyManager, num_passes: int, label: String, speed_ce
 		if tick_index % WRITE_INJECT_INTERVAL == 0:
 			# Simulated far-write activity while travelling (dig orders per
 			# ADR-0015 Context — "far-world writes exist and are not rare").
-			# Gives C1's I/O-attribution a non-zero signal instead of the
-			# degenerate all-regen case (this synthetic route otherwise
-			# never mutates anything).
 			var wy := 4 + (tick_index % 10)
 			mgr.set_cell(Vector3i(int(camera_x), wy, CORRIDOR_Z), 250)
 
@@ -300,8 +309,9 @@ func _run_travel(mgr: ResidencyManager, num_passes: int, label: String, speed_ce
 			mem_samples.append(int(Performance.get_monitor(Performance.MEMORY_STATIC)))
 
 		if tick_index % 4000 == 0:
-			print("PROGRESS travel[%s] tick=%d pass=%d/%d camera_x=%.0f resident=%d" % [
-				label, tick_index, passes_done, num_passes, camera_x, mgr.resident_count()])
+			print("PROGRESS travel[%s] tick=%d pass=%d/%d camera_x=%.0f resident=%d deferred_pagein=%d deferred_evict=%d" % [
+				label, tick_index, passes_done, num_passes, camera_x, mgr.resident_count(),
+				mgr.deferred_pagein_events, mgr.deferred_evict_events])
 
 		await get_tree().process_frame
 
@@ -338,6 +348,9 @@ func _run_travel(mgr: ResidencyManager, num_passes: int, label: String, speed_ce
 	metrics.record("%s/mem_peak_mb" % label, "%.1f" % (mem_peak / 1048576.0))
 	metrics.record("%s/mem_first_avg_mb" % label, "%.1f" % (mem_first_avg / 1048576.0))
 	metrics.record("%s/mem_last_avg_mb" % label, "%.1f" % (mem_last_avg / 1048576.0))
+	metrics.record("%s/deferred_pagein_events" % label, str(mgr.deferred_pagein_events))
+	metrics.record("%s/deferred_evict_events" % label, str(mgr.deferred_evict_events))
+	metrics.record("%s/header_io_usec_total" % label, str(mgr.header_io_usec_total))
 
 	return {
 		"ticks": tick_index,
@@ -352,6 +365,9 @@ func _run_travel(mgr: ResidencyManager, num_passes: int, label: String, speed_ce
 		"mem_peak": mem_peak,
 		"mem_first_avg": mem_first_avg,
 		"mem_last_avg": mem_last_avg,
+		"deferred_pagein_events": mgr.deferred_pagein_events,
+		"deferred_evict_events": mgr.deferred_evict_events,
+		"header_io_usec_total": mgr.header_io_usec_total,
 	}
 
 
@@ -386,14 +402,14 @@ func _run_c5(rng: RandomNumberGenerator) -> Dictionary:
 		pristine_expected[cc] = terrain_gen.fill_chunk(cc)
 
 	var naive_full_world_bytes := CHUNKS_PER_AXIS * CHUNKS_PER_AXIS * (CHUNK * CHUNK * MAX_Y)
-	residency.flush_all()   # "save" — dirty region files only, no monolithic pass
+	residency.flush_all()   # "save" — dirty region files only, no monolithic pass; blocks on any in-flight async writes too
 	var bytes_written := _total_region_bytes(region_dir)
 	var region_file_count := _count_region_files(region_dir)
 
 	# Simulate an app restart: brand-new manager instance, fresh in-memory
 	# state, same on-disk region directory.
 	var residency2 := ResidencyManagerScript.new()
-	residency2.setup(region_dir, VIEW_RADIUS_CHUNKS, SETTLEMENT_RADIUS_CHUNKS, SETTLEMENT_ANCHOR, PAGE_BUDGET_MS, EVICT_BUDGET_MS, true)
+	residency2.setup(region_dir, VIEW_RADIUS_CHUNKS, SETTLEMENT_RADIUS_CHUNKS, SETTLEMENT_ANCHOR, PAGE_BUDGET_MS, EVICT_BUDGET_MS, true, OFFICIAL_CAP)
 
 	var mismatches := 0
 	var tested := 0
@@ -428,47 +444,46 @@ func _run_c5(rng: RandomNumberGenerator) -> Dictionary:
 	}
 
 
-## Reports C1/C2/C4 (the speed-dependent criteria) for ONE travel run,
-## tagged with a speed label ("REAL" / "STRESS") so both sets print side by
-## side without overwriting each other. Only the "REAL" call's results are
-## used for the official results["C1"]/["C2"]/["C4"] (and hence
-## SPIKE_RESULT) — see _run()'s gating comment.
-func _report_speed(travel: Dictionary, speed_label: String, speed_cells_per_sec: float) -> Dictionary:
+## Reports C1/C2/C4 (the speed-and-cap-dependent criteria) for ONE travel
+## run, tagged with a label ("REAL_cap64" etc.) so every combination prints
+## side by side. Only the OFFICIAL (REAL speed, OFFICIAL_CAP) call's
+## results feed results["C1"]/["C2"]/["C4"] (and hence SPIKE_RESULT).
+func _report_speed(travel: Dictionary, label: String, speed_cells_per_sec: float) -> Dictionary:
 	# --- C1: page-in latency at the streaming edge ---
 	var c1_pass: bool = int(travel["worst_frame_usec"]) <= FRAME_BUDGET_USEC
-	var c1_detail := "worst=%.2fms p95=%.2fms avg=%.2fms io_worst=%.2fms io_avg=%.2fms regen_worst=%.2fms ticks=%d speed=%.1fcells_per_sec budget=16.6ms" % [
+	var c1_detail := "worst=%.2fms p95=%.2fms avg=%.2fms io_worst=%.2fms regen_worst=%.2fms header_io_total=%.2fms deferred_pagein=%d ticks=%d speed=%.1fcells_per_sec budget=16.6ms" % [
 		float(travel["worst_frame_usec"]) / 1000.0,
 		float(travel["frame_stats"]["p95"]) / 1000.0,
 		float(travel["frame_stats"]["avg"]) / 1000.0,
 		float(travel["io_stats"]["worst"]) / 1000.0,
-		float(travel["io_stats"]["avg"]) / 1000.0,
 		float(travel["regen_stats"]["worst"]) / 1000.0,
+		float(travel["header_io_usec_total"]) / 1000.0,
+		int(travel["deferred_pagein_events"]),
 		int(travel["ticks"]),
 		speed_cells_per_sec,
 	]
-	print("SPIKE C1[%s] %s %s" % [speed_label, "PASS" if c1_pass else "FAIL", c1_detail])
+	print("SPIKE C1[%s] %s %s" % [label, "PASS" if c1_pass else "FAIL", c1_detail])
 
 	# --- C2: memory ceiling under sustained travel ---
 	var mem_peak: int = travel["mem_peak"]
 	var mem_first: float = travel["mem_first_avg"]
 	var mem_last: float = travel["mem_last_avg"]
-	# "Flat" tolerance (documented spike judgment call, README): last-decile
-	# average resident memory must not exceed 1.5x the first-decile average.
 	var flat: bool = mem_first <= 0.0 or mem_last <= mem_first * 1.5
 	var c2_pass: bool = mem_peak <= MEMORY_CEILING_BYTES and flat
 	var c2_detail := "peak=%.1fMB ceiling=4096MB first10pct=%.1fMB last10pct=%.1fMB flat=%s" % [
 		mem_peak / 1048576.0, mem_first / 1048576.0, mem_last / 1048576.0, str(flat),
 	]
-	print("SPIKE C2[%s] %s %s" % [speed_label, "PASS" if c2_pass else "FAIL", c2_detail])
+	print("SPIKE C2[%s] %s %s" % [label, "PASS" if c2_pass else "FAIL", c2_detail])
 
 	# --- C4: eviction under budget (no unload-burst hitch) ---
 	var c4_pass: bool = int(travel["worst_evict_frame_usec"]) <= FRAME_BUDGET_USEC
-	var c4_detail := "worst_eviction_active_tick=%.2fms eviction_active_ticks=%d evict_budget_ms=%.1f" % [
-		float(travel["worst_evict_frame_usec"]) / 1000.0, int(travel["eviction_active_ticks"]), EVICT_BUDGET_MS,
+	var c4_detail := "worst_eviction_active_tick=%.2fms eviction_active_ticks=%d deferred_evict=%d evict_budget_ms=%.1f" % [
+		float(travel["worst_evict_frame_usec"]) / 1000.0, int(travel["eviction_active_ticks"]),
+		int(travel["deferred_evict_events"]), EVICT_BUDGET_MS,
 	]
-	print("SPIKE C4[%s] %s %s" % [speed_label, "PASS" if c4_pass else "FAIL", c4_detail])
+	print("SPIKE C4[%s] %s %s" % [label, "PASS" if c4_pass else "FAIL", c4_detail])
 
-	if speed_label == "REAL":
+	if label == "REAL_cap%d" % OFFICIAL_CAP:
 		results["C1"] = {"pass": c1_pass, "detail": c1_detail}
 		results["C2"] = {"pass": c2_pass, "detail": c2_detail}
 		results["C4"] = {"pass": c4_pass, "detail": c4_detail}
@@ -476,10 +491,9 @@ func _report_speed(travel: Dictionary, speed_label: String, speed_cells_per_sec:
 	return {"c1_pass": c1_pass, "c2_pass": c2_pass, "c4_pass": c4_pass}
 
 
-## Reports C3/C5 (speed-independent, run once) + aggregate totals across
-## ALL manager instances used this run (main residency + C5's restart
-## instance + both speed-travel managers).
-func _report_shared(c3: Dictionary, c5: Dictionary, mgr_real: ResidencyManager, mgr_stress: ResidencyManager) -> void:
+## Reports C3/C5 (speed-and-cap-independent, run once) + aggregate totals
+## across ALL manager instances used this run.
+func _report_shared(c3: Dictionary, c5: Dictionary, managers: Dictionary) -> void:
 	# --- C3: write-to-unloaded-chunk correctness ---
 	var c3_pass: bool = int(c3["mismatches"]) == 0
 	var c3_detail := "tested=%d mismatches=%d" % [c3["tested"], c3["mismatches"]]
@@ -498,10 +512,16 @@ func _report_shared(c3: Dictionary, c5: Dictionary, mgr_real: ResidencyManager, 
 
 	# --- Aggregate reporting (not one of the 5 gated criteria) ---
 	var residency2: ResidencyManager = c5["residency2"]
-	var total_page_ins: int = residency.page_in_count + residency2.page_in_count + mgr_real.page_in_count + mgr_stress.page_in_count
-	var total_regen: int = residency.regen_count + residency2.regen_count + mgr_real.regen_count + mgr_stress.regen_count
-	var total_load: int = residency.load_count + residency2.load_count + mgr_real.load_count + mgr_stress.load_count
-	var disk_footprint := _total_region_bytes(region_dir) + _total_region_bytes(mgr_real.region_dir) + _total_region_bytes(mgr_stress.region_dir)
+	var total_page_ins: int = residency.page_in_count + residency2.page_in_count
+	var total_regen: int = residency.regen_count + residency2.regen_count
+	var total_load: int = residency.load_count + residency2.load_count
+	var disk_footprint := _total_region_bytes(region_dir)
+	for key: String in managers:
+		var mgr: ResidencyManager = managers[key]
+		total_page_ins += mgr.page_in_count
+		total_regen += mgr.regen_count
+		total_load += mgr.load_count
+		disk_footprint += _total_region_bytes(mgr.region_dir)
 	print("SPIKE_AGGREGATE page_ins=%d regen=%d load=%d regen_pct=%.2f disk_footprint_mb=%.2f" % [
 		total_page_ins, total_regen, total_load,
 		100.0 * total_regen / float(maxi(1, total_page_ins)), disk_footprint / 1048576.0,

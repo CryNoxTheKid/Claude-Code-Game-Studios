@@ -56,6 +56,39 @@ func offset_of(slot: int) -> int:
 	return _offsets[slot]
 
 
+## ROUND 3 (lever 2 — disk I/O off the main thread): MAIN-THREAD-ONLY
+## bookkeeping that reserves (or returns the existing) byte offset for a
+## slot WITHOUT performing the actual payload write — that happens in a
+## background task afterward (residency_manager.gd's _bg_write). Splitting
+## "reserve the slot" (must be synchronized — two concurrent writers must
+## never allocate the same append offset) from "write the bytes" (safe to
+## do concurrently once each writer has its own offset) is what lets the
+## slow part run off-thread without a race.
+##
+## Exception, documented: if this is the FIRST write ever to this region,
+## the (small, 8192 B) blank header file is created HERE, synchronously —
+## centralizing region-file creation on the main thread is what prevents
+## two background tasks for two different chunks in the same brand-new
+## region from both trying to create the file concurrently (a real
+## corruption risk if left to the background tasks themselves). This is a
+## one-time-per-region cost (at most ~50-100 occurrences across a full
+## spike run), not a per-chunk one, and measured separately — see
+## header_io_usec in residency_manager.gd.
+func reserve_offset_for_write(slot: int) -> int:
+	_ensure_header()
+	if not FileAccess.file_exists(path):
+		var create_f := FileAccess.open(path, FileAccess.WRITE)
+		for i in SLOTS_PER_REGION:
+			create_f.store_64(0)
+		create_f.close()
+	var offset: int = _offsets[slot]
+	if offset == 0:
+		offset = _next_append_offset
+		_offsets[slot] = offset
+		_next_append_offset += CHUNK_BYTES
+	return offset
+
+
 func read_chunk(slot: int) -> PackedByteArray:
 	_ensure_header()
 	var f := FileAccess.open(path, FileAccess.READ)
