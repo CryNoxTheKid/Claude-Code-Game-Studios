@@ -105,6 +105,12 @@ The `100_000` dungeon offset's "50× margin" claim was vs the 2000-cell span; at
 - **ADR-0016 (Build-Project Entity Lifecycle)** — **AUTHORED 2026-07-23, Status Accepted (prototype-validated 2026-07-22/23; commits 32edfbf, 555b4aa, b2259f4).** Persistent draft→released(BUILDING)→paused→done projects + job-based demolition (incl. furniture), 26-neighborhood grouping/merge, change orders, worker attribution, plan-only undo, cell→project reverse-index selection, persistence-until-empty. Governs building-system TR-102..126, building-ui TR-075..088, villager-ai TR-097; serialized via ADR-0012. See `adr-0016-build-project-entity-lifecycle.md`.
 - **ADR-0012 / ADR-0013** — impact notes recorded in-place this batch; no decision change until ADR-0015 lands.
 
+### Spike outcome & finalization (2026-07-23)
+- **ADR-0015 storage/streaming spike → PASS 5/5**, at the game's real max camera speed (144 c/s, derived from `camera_input.gd`) and stress (120 c/s), at async caps 32 and 64 (`prototypes/storage-residency-spike/`, commits afb609c + 799ddbc). Key numbers: worst frame 13–15 ms (budget 16.6); peak memory 44–84 MB flat (ceiling 4 GB); save footprint 0.77 MB vs 7.63 GB naive (~1,600×); 99.5% of page-ins were regens, 0.5% disk. **ADR-0015 → Accepted (spike-validated).** Four validated text refinements applied: (a) time-based budget (`page_budget_ms`/`evict_budget_ms` = 4.0 ms) not fixed count; (b) §6 hardened to "no synchronous disk I/O or terrain-gen in the per-frame path, full stop" — the sync fallback was the failure mode; (c) read-through in-flight-write cache added as an edge case of §3; (d) accepted one-time per-region header-I/O exception + production note to make the drain loop completion-driven.
+- **ADR-0014** — full-world-at-boot clause now **formally superseded** by ADR-0015 (Status/§1 updated; mesher/view-window/streaming unaffected).
+- **ADR-0012 → finalized (Accepted, unchanged contract).** Voxel save format IS ADR-0015's region files (chunked by construction — the Alternative-C escape hatch exercised); per-system serialize contract unchanged; new state (`restore_value`, project entities, telemetry) absorbed structurally.
+- **ADR-0013 → finalized.** Dungeon offset **kept at `100_000`**, justification recomputed from ratio to absolute gap (84,000 units of separation vs the 16k span; ~6.25× ratio). Increasing the offset rejected — float32 ULP scales with magnitude (7.8 mm @ 100k → 62 mm @ 1M), trading imperceptible jitter for perceptible for no real separation gain. `10_000` fallback remains non-viable.
+
 ---
 
 ## Traceability

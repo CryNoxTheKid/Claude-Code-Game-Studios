@@ -3,7 +3,7 @@
 ## Status
 Accepted (2026-07-11 — validated empirically by `prototypes/chunked-mesher/` at full 2000×2000×32 scale before authoring; user/creative-director decision: large world for exploration + distant dungeons. Supersedes ADR-0003.)
 
-**(Slice propagation 2026-07-23)** Remains Accepted at the 2000×2000×32 baseline. Amended in place: CW-winding + backface-culling-enabled mesher requirement (Decision §2), ghost-anchored `extra_solid` picking predicate recorded under §4. The full-world-at-boot storage clause (§1) is under supersession review by pending ADR-0015 (Large-World Storage & Residency) for the 16k target. See `change-impact-2026-07-23-slice-batch.md`.
+**(Slice propagation 2026-07-23)** Remains Accepted at the 2000×2000×32 baseline. Amended in place: CW-winding + backface-culling-enabled mesher requirement (Decision §2), ghost-anchored `extra_solid` picking predicate recorded under §4. The full-world-at-boot storage clause (§1) is **superseded by ADR-0015 (Large-World Storage & Residency, Accepted spike-validated 2026-07-23)** for the 16k target — paged region-file residency replaces full-world allocation; the mesher/view-window/streaming design here is unaffected. See `change-impact-2026-07-23-slice-batch.md`.
 
 ## Date
 2026-07-11
@@ -49,14 +49,16 @@ streamed view window.**
 1. **Storage**: the world is divided into 16×16-column chunks; each chunk's
    cell data lives in a packed array (`PackedByteArray`-class storage,
    ~1–4 B/cell), allocated for the FULL world at boot. **(Slice propagation
-   2026-07-23) The full-world-at-boot allocation clause is under supersession
-   review by pending ADR-0015 (Large-World Storage & Residency).** It is
-   validated and remains Accepted at the 2000×2000×32 baseline (~172 MB); the
-   16,000×16,000×32 production target projects to ~11 GB resident (~3× over the
-   4 GB ceiling) — a storage/residency problem, not a rendering one (draw calls
-   are already decoupled from world size via the streamed view window). ADR-0015
-   will decide paged/on-demand vs sparse vs reduced-footprint residency and
-   supersede ONLY this clause; the mesher, view-window, and streaming design
+   2026-07-23) The full-world-at-boot allocation clause is SUPERSEDED by
+   ADR-0015 (Large-World Storage & Residency, Accepted spike-validated
+   2026-07-23) for the 16k target.** It is validated and remains correct at the
+   2000×2000×32 baseline (~172 MB); the 16,000×16,000×32 production target
+   projects to ~11 GB resident (~3× over the 4 GB ceiling) — a storage/residency
+   problem, not a rendering one (draw calls are already decoupled from world
+   size via the streamed view window). ADR-0015 replaces full-world allocation
+   with **paged/on-demand region-file residency** (camera-near ∪ settlement
+   resident; time-based streaming budget; no synchronous per-frame I/O/gen),
+   superseding ONLY this clause; the mesher, view-window, and streaming design
    below are unaffected. Voxel World's public
    API is unchanged (O(1) `get`/`set` by `Vector3i`, `cell_changed` signal,
    `raycast_cells` DDA) — only the internal representation changes from

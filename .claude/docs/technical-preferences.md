@@ -76,8 +76,8 @@
 - ADR-0011 UI Timer & Expiry Management — **Accepted**
 - ADR-0012 Save/Load Serialization Strategy — **Accepted**
 - ADR-0013 Multi-Scene Concurrency Model — **Accepted**
-- ADR-0014 Chunked Voxel Rendering & Large-World Storage — **Accepted** (prototype-validated; supersedes ADR-0003; amended 2026-07-23 slice propagation — CW winding/culling, ghost-picking predicate; full-world-at-boot clause under ADR-0015 supersession review)
-- ADR-0015 Large-World Storage & Residency (16k target) — **Proposed** (pending storage/streaming spike; paged region-file residency; supersedes ADR-0014's full-world-at-boot clause on Accept)
+- ADR-0014 Chunked Voxel Rendering & Large-World Storage — **Accepted** (prototype-validated; supersedes ADR-0003; amended 2026-07-23 slice propagation — CW winding/culling, ghost-picking predicate; full-world-at-boot clause **superseded by ADR-0015** for the 16k target)
+- ADR-0015 Large-World Storage & Residency (16k target) — **Accepted** (spike-validated 2026-07-23, 5/5 at 144 & 120 c/s, caps 32/64; paged region-file residency, time-based budget, no synchronous per-frame I/O/gen; supersedes ADR-0014's full-world-at-boot clause)
 - ADR-0016 Build-Project Entity Lifecycle — **Accepted** (prototype-validated 2026-07-22/23; persistent draft→released→paused→done projects, plan-only undo, job-based demolition incl. furniture)
 
 Status source of truth: each ADR's `## Status` section in `docs/architecture/`.
