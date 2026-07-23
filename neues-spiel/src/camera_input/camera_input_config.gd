@@ -84,11 +84,11 @@ const MAX_DELTA_TIME_MAX: float = 0.2
 @export var pitch_max: float = 1.5
 
 ## Yaw step per Q/E key press, radians (GDD default: 0.12). Consumed by
-## story cam-003, out of scope here.
+## [CameraInput._apply_qe_rotation] (story cam-003).
 @export var q_e_rotate_step: float = 0.12
 
 ## Yaw/pitch change per pixel of middle-mouse-drag (GDD default: 0.008).
-## Consumed by story cam-003, out of scope here.
+## Consumed by [CameraInput._apply_mouse_drag_rotation] (story cam-003).
 @export var mouse_drag_sensitivity: float = 0.008
 
 ## Pan speed multiplier applied to `delta * distance` (GDD default: 0.7).

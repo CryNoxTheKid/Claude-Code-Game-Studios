@@ -19,10 +19,24 @@
 ## interpreting the action name or branching on input device identity
 ## [TR-camera-input-027] [TR-camera-input-032] [TR-camera-input-039].
 ##
+## Story cam-003 (ADR-0002 primary) additionally owns orbit rotation: Q/E
+## fixed-step yaw ([method _apply_qe_rotation], GDD Core Rule 3
+## [TR-camera-input-023]) and middle-mouse-drag yaw/pitch
+## ([method _apply_mouse_drag_rotation], GDD Core Rule 2
+## [TR-camera-input-022]). Both are purely event-driven -- neither reads the
+## Time & Tick Autoload nor any of its warp/pause-affected accumulator state
+## anywhere -- so the raw-delta contract [TR-camera-input-030] holds
+## structurally rather than by a conditional bypass. Pitch changes always
+## route through the existing
+## [method set_pitch] primitive (story cam-001), inheriting its silent
+## pole-safety clamp [TR-camera-input-040] for free. Never sets
+## `Input.mouse_mode = MOUSE_MODE_CAPTURED` during the drag -- the cursor
+## stays visible and free, per the GDD/manifest.
+##
 ## Out of scope for this class as authored here (later stories extend this
-## same class, not new ones): mouse-drag/Q-E rotation and WASD pan/zoom input
-## handling (stories cam-003/004/005), the mouse world-ray query (story
-## cam-006), and the Active/Suspended state machine (story cam-007).
+## same class, not new ones): mouse-wheel zoom and WASD pan input handling
+## (stories cam-004/005), the mouse world-ray query (story cam-006), and the
+## Active/Suspended state machine (story cam-007).
 class_name CameraInput
 extends Node
 
@@ -200,9 +214,63 @@ func get_target() -> Vector3:
 ## per action name to grep for [TR-camera-input-027]. This method never
 ## reads the input device identity of [param event] anywhere
 ## [TR-camera-input-039].
+##
+## Story cam-003 additionally drives this system's OWN rotation behavior
+## from the same event, via two unconditional call sites appended below the
+## passthrough loop -- [method _apply_qe_rotation] and
+## [method _apply_mouse_drag_rotation]. Neither call line itself branches on
+## [param event]'s identity (the branching lives inside those methods, on
+## this system's own two owned rotation actions / the middle-mouse button --
+## never on the arbitrary [constant OWNED_ACTIONS] list this method's own
+## loop still treats uniformly). [TR-camera-input-027]'s "no branch on
+## action identity" guarantee is about the opaque re-emission of OTHER
+## systems' actions and is unaffected.
 func _unhandled_input(event: InputEvent) -> void:
 	var fired: Array[StringName] = OWNED_ACTIONS.filter(
 		func(action_name: StringName) -> bool: return event.is_action_pressed(action_name)
 	)
 	for action_name: StringName in fired:
 		action_fired.emit(action_name)
+	_apply_qe_rotation(event)
+	_apply_mouse_drag_rotation(event)
+
+
+## Q/E fixed-step yaw rotation (GDD Core Rule 3) [TR-camera-input-023].
+## `camera_rotate_left` (Q) and `camera_rotate_right` (E) are already
+## registered, owned actions (see [constant OWNED_ACTIONS]) -- this reacts to
+## the SAME event the passthrough loop above already inspects, applying this
+## system's own Core-Rule-3 behavior for its own owned actions. Distinct from
+## [TR-camera-input-027]'s "no branch on action identity" guarantee, which
+## governs only the opaque re-emission of OTHER systems' actions (build_place
+## et al.) -- Camera & Input interpreting its OWN rotation actions for its
+## OWN camera state is the GDD's explicitly assigned behavior, not a
+## violation of that passthrough contract. Step size is read from
+## [member config] -- never a hardcoded literal [TR-camera-input-019].
+func _apply_qe_rotation(event: InputEvent) -> void:
+	if event.is_action_pressed(&"camera_rotate_left"):
+		_yaw -= config.q_e_rotate_step
+	elif event.is_action_pressed(&"camera_rotate_right"):
+		_yaw += config.q_e_rotate_step
+
+
+## Middle-mouse-drag rotation (GDD Core Rule 2) [TR-camera-input-022].
+## Horizontal drag changes yaw, vertical drag changes pitch -- both
+## proportional to `config.mouse_drag_sensitivity`, applied per motion
+## event's [member InputEventMouseMotion.relative] pixel delta (never a
+## manually-tracked previous-position diff, and never delta-time-scaled --
+## the GDD's formula is purely per-pixel-of-drag, not per-frame). Pitch
+## changes always route through [method set_pitch], inheriting its pole-
+## safety clamp [TR-camera-input-037] silently, with no error, at either
+## bound [TR-camera-input-040].
+##
+## Gated on `MOUSE_BUTTON_MASK_MIDDLE` in the motion event's own
+## `button_mask` -- a self-describing per-event check, not a separately
+## tracked press/release drag-state field: there is nothing to get "stuck"
+## if a press or release event is ever swallowed elsewhere (e.g. by an HUD
+## Control under ADR-0010's routing), because no state survives between
+## events. Never sets `Input.mouse_mode = MOUSE_MODE_CAPTURED` -- the cursor
+## stays visible and free, per the GDD/manifest.
+func _apply_mouse_drag_rotation(event: InputEvent) -> void:
+	if event is InputEventMouseMotion and event.button_mask & MOUSE_BUTTON_MASK_MIDDLE:
+		_yaw += event.relative.x * config.mouse_drag_sensitivity
+		set_pitch(_pitch + event.relative.y * config.mouse_drag_sensitivity)

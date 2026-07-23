@@ -1,7 +1,7 @@
 # Story 003: Orbit rotation — middle-mouse drag + Q/E, pitch clamp
 
 > **Epic**: Camera & Input
-> **Status**: Ready
+> **Status: Complete (2026-07-23 — 266/266 suite green, parent-verified; windowed feel-check ADVISORY deferred to first rendered world, vox-007)
 > **Layer**: Foundation
 > **Type**: Logic
 > **Estimate**: 1 day
