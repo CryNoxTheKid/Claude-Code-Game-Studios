@@ -1,7 +1,7 @@
 # Story 003: Read-only lookup API (get_by_id + listing queries)
 
 > **Epic**: Resource & Item Database
-> **Status**: Ready
+> **Status: Complete (2026-07-23 — 138/138 suite green, parent-verified)
 > **Layer**: Foundation
 > **Type**: Logic
 > **Estimate**: 1 day

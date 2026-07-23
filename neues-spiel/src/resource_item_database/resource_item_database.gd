@@ -23,14 +23,21 @@
 ## story's scope (no schema invariant exists yet to violate) -- it resolves
 ## Ready with zero definitions until Story 009 authors real MVP data content.
 ##
-## The lookup entry point [method get_by_id] is likewise a minimal
-## placeholder: it establishes ONLY the non-Ready guard contract
-## (TR-resource-item-database-034 -- outside Ready, always an explicit
-## error, never data, never a partial read) using the exact
-## `get_by_id(id) -> ItemDefinition` signature ADR-0006's Key Interfaces
-## section specifies. The full lookup surface (`missing_item` fallback,
-## additional listing queries, etc.) is Story 003/007's job, built on this
-## same guard, without changing this signature.
+## The lookup entry point [method get_by_id] carries Story 002's minimal
+## non-Ready guard contract (TR-resource-item-database-034 -- outside Ready,
+## always an explicit error, never data, never a partial read) using the
+## exact `get_by_id(id) -> ItemDefinition` signature ADR-0006's Key
+## Interfaces section specifies. Story 003 completes the read-only lookup
+## surface on this same guard: [method get_by_id] now logs an unknown id
+## once before returning `null` (GDD Edge Case 2 / AC8), and four listing
+## queries -- [method list_ids_by_category], [method
+## list_ids_by_material_family], [method list_ids_by_tier], [method
+## list_all_ids] -- are added, each returning an empty typed list (never an
+## error) both outside Ready and for a zero-match query (GDD Edge Case 8 /
+## AC12; GDD Core Rule 8 -- no write API is exposed anywhere on this
+## surface). The `missing_item` fallback resolution and its exclusion from
+## these listings remain Story 007's job, layered on this same surface
+## without changing any signature here.
 ##
 ## Deliberately carries NO `class_name` -- Godot 4.7 hard-errors "Class
 ## 'ResourceItemDatabase' hides an autoload singleton" if a script both
@@ -132,20 +139,86 @@ func get_state() -> BootState:
 	return _state
 
 
-## Minimal placeholder lookup (see class doc comment): outside Ready, always
-## returns `null` -- an explicit "no data" result, never a partial read,
-## never a stale/previous value (TR-resource-item-database-034). Inside
-## Ready, wraps the stored [ItemDefinitionResource] in a fresh
-## [ItemDefinition] per call (ADR-0006 -- wraps, never copies), or `null` if
-## [param id] is not present (the `missing_item` fallback is Story 007's
-## job, layered on this same guard without changing this signature).
+## Full lookup implementation (Story 003, ADR-0006 Decision + GDD Core
+## Rule 8): outside Ready, always returns `null` -- an explicit "no data"
+## result, never a partial read, never a stale/previous value
+## (TR-resource-item-database-034). Inside Ready, wraps the stored
+## [ItemDefinitionResource] in a fresh [ItemDefinition] per call (ADR-0006 --
+## wraps, never copies), or logs the unknown id once and returns `null` if
+## [param id] is not present (GDD Edge Case 2 / AC8 -- an explicit not-found
+## result, never a crash; the `missing_item` fallback resolution is Story
+## 007's job, layered on this same guard without changing this signature).
 func get_by_id(id: StringName) -> ItemDefinition:
 	if _state != BootState.READY:
 		return null
 	var source: ItemDefinitionResource = _definitions.get(id)
 	if source == null:
+		push_warning(
+			(
+				"ResourceItemDatabase.get_by_id(): unknown id '%s' queried -- "
+				+ "returning null (GDD Edge Case 2; missing_item fallback is "
+				+ "Story 007's scope)"
+			) % String(id)
+		)
 		return null
 	return ItemDefinition.new(source)
+
+
+## Returns the id of every entry whose [member ItemDefinitionResource.category]
+## equals [param category]. A category with zero authored entries (e.g.
+## `raw_resource` in MVP) returns an empty list -- a valid result, never an
+## error (GDD Edge Case 8 / AC12). Outside Ready, also returns an empty list
+## -- the same non-Ready guard [method get_by_id] applies
+## (TR-resource-item-database-034): a listing query never partially answers.
+func list_ids_by_category(category: StringName) -> Array[StringName]:
+	var ids: Array[StringName] = []
+	if _state != BootState.READY:
+		return ids
+	for id: StringName in _definitions:
+		if _definitions[id].category == category:
+			ids.append(id)
+	return ids
+
+
+## Returns the id of every entry whose [member
+## ItemDefinitionResource.material_family] equals [param material_family] --
+## all and only entries of that family (GDD AC15). Same empty-list-on-zero-
+## matches and non-Ready guard as [method list_ids_by_category].
+func list_ids_by_material_family(material_family: StringName) -> Array[StringName]:
+	var ids: Array[StringName] = []
+	if _state != BootState.READY:
+		return ids
+	for id: StringName in _definitions:
+		if _definitions[id].material_family == material_family:
+			ids.append(id)
+	return ids
+
+
+## Returns the id of every entry whose [member ItemDefinitionResource.tier]
+## equals [param tier] (GDD AC14 -- proves the query logic on a fixture; the
+## tier-0 building-material CONTENT assertion against shipped MVP data is
+## Story 009's scope). Same empty-list-on-zero-matches and non-Ready guard
+## as [method list_ids_by_category].
+func list_ids_by_tier(tier: int) -> Array[StringName]:
+	var ids: Array[StringName] = []
+	if _state != BootState.READY:
+		return ids
+	for id: StringName in _definitions:
+		if _definitions[id].tier == tier:
+			ids.append(id)
+	return ids
+
+
+## Returns every authored entry's id exactly once, in boot-load (sorted
+## filename) order -- no unauthored id ever appears (GDD AC16). Same
+## non-Ready guard as [method list_ids_by_category].
+func list_all_ids() -> Array[StringName]:
+	var ids: Array[StringName] = []
+	if _state != BootState.READY:
+		return ids
+	for id: StringName in _definitions:
+		ids.append(id)
+	return ids
 
 
 ## Scans [member data_dir] for `.tres` files and attempts to load each as an

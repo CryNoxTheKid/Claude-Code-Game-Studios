@@ -41,7 +41,7 @@ stories:
     name: "Read-only lookup API — get_by_id + listing queries"
     file: "production/epics/resource-item-database/story-003-lookup-api.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete-for-dev
     owner: "godot-gdscript-specialist"
     estimate_days: 1
     blocker: ""
