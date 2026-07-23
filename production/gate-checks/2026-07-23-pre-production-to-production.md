@@ -65,3 +65,23 @@
 The failure is not a quality problem: every validation-type artifact passes (slice PROCEED, architecture Accepted end-to-end, art bible signed off). What is missing is exactly the *planning* layer Production runs on (epics, stories, milestone, sprint plan, two menu specs). All five blockers are well-defined, slice-sized work items with named skills. No director returned NOT READY.
 
 **Chain-of-Verification**: 5 questions checked, incl. 3 tool actions (stage.txt + artifact scan; ADR-0002 status re-read confirming Accepted; AD-ART-BIBLE header re-read pre/post sign-off recording; producer's stale ADR-0015 claim refuted against the in-file status line) — verdict **unchanged: FAIL** with corrected panel input.
+
+---
+
+## Re-Check Addendum — 2026-07-23 (same day, blocker path executed)
+
+All five blockers from the verdict above are resolved and committed:
+1. Control manifest refreshed — Version 2026-07-23, ~39 new rules from ADR-0015/0016 + slice amendments ✓
+2. production/milestones/milestone-01-foundation-core.md (13 exit criteria) + estimate re-baseline (32 expected days, slice-velocity-derived) ✓
+3. Epics: 8 (6 Foundation + 2 Core) with 108 dependency-ordered stories embedding TR-IDs, ADR guidance, manifest version, test evidence paths ✓
+4. main-menu.md and pause-menu.md authored, review-fixed, APPROVED via /ux-review ✓
+5. production/sprints/sprint-01.md — 8 stories (5 Must / 3 Should), real story paths, dependency-verified, 20% buffer ✓
+
+AD-ART-BIBLE sign-off was recorded APPROVED during the original panel. Director verdicts stand (4× CONCERNS,
+none NOT READY); their tracked concerns are carried as milestone/sprint content (ambient-life wave 1,
+loop-payoff, external playtests, re-tune pass) — not as gate artifacts.
+
+### Final Verdict: PASS
+Non-blocking recommendations carried forward: /qa-plan sprint before /dev-story (QA plan is a
+Production → Polish gate artifact, absent today); 1–2 external silent-walkthrough playtests before
+scope lock; /asset-spec entity inventory as a first-sprint item.
