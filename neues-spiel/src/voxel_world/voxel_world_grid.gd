@@ -19,9 +19,16 @@
 ## 043) -- a bulk write reuses the same core mutation [method set_cell] uses
 ## ([method _apply_write]) but suppresses the per-cell [signal cell_changed]
 ## for the duration of the call, emitting exactly ONE batched signal instead.
-## Neighbor lookup and the DDA raycast are Story 004's scope; procedural
-## terrain generation using [member VoxelWorldConfig.base_height]/
-## `amplitude`/`frequency` remains Story 006's scope.
+##
+## Story 004 (this revision) adds [method get_neighbors] and [method
+## raycast_cells] -- completing Core Rule 5's read API (TR-voxel-world-031).
+## [method raycast_cells] is a manual Amanatides-Woo DDA grid walk against
+## [method get_cell] (ADR-0004 Decision, ADR-0014 Decision Section 4;
+## TR-voxel-world-017/049/018) -- no physics API of any kind is used for
+## picking anywhere in this file (grep-verified by
+## `tests/integration/voxel_world/dda_raycast_test.gd`). Procedural terrain
+## generation using [member VoxelWorldConfig.base_height]/`amplitude`/
+## `frequency` remains Story 006's scope.
 class_name VoxelWorldGrid
 extends Node
 
@@ -169,6 +176,150 @@ func is_in_bounds(cell: Vector3i) -> bool:
 func query_world_to_cell(world_pos: Vector3) -> CellQueryResult:
 	var cell: Vector3i = VoxelWorldGrid.world_to_cell(world_pos)
 	return CellQueryResult.new(is_in_bounds(cell), cell)
+
+
+## The 6 face-adjacent neighbor offsets (Story vox-004, Core Rule 5 read API
+## completion, TR-voxel-world-031) -- fixed +/-1 integer offsets along each
+## axis, in a stable, deterministic order. Locked engine-shape data, not a
+## designer tuning knob (same rationale as [constant CHUNK_SIZE]).
+const NEIGHBOR_OFFSETS: Array[Vector3i] = [
+	Vector3i(1, 0, 0), Vector3i(-1, 0, 0),
+	Vector3i(0, 1, 0), Vector3i(0, -1, 0),
+	Vector3i(0, 0, 1), Vector3i(0, 0, -1),
+]
+
+
+## Neighbor lookup (Story vox-004, Core Rule 5, TR-voxel-world-031): returns
+## [param cell]'s 6 face-adjacent grid neighbors via [constant NEIGHBOR_OFFSETS]'s
+## fixed integer offsets, bounds-checked via [method is_in_bounds] (Story 001's
+## out-of-grid rule, TR-voxel-world-037) -- an offset that falls outside the
+## configured world bounds is OMITTED from the result entirely, never included
+## as an invalid/sentinel entry (there is no "partial" neighbor to represent;
+## a cell simply has fewer neighbors at the world's edge). Pure and
+## side-effect-free -- never touches [member _chunks], safe to call every
+## frame (TR-voxel-world-047 read-purity guarantee).
+func get_neighbors(cell: Vector3i) -> Array[Vector3i]:
+	assert(config != null, "VoxelWorldGrid.config not wired")
+	var neighbors: Array[Vector3i] = []
+	for offset: Vector3i in NEIGHBOR_OFFSETS:
+		var neighbor: Vector3i = cell + offset
+		if is_in_bounds(neighbor):
+			neighbors.append(neighbor)
+	return neighbors
+
+
+## DDA cell-picking raycast (Story vox-004, ADR-0004 Decision + ADR-0014
+## Decision Section 4; TR-voxel-world-017/049/047/018): a manual
+## Amanatides-Woo grid walk against [method get_cell] -- returns the first
+## occupied cell along the ray (or an explicit miss, [RaycastHitResult]) in
+## O(ray-length-in-cells) time, INDEPENDENT of grid size (TR-voxel-world-019)
+## and completely independent of the eventual rendering mechanism
+## (TR-voxel-world-049). Never mutates [member _chunks] or any cell contents
+## -- safe to call every frame for hover picking (TR-voxel-world-047). ZERO
+## `PhysicsServer3D`/`RayCast3D`/`intersect_ray` usage anywhere in this method
+## (TR-voxel-world-018; grep-verified by
+## `tests/integration/voxel_world/dda_raycast_test.gd`).
+##
+## "Solid" for picking purposes is simply "non-empty"
+## ([method CellContents.is_empty] false) -- Voxel World never resolves
+## opaque block-type ids to gameplay meaning (Core Rule 2, TR-voxel-world-028),
+## so no per-block-type solidity special-casing (e.g. a "water doesn't pick"
+## rule) belongs at this layer; that would require this class to know what a
+## given id MEANS, which it deliberately never does. Any such rule is a
+## caller-side concern layered on top via [param extra_solid], not this
+## method's.
+##
+## [param extra_solid] is an optional `Callable(cell: Vector3i) -> bool`
+## overlay evaluated at every stepped cell (via OR) alongside the real grid
+## data -- the exact hook the ADR-0014 Section 4 ghost-anchoring predicate
+## plugs into later (Building System slice). Constructing or populating that
+## overlay is explicitly OUT OF SCOPE for this story: this method only
+## accepts and evaluates a predicate IF a caller supplies one; the default
+## `Callable()` is invalid and is simply skipped.
+##
+## Bounds handling: the ray's origin MAY lie outside the configured world
+## bounds (e.g. a camera positioned just outside the world's edge looking
+## in) -- an out-of-bounds cell is never itself solid and stepping continues.
+## Once the walk has entered the bounds at least once, the FIRST subsequent
+## step back outside bounds terminates the walk as a miss immediately (the
+## world is a convex axis-aligned box; a straight ray can enter it at most
+## once and exit at most once, so re-entry after leaving is impossible) --
+## this is the "ray exiting world bounds returns none" contract. A ray whose
+## origin is outside bounds and which never enters them within `max_distance`
+## also returns a miss, naturally, once the loop exhausts `max_distance`.
+func raycast_cells(origin: Vector3, direction: Vector3, max_distance: float, extra_solid: Callable = Callable()) -> RaycastHitResult:
+	assert(config != null, "VoxelWorldGrid.config not wired")
+	var dir: Vector3 = direction.normalized()
+	if dir.length_squared() == 0.0:
+		return RaycastHitResult.new(false)
+
+	var cell: Vector3i = VoxelWorldGrid.world_to_cell(origin)
+	var entered_bounds: bool = false
+	if is_in_bounds(cell):
+		entered_bounds = true
+		if _is_pick_solid(cell, extra_solid):
+			return RaycastHitResult.new(true, cell, Vector3i.ZERO)
+
+	var step: Vector3i = Vector3i(
+		1 if dir.x > 0.0 else (-1 if dir.x < 0.0 else 0),
+		1 if dir.y > 0.0 else (-1 if dir.y < 0.0 else 0),
+		1 if dir.z > 0.0 else (-1 if dir.z < 0.0 else 0)
+	)
+	var t_max: Vector3 = Vector3(INF, INF, INF)
+	var t_delta: Vector3 = Vector3(INF, INF, INF)
+	if dir.x != 0.0:
+		t_delta.x = 1.0 / absf(dir.x)
+		var boundary_x: float = float(cell.x + (1 if step.x > 0 else 0))
+		t_max.x = (boundary_x - origin.x) / dir.x
+	if dir.y != 0.0:
+		t_delta.y = 1.0 / absf(dir.y)
+		var boundary_y: float = float(cell.y + (1 if step.y > 0 else 0))
+		t_max.y = (boundary_y - origin.y) / dir.y
+	if dir.z != 0.0:
+		t_delta.z = 1.0 / absf(dir.z)
+		var boundary_z: float = float(cell.z + (1 if step.z > 0 else 0))
+		t_max.z = (boundary_z - origin.z) / dir.z
+
+	var t: float = 0.0
+	while t <= max_distance:
+		var normal: Vector3i
+		if t_max.x < t_max.y and t_max.x < t_max.z:
+			t = t_max.x
+			t_max.x += t_delta.x
+			cell.x += step.x
+			normal = Vector3i(-step.x, 0, 0)
+		elif t_max.y < t_max.z:
+			t = t_max.y
+			t_max.y += t_delta.y
+			cell.y += step.y
+			normal = Vector3i(0, -step.y, 0)
+		else:
+			t = t_max.z
+			t_max.z += t_delta.z
+			cell.z += step.z
+			normal = Vector3i(0, 0, -step.z)
+		if t > max_distance:
+			break
+		if is_in_bounds(cell):
+			entered_bounds = true
+			if _is_pick_solid(cell, extra_solid):
+				return RaycastHitResult.new(true, cell, normal)
+		elif entered_bounds:
+			return RaycastHitResult.new(false)
+		# else: not yet entered bounds -- keep stepping, may enter later.
+	return RaycastHitResult.new(false)
+
+
+## Solidity predicate for [method raycast_cells] -- see that method's doc
+## comment for why "solid" is simply "non-empty" at this layer, and why
+## [param extra_solid] exists but is never populated by this story. [param cell]
+## is assumed already bounds-checked by the caller (both [method raycast_cells]
+## call sites check [method is_in_bounds] first) -- [method get_cell] would
+## otherwise return `null` here and crash on [method CellContents.is_empty].
+func _is_pick_solid(cell: Vector3i, extra_solid: Callable) -> bool:
+	if not get_cell(cell).is_empty():
+		return true
+	return extra_solid.is_valid() and bool(extra_solid.call(cell))
 
 
 ## Chunked read API (Core Rule 5, TR-voxel-world-031): returns the occupant

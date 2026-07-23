@@ -1,7 +1,7 @@
 # Story 004: Neighbor lookup + DDA cell-picking on the data layer
 
 > **Epic**: Voxel World / Grid Data
-> **Status**: Ready
+> **Status: Complete (2026-07-23 — 232/232 suite green, parent-verified)
 > **Layer**: Foundation
 > **Type**: Integration
 > **Estimate**: 1 day
