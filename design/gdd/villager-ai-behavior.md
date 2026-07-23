@@ -1,8 +1,8 @@
 # Villager AI & Behavior
 
-> **Status**: Approved (2026-07-10 — full review NEEDS REVISION -> revised -> re-review APPROVED; see design/gdd/reviews/villager-ai-behavior-review-log.md)
+> **Status**: Approved (2026-07-10 — full review NEEDS REVISION -> revised -> re-review APPROVED; see design/gdd/reviews/villager-ai-behavior-review-log.md); Slice-revised 2026-07-23 (character scale, anti-stuck safety net, worker attribution — see prototypes/last-seal-vertical-slice/REPORT.md)
 > **Author**: user + Claude Code Game Studios agents
-> **Last Updated**: 2026-07-09
+> **Last Updated**: 2026-07-23
 > **Last Verified**: 2026-07-09
 > **Implements Pillar**: Pillar 2 — A settlement that feels alive (primary); Pillar 1 — The building IS the game (villagers construct and inhabit what the player builds)
 
@@ -124,6 +124,13 @@ ever "one of thousands").
    the argmin flips)*. [TR-villager-ai-behavior-052] "Available" for the priority list (Rule 2) means
    queue-non-empty — reachability is discovered lazily at selection time
    (F2), never as a gate on the ranking itself. [TR-villager-ai-behavior-053]
+   **Claim attribution** *(added by the 2026-07-23 slice revision)*: a
+   successful claim records the claiming villager's id on the claim
+   record. The Building System's project entity aggregates these ids
+   into its `worker_ids` field for per-project attribution (e.g. its
+   project window listing who is working a job) — this GDD supplies the
+   id only; ownership of the aggregate field stays with the Building
+   System (see Dependencies). [TR-villager-ai-behavior-097]
 5. **On site** = the villager occupies the job's target cell or an
    orthogonally adjacent cell (including directly above/below), exactly as
    the Building System defines. Work progress accrues only while on site. [TR-villager-ai-behavior-054]
@@ -150,6 +157,19 @@ ever "one of thousands").
    minimum walkable interior height — a standard room is walkable with no
    headroom to spare; lowering wall height below 3 makes the interior
    unwalkable.*
+8a. **Character scale** *(added by the 2026-07-23 slice revision —
+    Minecraft-style proportions, slice-validated Day 2 of the vertical
+    slice)*: the villager model is 2 cells tall (a feet cell plus one
+    cell directly above forms the visible body). The **body-column** —
+    the vertical cell span the anti-stuck rules below (Rules 15–17,
+    Edge Cases 13–17) must treat as the villager's own space — is the
+    same 3-cell span as standability clearance above: the 2-cell body
+    plus one buffer cell of headroom. The numeric clearance constant
+    does not change; this rule only names the concept explicitly so the
+    anti-stuck rules have a precise, reusable definition of "the
+    villager's space" — checking only the feet cell would let a rescue
+    or seal-prevention check pass while the model still clips a low
+    ceiling. [TR-villager-ai-behavior-098]
 9. A step between adjacent standable cells is legal if the height
    difference is at most 1 cell (natural block staircases work; 2+ cliffs
    don't). Orthogonal steps only; a diagonal is legal only when both
@@ -244,6 +264,59 @@ ever "one of thousands").
     concept's "~5 villagers at VS" with Rule 14's tiering — without it,
     no system could place villagers 2–5 before Alpha.
 
+**Anti-stuck safety net** *(added by the 2026-07-23 slice revision —
+validated as an interim safety net during the vertical slice, commit
+64ff918; see Open Questions for the production-grade replacement this
+net stands in for)*
+
+15. **Unstuck watchdog**: a villager in **Traveling** or **Working**
+    that has zero legal step from its current cell, or whose current
+    cell fails the standability check (Rule 8), for
+    `unstuck_watchdog_threshold_ticks` consecutive ticks (default 12) is
+    teleported to the nearest standable, unoccupied cell (F5). Any job
+    claim it holds releases back to the queue exactly as Rule 6's
+    unreachable-job flow; bed ownership, if any, is unaffected. The
+    villager re-enters Deciding at the new cell. A `villager_unstuck`
+    event fires, incrementing a per-villager counter and a world total
+    counter, exposed to the F3 debug console now and reserved for
+    future production analytics (see Dependencies). **Idle, Wandering,
+    Sleeping, and Breather villagers are never rescued by the
+    watchdog** — Edge Case 2's original stay-put/distress-cue behavior
+    is unchanged for those states; the watchdog's scope is strictly
+    Traveling/Working. [TR-villager-ai-behavior-099]
+15b. **Rescue target selection** is a bounded search (F5), never an
+    unbounded teleport-anywhere: the nearest standable, unoccupied cell
+    within `unstuck_rescue_search_radius`, found by an expanding-ring
+    search from the villager's current cell (tie-break by the same
+    lexicographic cell-coordinate convention as F2, for determinism).
+    If none is found, the radius doubles up to
+    `unstuck_rescue_max_radius` before the rescue defers to the next
+    tick (Edge Case 14). [TR-villager-ai-behavior-100]
+16. **Seal prevention**: a build-job completion (Planned→Built write)
+    that would leave its builder with zero legal steps is refused — the
+    write does not commit, the claim releases back to the queue, and a
+    different villager may claim and complete the job from a position
+    that doesn't self-trap (F6). **Dig and demolition jobs are
+    exempt** — their completions are never refused for this reason. [TR-villager-ai-behavior-101]
+16b. **Livelock escape**: refusing a completion increments an abandon
+    counter for that specific (job, villager) pair. After
+    `seal_prevention_abandon_limit` (default 3) refusals of the SAME
+    villager on the SAME job, the write proceeds unconditionally on the
+    next attempt — the builder becomes sealed in by its own completed
+    work, and the Unstuck Watchdog (Rule 15) rescues it on its normal
+    schedule. This is a deliberate tradeoff: a rare, self-healing
+    entrapment beats a job that can never complete. [TR-villager-ai-behavior-102]
+17. **Dig onsite exclusion (self-undermine guard)**: for dig and
+    demolition jobs specifically, the onsite position (Rule 5) directly
+    above the target cell is excluded from eligibility — a villager may
+    not stand on the block it is digging out; it must approach from an
+    orthogonal side instead. *(Real incident: a villager dug the block
+    directly beneath its own feet, instantly failing its own
+    standability check the moment the write committed.)* This exclusion
+    does not apply to build jobs, where standing on/adjacent to a
+    not-yet-Built cell is safe (blueprints are non-solid, Building Core
+    Rule 14b). [TR-villager-ai-behavior-103]
+
 ### States and Transitions
 
 **Agent state machine** (per villager):
@@ -251,8 +324,8 @@ ever "one of thousands").
 | State | Entry | Exit | Behavior |
 |-------|-------|------|----------|
 | Deciding | Loop start, activity end, interruption, preemption | Activity chosen (same tick) | Runs the priority list (Rule 2); instantaneous — never a visible "stand and think" pause [TR-villager-ai-behavior-066] |
-| Traveling | Activity chosen with a distant target | Arrival on site / target invalidated / preemption | Follows the computed path cell-by-cell; re-paths if a Voxel World write blocks the path |
-| Working | Arrived at claimed job, on site | Cell Built / job revoked / preemption | Applies tick progress to the claimed cell (Building System F3); plays work animation/sound |
+| Traveling | Activity chosen with a distant target | Arrival on site / target invalidated / preemption / Unstuck Watchdog rescue fires (Rule 15, Edge Case 13) *(Slice revision 2026-07-23)* | Follows the computed path cell-by-cell; re-paths if a Voxel World write blocks the path |
+| Working | Arrived at claimed job, on site | Cell Built / job revoked / preemption / Unstuck Watchdog rescue fires (Rule 15, Edge Case 13) *(Slice revision 2026-07-23)* | Applies tick progress to the claimed cell (Building System F3); plays work animation/sound |
 | Sleeping | Arrived at owned bed (or ground fallback) with urgent sleep need | Wake threshold reached / bed removed under them | Restores sleep need per tick (rates owned by Needs GDD) |
 | Breather | `jobs_before_break` consecutive jobs completed | `breather_duration_ticks` elapse / urgent need preempts | Non-productive rest beat near the work site (sit/look around); work-claiming suppressed; needs still decay and preempt (Rule 7b) |
 | Wandering | Decided Idle | Any higher-priority activity appears (checked every `decision_interval` ticks); interruption takes effect at the end of the current 1-cell step | Varies among micro-behaviors (walk, pause-and-look, sit, drift toward owned bed's area — Rule 7c); pure flavor, no gameplay effect [TR-villager-ai-behavior-067] |
@@ -269,7 +342,14 @@ Core Rule 4. Villagers pause only when game time pauses.)* [TR-villager-ai-behav
   provisional halves it listed: claim mechanics, on-site presence,
   unreachable reporting + retry cadence, graceful abandon, nudge-aside.
   Its GDD's "PROVISIONAL" markers on the job contract can be considered
-  resolved once this GDD is approved.
+  resolved once this GDD is approved. **Contract amendment (Slice
+  revision 2026-07-23)**: the claim record now carries the claiming
+  villager's id (Rule 4), which the Building System's project entity
+  aggregates as `worker_ids`; and the Planned→Built write must
+  additionally accept a Seal Prevention refusal (Rule 16/F6) — a
+  negative-write gate beyond the existing unreachable-job reporting
+  (Rule 6) that the Building System's write path must be able to reject
+  and requeue.
 - **Time & Tick System** (upstream, MVP): decisions/work/need-recovery on
   tick events; movement interpolation on game delta; everything halts in
   pause and accelerates under warp. Never touches raw delta.
@@ -306,6 +386,14 @@ Core Rule 4. Villagers pause only when game time pauses.)* [TR-villager-ai-behav
 - **Squad & Combat / Wave Defense** (Vertical Slice, downstream,
   provisional): recruits able villagers into squads — out of scope here;
   flagged so the seam isn't forgotten.
+- **Stuck Telemetry** (Production, downstream, undesigned — added by the
+  2026-07-23 slice revision): the `villager_unstuck` event and its
+  per-villager/total counters (Rule 15) are the sizing input
+  REPORT.md flags as a hard requirement — production build-order
+  planning and scaffolding/ladders (the real fix this safety net stands
+  in for) will be tuned against this telemetry. Exposed immediately to
+  the F3 debug console (dev tool, no dedicated GDD) pending a formal
+  analytics system.
 
 ## Formulas
 
@@ -409,6 +497,90 @@ remains deferred until the step completes and the cell is clear. There
 is no timing promise tied to tick length *(replaces the original "within
 one tick", which broke at `move_speed` < 2.0)*. [TR-villager-ai-behavior-034]
 
+### F5 — Unstuck watchdog trigger and rescue target *(added by the 2026-07-23 slice revision)*
+
+`rescue_fires = (stuck_tick_count >= unstuck_watchdog_threshold_ticks)`
+
+where `stuck_tick_count` increments by 1 each tick a Traveling/Working
+villager has zero legal step from `current_cell` OR `current_cell` fails
+the standability check (Rule 8), and resets to 0 the instant a legal
+step or standable cell becomes available again.
+
+`rescue_target = nearest(cell)` such that `cell` is standable (Rule 8)
+and unoccupied (no other villager's `current_cell`), found by an
+expanding-ring BFS from `current_cell` out to `unstuck_rescue_search_radius`
+(tie-break lexicographic `y, x, z`, the F2 convention, for determinism);
+if none is found the radius doubles, up to `unstuck_rescue_max_radius`
+(Edge Case 14).
+
+| Variable | Type | Range | Description |
+|----------|------|-------|--------------|
+| `stuck_tick_count` | int | 0 – unbounded (resets on relief) | Consecutive ticks a Traveling/Working villager has had no legal step or a non-standable current cell |
+| `unstuck_watchdog_threshold_ticks` | int | 6–30, default 12 | Ticks of continuous stuckness before rescue fires |
+| `rescue_target` | cell coordinate | any standable, unoccupied cell within the search radius | Teleport destination |
+| `unstuck_rescue_search_radius` | int (Chebyshev cells) | 3–12, default 6 `[assumption]` | Initial BFS ring radius searched for a rescue cell |
+| `unstuck_rescue_max_radius` | int (Chebyshev cells) | 12–48, default 24 `[assumption]` | Expansion ceiling before a rescue defers to the next tick |
+| `rescue_fires` | bool | {true, false} | Whether the teleport, claim-release, and `villager_unstuck` event occur this tick |
+
+**Output range**: a discrete per-tick boolean gate. When true, exactly
+one teleport, one claim release (only if a claim is held), and one
+`villager_unstuck` event occur; the counter resets afterward, so a
+villager can only be rescued once per stuck episode.
+
+**Provenance note on the threshold's wall-clock equivalent**: `12`
+ticks is the portable, tuning-safe value validated during the slice
+(commit 64ff918). At this GDD's registered `ticks_per_second = 2.0`,
+12 ticks = **6.0 game-seconds at 1x** — not the "~3 seconds" figure the
+slice's own ad-hoc debug-clock instrumentation logged (that
+instrumentation ran an internal 4-ticks/second timer, independent of
+the registered constant). The tick count (12) is the authoritative,
+slice-validated value; the wall-clock figure quoted here is derived
+from this GDD's own `ticks_per_second`, consistent with every other
+tick-based tuning knob in this document.
+
+**Worked example**: default tuning. A villager Working a claimed cell
+becomes boxed in when a second villager finishes the wall around it.
+`stuck_tick_count` increments each tick; at tick 12 (6.0 game-seconds
+at 1x) `rescue_fires` becomes true. The BFS finds a standable, empty
+cell 2 rings away (well within `unstuck_rescue_search_radius = 6`); the
+villager teleports there, its job claim releases back to the queue,
+and its per-villager `villager_unstuck` counter increments to 1 (world
+total also increments).
+
+### F6 — Seal-prevention refusal and livelock escape *(added by the 2026-07-23 slice revision)*
+
+`allow_write = NOT would_trap_builder OR (abandon_count >= seal_prevention_abandon_limit) OR (job_type != build)`
+
+where `would_trap_builder` evaluates the builder's `current_cell`
+against Rules 8–9 as if the write had already committed — true iff the
+builder would then have zero legal steps to any standable neighbor.
+`abandon_count` is a counter kept per (job, villager) pair, incremented
+each time this specific pairing's completion is refused for this
+reason; it resets when the job is claimed by a **different** villager.
+
+| Variable | Type | Range | Description |
+|----------|------|-------|--------------|
+| `would_trap_builder` | bool | {true, false} | Whether completing this write leaves the builder with zero legal steps |
+| `abandon_count` | int | 0 – `seal_prevention_abandon_limit` | Refusals of this specific (job, villager) pair so far |
+| `seal_prevention_abandon_limit` | int | 1–6, default 3 (slice-validated) | Livelock-escape threshold — after this many refusals the write proceeds unconditionally |
+| `job_type` | enum | {build, dig, demolish} | Dig/demolition jobs are exempt — `allow_write` is always true for them (Rule 16) |
+| `allow_write` | bool | {true, false} | Whether the Building System's write is permitted to commit this tick |
+
+**Output range**: a per-attempt boolean gate; `abandon_count` is
+monotonic per (job, villager) pair and bounded above by
+`seal_prevention_abandon_limit` (it stops mattering once `allow_write`
+flips true).
+
+**Worked example**: a villager completes the last wall cell of a tiny
+1×1 room whose only doorway was sealed moments earlier by a different
+job elsewhere. `would_trap_builder = true` (no legal step out) — the
+write is refused, the claim releases (`abandon_count` for this
+(job, villager) pair = 1). The same villager, being nearest, re-claims
+and reaches the identical position twice more (`abandon_count` = 2,
+then 3). On the 3rd refusal, `allow_write` flips true regardless of the
+trap check: the wall completes, the villager is sealed inside, and 12
+ticks later (F5) the watchdog teleports it out.
+
 ### Deliberately NOT formulas (and why)
 
 - **The pathfinding algorithm** (A*, flow fields, hierarchical) —
@@ -432,11 +604,14 @@ one tick", which broke at `move_speed` < 2.0)*. [TR-villager-ai-behavior-034]
    job — report to the Building System (orange ghost), release the claim,
    pick the next job (F2); for a bed — fall back to ground sleep (Rule 12);
    for a wander target — pick a new one (F3). [TR-villager-ai-behavior-036]
-2. **Villager completely walled in** (no legal step from its cell). The
-   villager stays put — **villagers never teleport, clip, or despawn to
-   escape**. It idles in place with a visible distress cue (treatment via
-   Villager Info UI / art bible); urgent sleep falls back to ground sleep
-   in place. The player resolves it by removing blocks. [TR-villager-ai-behavior-080] *(A trapped
+2. **Villager completely walled in** (no legal step from its cell)
+   **while Idle, Wandering, Sleeping, or Breather** *(scope narrowed by
+   the 2026-07-23 slice revision — see Edge Case 13 for the
+   Traveling/Working case, which IS rescued)*. The villager stays put —
+   it is **never teleported, clipped, or despawned to escape**. It idles
+   in place with a visible distress cue (treatment via Villager Info UI /
+   art bible); urgent sleep falls back to ground sleep in place. The
+   player resolves it by removing blocks. [TR-villager-ai-behavior-080] *(A trapped
    villager is always the player's own construction — consistent with the
    unreachable-blueprint philosophy: visible, patient, player-fixable.)*
 3. **Two villagers race for the same job.** Claims are atomic: exactly one
@@ -498,6 +673,48 @@ one tick", which broke at `move_speed` < 2.0)*. [TR-villager-ai-behavior-034]
     criteria) — softened from "correct baseline" per the 2026-07-10
     review; the claim is a hypothesis until tested.
 
+**Added by the 2026-07-23 slice revision (anti-stuck safety net)**
+
+13. **Traveling/Working villager stuck for `unstuck_watchdog_threshold_ticks`.**
+    A villager in Traveling or Working with zero legal step from its
+    current cell, or on a non-standable cell, for `unstuck_watchdog_threshold_ticks`
+    consecutive ticks is teleported to the nearest standable, unoccupied
+    cell (F5). Any held job claim releases back to the queue exactly as
+    Rule 6's unreachable-job flow; the villager re-enters Deciding at the
+    new cell; a `villager_unstuck` event fires, incrementing per-villager
+    and world total counters for F3 debug/telemetry. This is the sole
+    exception to Edge Case 2's "never teleport" rule — scoped strictly to
+    Traveling/Working (Rule 15). [TR-villager-ai-behavior-104]
+14. **Watchdog rescue search finds no standable, unoccupied cell within
+    `unstuck_rescue_search_radius`.** The search radius doubles, up to
+    `unstuck_rescue_max_radius` (Rule 15b). If still no cell is found,
+    the rescue defers to the next tick — `stuck_tick_count` keeps
+    incrementing and the search retries every tick until a cell is
+    found — and a `villager_unstuck_search_failed` event fires exactly
+    once for the stuck episode (not once per tick), so this pathological
+    case is visible without spamming logs. [TR-villager-ai-behavior-105]
+15. **Build-job completion would trap its builder.** The write is
+    refused, the claim releases back to the queue, and `abandon_count`
+    for that (job, villager) pair increments by 1 (F6, Rule 16). A
+    different villager may then claim and complete the job from a
+    position that doesn't self-trap. Dig and demolition jobs are
+    exempt — they are never refused for this reason. [TR-villager-ai-behavior-106]
+16. **Same villager refused on the same job 3 times
+    (`seal_prevention_abandon_limit`).** On the next attempt the write
+    proceeds unconditionally — the builder becomes sealed in by its own
+    completed work — and the Unstuck Watchdog (Edge Case 13) rescues it
+    on its normal schedule (F6, Rule 16b). This is a deliberate
+    tradeoff: a rare, self-healing entrapment beats an unresolvable
+    livelock where the job can never complete. [TR-villager-ai-behavior-107]
+17. **Dig/demolition job's only onsite position is directly above the
+    target cell.** That position is excluded from onsite eligibility for
+    dig/demolition jobs specifically — the villager must approach from
+    an orthogonal side instead (Rule 17). *(Real incident: a villager
+    dug the block directly beneath its own feet, instantly failing its
+    own standability check the moment the write committed.)* Does not
+    apply to build jobs, where standing on/adjacent to a not-yet-Built
+    cell is safe (blueprints are non-solid, Building Core Rule 14b). [TR-villager-ai-behavior-108]
+
 ## Dependencies
 
 ### Upstream (systems this one depends on)
@@ -506,14 +723,14 @@ one tick", which broke at `move_speed` < 2.0)*. [TR-villager-ai-behavior-034]
 |--------|-----------|---------------------------|
 | Voxel World | ✅ Designed | Physical occupancy reads for walkability (Rules 8–9); write signals for mid-travel re-pathing. Never mutates the grid |
 | Time & Tick System | ✅ Designed | Tick events (decisions, work, need recovery) + game delta (movement interpolation); pause/warp semantics |
-| Building System | ✅ Approved | The construction-job queue and its Core Rule 12 contract — this GDD confirms it and supplies the AI halves (Rules 3–7) |
+| Building System | ✅ Approved | The construction-job queue and its Core Rule 12 contract — this GDD confirms it and supplies the AI halves (Rules 3–7). *(Slice revision 2026-07-23)*: also depends on Building System's write path accepting a Seal Prevention refusal (Rule 16/F6) as a new negative-write gate |
 | Needs & Mood System | ✅ Designed (2026-07-10) | Which needs exist, urgency/wake thresholds, decay and recovery rates (incl. the ground-sleep penalty) — **interface CONFIRMED** by needs-mood-system.md (urgency=25, satisfied=95, ground_penalty=0.4 — registered constants) |
 
 ### Downstream (systems that depend on this one)
 
 | System | Tier | GDD Status | What it consumes |
 |--------|------|-----------|------------------|
-| Building System | MVP | ✅ Designed | The mutual seam's other direction: its construction pipeline cannot complete without this system's labor (job claiming, on-site work — its Core Rule 12); listed upstream above for the queue this system consumes (added 2026-07-10, cross-review fix) |
+| Building System | MVP | ✅ Designed | The mutual seam's other direction: its construction pipeline cannot complete without this system's labor (job claiming, on-site work — its Core Rule 12); listed upstream above for the queue this system consumes (added 2026-07-10, cross-review fix). *(Slice revision 2026-07-23)*: also consumes claim attribution (Rule 4) for its project entity's `worker_ids` field |
 | Build Validation & Navigability | MVP | ✅ Designed | The walkability definition (Rules 8–10) as ground truth for reachability (contract confirmed by build-validation-navigability.md) |
 | Needs & Mood System | MVP | ✅ Designed — CONFIRMED (2026-07-10) | `start_recovery`/`stop_recovery` reports with the source enum (its Core Rule 10); mutual seam with the upstream row |
 | Villager Info UI | MVP | ✅ Designed — CONFIRMED (2026-07-10) | Villager name, current activity/state, distress cues |
@@ -522,6 +739,7 @@ one tick", which broke at `move_speed` < 2.0)*. [TR-villager-ai-behavior-034]
 | Township Progression | Alpha | Undesigned | Population (spawning/recruiting is ITS job, bounded by the 20–30 ceiling) *(provisional)* |
 | Squad & Combat / Wave Defense | Vertical Slice | Undesigned | Recruits able villagers into squads *(provisional)* |
 | Save/Load & World Persistence | Vertical Slice | Undesigned | Per-villager state serialization (position, activity, claimed job id, owned bed) *(provisional)* |
+| Stuck Telemetry / Production Analytics | Production | Undesigned | `villager_unstuck` event + per-villager/total counters (Rule 15) — sizing input for build-order-planning and scaffolding/ladders production work *(provisional, added 2026-07-23 slice revision)* |
 
 ## Tuning Knobs
 
@@ -538,6 +756,10 @@ one tick", which broke at `move_speed` < 2.0)*. [TR-villager-ai-behavior-034]
 | `breather_duration_ticks` | 90 (= 45s at 1x) | 30–240 | Length of the rest beat. Too short reads as a glitch; too long frustrates waiting players |
 | `starting_villager_count` | 1 (MVP) / 5 (VS config) | 1–8 | The world-generation starting roster (Rule 14b). Growth beyond it is Township Progression's (Alpha) |
 | Population ceiling | 20–30 (Full Vision) | design commitment, not a slider | MVP: 1, Vertical Slice: ~5. Raising it beyond 30 invalidates the per-agent AI assumption AND the Pillar-2 individual-legibility promise — treat as a design change, not a tune |
+| `unstuck_watchdog_threshold_ticks` *(added 2026-07-23)* | 12 ticks (= 6.0s at 1x, `ticks_per_second`=2.0; slice-validated tick count) | 6–30 `[assumption range]` | How long a Traveling/Working villager must be fully stuck before the safety-net rescue fires (F5/Rule 15). Lower = rescues faster but risks false-positives during momentary congestion; higher = longer visible "stuck" moments before self-healing |
+| `unstuck_rescue_search_radius` *(added 2026-07-23)* | 6 cells `[assumption]` | 3–12 `[assumption]` | Initial BFS ring radius searched for a rescue cell (F5/Rule 15b); larger = more likely to find a cell in one pass at higher per-rescue cost |
+| `unstuck_rescue_max_radius` *(added 2026-07-23)* | 24 cells `[assumption]` | 12–48 `[assumption]` | Hard expansion ceiling before deferring a rescue to the next tick (Edge Case 14) |
+| `seal_prevention_abandon_limit` *(added 2026-07-23)* | 3 (slice-validated) | 1–6 `[assumption range]` | Livelock-escape threshold (F6/Rule 16b) — after this many refused completions by the same villager on the same job, the write proceeds and the watchdog takes over |
 
 All values data-driven per the coding standard; none are player-facing. [TR-villager-ai-behavior-090]
 
@@ -666,7 +888,7 @@ testing standards — those ACs do NOT wait for that GDD.)*
 31. **GIVEN** a flood-fill wander search returning only the current cell, **WHEN** `wander_interval` elapses, **THEN** the villager stays in place without error and re-attempts at the next interval (Edge Case 8). [TR-villager-ai-behavior-087]
 
 **Lifecycle and edge behavior**
-32. **GIVEN** a villager with no legal step from its cell, **WHEN** any game time passes, **THEN** it remains in place with the distress flag set and never teleports (Edge Case 2). [TR-villager-ai-behavior-080]
+32. **GIVEN** an Idle, Wandering, Sleeping, or Breather villager with no legal step from its cell, **WHEN** any game time passes, **THEN** it remains in place with the distress flag set and never teleports (Edge Case 2; scope narrowed 2026-07-23 — see AC51 for the Traveling/Working rescue case). [TR-villager-ai-behavior-080]
 33. **GIVEN** a job revoked mid-work, **WHEN** the revocation registers, **THEN** the villager stops at the tick boundary and re-enters Deciding without error (Edge Case 4). [TR-villager-ai-behavior-083]
 34. **GIVEN** an idle occupant in a builder's target cell, **WHEN** the vacate request fires, **THEN** the occupant steps to the F4 target within one tick; **GIVEN** a Working/Sleeping occupant, **THEN** it is not interrupted (Rule 7). [TR-villager-ai-behavior-056]
 35. **GIVEN** a vacate-target tie on height difference and distance, **WHEN** resolved, **THEN** the fixed N/E/S/W scan order breaks the tie identically every run (F4 determinism). [TR-villager-ai-behavior-079]
@@ -702,6 +924,22 @@ are blocking integration tests; AC38 is provisional-integration
 (Save/Load); AC39 is formally an Advisory/Performance criterion gated at
 VS/Full-Vision milestones — not part of the Logic gate, re-tiered
 2026-07-10.)* [TR-villager-ai-behavior-096]
+
+**Added by the 2026-07-23 slice revision (anti-stuck safety net)**
+51. **GIVEN** a Traveling or Working villager with zero legal steps (or a non-standable current cell) for `unstuck_watchdog_threshold_ticks` consecutive ticks, **WHEN** the threshold is reached, **THEN** it is teleported to a standable, unoccupied cell, any held job claim releases back to the queue, and a `villager_unstuck` event fires with incremented per-villager and total counters (F5, Edge Case 13). [TR-villager-ai-behavior-104]
+52. **GIVEN** a villager holding a claimed job at the moment the watchdog rescues it, **WHEN** the teleport occurs, **THEN** the claim releases back to the queue exactly as Rule 6's unreachable-job flow — no double-release, no orphaned claim; **GIVEN** a villager with no held claim (e.g. Traveling to a bed), **THEN** no claim-release side effect occurs and bed ownership is unaffected (F5). [TR-villager-ai-behavior-104]
+53. **GIVEN** the watchdog's search finds no standable, unoccupied cell within `unstuck_rescue_search_radius`, **WHEN** the search completes, **THEN** the radius doubles (up to `unstuck_rescue_max_radius`) before a rescue defers to the next tick, and a `villager_unstuck_search_failed` event fires exactly once for the stuck episode, not once per tick (Edge Case 14). [TR-villager-ai-behavior-105]
+54. **GIVEN** a build-job completion that would leave its builder with zero legal steps, **WHEN** the write is evaluated, **THEN** it is refused, the claim releases back to the queue, and `abandon_count` for that (job, villager) pair increments by 1 (F6, Edge Case 15). [TR-villager-ai-behavior-106]
+55. **GIVEN** a dig or demolition job whose completion would leave the builder with zero legal steps, **WHEN** the write is evaluated, **THEN** it proceeds unconditionally — dig/demolition jobs never trigger seal-prevention refusal (F6 exemption, Rule 16). [TR-villager-ai-behavior-106]
+56. **GIVEN** the same (job, villager) pair refused `seal_prevention_abandon_limit` times, **WHEN** the villager attempts the job again, **THEN** the write proceeds unconditionally regardless of the trap check (F6 livelock escape, Edge Case 16). [TR-villager-ai-behavior-107]
+57. **GIVEN** a dig job whose only onsite position (Rule 5) is directly above the target cell, **WHEN** onsite eligibility is evaluated, **THEN** that position is excluded — the villager must approach from an orthogonal side (Rule 17, Edge Case 17). [TR-villager-ai-behavior-108]
+58. **GIVEN** `claim_job` succeeds, **WHEN** the claim record is inspected, **THEN** the claiming villager's id is recorded on it and retrievable for the Building System's project `worker_ids` aggregation (Rule 4 attribution). [TR-villager-ai-behavior-097]
+59. *[Historical evidence citation, Advisory — not a repeatable production-code AC]* **GIVEN** the automated E2E hut-build regression run during the vertical slice, **THEN** a real Unstuck Watchdog rescue fired at least once (see `prototypes/last-seal-vertical-slice/REPORT.md`, Feel Assessment) — cited as existing evidence the mechanism activates under real play conditions, not only synthetic unit tests. [TR-villager-ai-behavior-109]
+
+*(Evidence-tier addendum: AC51, 52, 54, 55, 56, 57, 58 are blocking
+headless unit tests; AC53 is a blocking integration test (search-radius
+expansion needs a multi-cell fixture); AC59 is Advisory/historical —
+already-observed evidence, not a repeatable gate.)*
 
 ## Open Questions
 
@@ -791,3 +1029,16 @@ VS/Full-Vision milestones — not part of the Logic gate, re-tiered
    traveling with its need pinned at 0 (harmless per Needs Rule 5, but
    long floor-value stretches). Note when retuning world size or speed.
    → *tuning documentation, no design change*
+11. **Production-grade replacement for the anti-stuck safety net** *(added
+   by the 2026-07-23 slice revision)* — the Unstuck Watchdog and Seal
+   Prevention (Rules 15–17) are a validated INTERIM safety net, not the
+   fix: the vertical slice's own recommendation (see
+   `prototypes/last-seal-vertical-slice/REPORT.md`, "If Proceeding" §1)
+   is that build-order planning (outside-in, roof-from-edge sequencing)
+   and scaffolding/ladders are the real solution to villagers sealing
+   themselves in. Until that production work lands, the watchdog/seal-
+   prevention rules stay in place, and the `villager_unstuck` telemetry
+   (Rule 15, Dependencies) is the required sizing input for that work —
+   do not remove the safety net when the production fix ships without
+   first confirming the telemetry shows near-zero rescues. →
+   *game-designer / ai-programmer, Production milestone*

@@ -1,9 +1,9 @@
 # Building System
 
-> **Status**: Approved (2026-07-10 — full review NEEDS REVISION -> revised -> re-review APPROVED; see design/gdd/reviews/building-system-review-log.md)
+> **Status**: Approved (2026-07-10 — full review NEEDS REVISION -> revised -> re-review APPROVED; see design/gdd/reviews/building-system-review-log.md) — **amended 2026-07-23** with USER-CONFIRMED vertical-slice findings (see `prototypes/last-seal-vertical-slice/REPORT.md`); passages touched by this pass are marked "(Slice revision 2026-07-23)"
 > **Author**: user + Claude Code Game Studios agents
-> **Last Updated**: 2026-07-09
-> **Last Verified**: 2026-07-09
+> **Last Updated**: 2026-07-23
+> **Last Verified**: 2026-07-09 (full review); slice amendment 2026-07-23 not yet re-reviewed
 > **Implements Pillar**: Pillar 1 — The building IS the game (primary); Pillar 4 — Clarity over complexity (transparent costs/validity)
 
 ## Summary
@@ -18,10 +18,25 @@ raycast, Camera & Input's mouse-ray and action signals, the item database's
 definitions, Time & Tick's game delta) into a fluid, expressive building
 loop — the *planning* half of which (drag tools, surface-aware picking,
 undo) was validated by the 2026-07-09 concept prototype (verdict:
-PROCEED); the *construction* half (build-over-time) is a design hypothesis
-pending the MVP playtest (see Game Feel).
+PROCEED); the *construction* half (build-over-time) was a design hypothesis
+at the 2026-07-10 review and is now **playtest-confirmed by the 2026-07-23
+vertical slice** (verdict: PROCEED — see Game Feel and
+`prototypes/last-seal-vertical-slice/REPORT.md`).
 
-> **Quick reference** — Layer: `Core/Gameplay` · Priority: `MVP` · Key deps: `Voxel World, Camera & Input, Resource & Item Database, Time & Tick System`
+**(Slice revision 2026-07-23)** The slice validated a materially larger
+Detailed Design than the 2026-07-10 review anticipated: an explicit **Build/
+Editor Mode** gates the whole toolset; blueprint cells are grouped into
+persistent **Build Project** entities (draft → release → build → done, with
+pause/resume/cancel and change orders); removal of anything already built
+(player blocks or terrain) is now job-gated (demolition/dig orders) rather
+than instant; and terrain itself becomes narrowly removable through dig-order
+"mining zone" projects — bounded and labor-gated, preserving the anti-pillar
+(no unbounded/instant terraforming). These are USER-CONFIRMED outcomes of the
+slice, not new proposals; they are folded into Core Rules below with new
+TR-IDs (102+), continuing this document's numbering without renumbering any
+existing ID.
+
+> **Quick reference** — Layer: `Core/Gameplay` · Priority: `MVP` · Key deps: `Voxel World, Camera & Input, Resource & Item Database, Time & Tick System, Villager AI & Behavior (worker attribution, build-order/scaffolding/stuck-telemetry seam — Slice revision 2026-07-23)`
 
 ## Overview
 
@@ -51,9 +66,16 @@ palette does).
 Out of scope here: whether a finished room is *navigable/livable* for
 villagers is Build Validation & Navigability's domain (a separate MVP
 system); wave-vs-base spatial rules await the wave-defense prototype;
-doors and windows arrive in the Vertical Slice per the concept's MVP
-definition; the rendering/meshing implementation is the future building
-ADR's decision.
+the rendering/meshing implementation is the future building ADR's
+decision. **(Slice revision 2026-07-23)** Doors and windows did NOT arrive
+as dedicated items during the Vertical Slice — the slice interim (a door is
+simply a walkable gap in a wall; a sealed room without one is not
+sheltered) is kept and is now the confirmed Production requirement
+(pathing-transparent door/window ITEMS that keep a room sealed for shelter
+analysis — see Open Question 6 and Art Bible §7.6's discoverability
+handoff); resource costs remain explicitly deferred to the Production
+economy (Core Rule 14, unchanged) — Build Projects (new, below) are the
+carrier entity Alpha costs will attach to.
 
 ## Player Fantasy
 
@@ -73,9 +95,16 @@ warm, furnished home."* The fantasy has three beats:
 2. **Fearless play.** Misclicks are never punished: while planning, I can
    try a roof shape, hate it, and undo it freely — so I experiment until
    it's right. Undo/redo is not a convenience feature; it is what makes
-   expression psychologically safe. (Undoing *already-constructed* work is
-   equally allowed but carries honest emotional weight — a villager's
-   visible labor is discarded. That asymmetry is accepted, not hidden.)
+   expression psychologically safe. *(Slice revision 2026-07-23 — supersedes
+   the parenthetical below the 2026-07-10 review had accepted: undoing
+   *already-constructed* work is no longer instant. Undo/redo now reaches
+   only plan entries — Core Rule 17/TR-building-system-119. Tearing down
+   something already built is a deliberate act with its own honest weight:
+   a demolition order, executed block by block by a villager, exactly
+   mirroring the labor that put it up. The asymmetry the 2026-07-10 review
+   accepted is now sharper by design, not softened — "fearless" applies to
+   planning; construction and demolition both carry real cost, confirmed
+   fun rather than friction in the slice's free play.)*
 3. **Earned pride.** The house doesn't pop into existence — it goes up over
    time, so finishing it feels like something *happened*, and the result is
    visibly the sum of my choices: this material, this roofline, this block
@@ -135,6 +164,39 @@ finished stat-box (the building IS the stats, Pillar 1).
    that GDD's Open Question 1). Furniture requires support: the cell(s)
    below must be occupied (ground or built floor). Furniture occupies its
    cells like blocks do (one cell = one occupant, Voxel World Core Rule 2). [TR-building-system-048]
+   **(Slice revision 2026-07-23)** Furniture may occupy a multi-cell
+   **footprint**, not just one cell: MVP's `bed` is 1×2. A footprint is a
+   fixed list of cell offsets from the picked anchor cell; a commit is
+   valid iff every offset cell independently satisfies this rule's support
+   requirement and Core Rule 9's availability check. All footprint cells
+   are written/read as **one furniture entity** — Voxel World's "one cell
+   = one occupant" model is satisfied by every footprint cell referencing
+   the same occupant id, not by N separate entities. `furniture_cell_count`
+   is therefore per-item, not always 1 (F5 updated below). [TR-building-system-124]
+
+**Build/editor mode** *(new subsection, Slice revision 2026-07-23 — gates
+everything above)*
+
+8a. Building tools arm **only inside an explicit Build/Editor Mode.**
+    Outside Build Mode, none of the six tools (Rule 1) can be armed and no
+    ghost preview exists — the toolset is fully inert. [TR-building-system-102]
+8b. Build Mode is entered two ways: (1) an explicit UI toggle, or (2)
+    arming any tool directly from the palette while outside Build Mode —
+    arming a tool always auto-enters Build Mode first, so a player's very
+    first click on a tool icon just works. Build Mode is exited only by
+    the explicit UI toggle or the Esc chain (Rule 8c) — never as a side
+    effect of a single tool deactivation. [TR-building-system-103]
+8c. **Esc chain**: Esc is layered and Build Mode is always the LAST link.
+    From Dragging, Esc aborts the drag (existing Tool state machine). From
+    ToolArmed, Esc returns to Idle (existing Rule, unchanged — still inside
+    Build Mode). From Idle (no tool armed, already inside Build Mode), a
+    further Esc exits Build Mode itself, handing world clicks back to
+    selection (Rule 8d). A single Esc therefore never skips a link: closing
+    a drag never also closes Build Mode in the same press. [TR-building-system-104]
+8d. **Outside Build Mode**, this system does not consume world clicks at
+    all — they belong to villager/project selection per Camera & Input's
+    click-ownership arbitration (ADR-0010). This is the default state
+    (Off) after boot and after the Esc chain's final link. [TR-building-system-105]
 
 **Placement validity** (owned here, per Voxel World's ownership boundary)
 
@@ -163,10 +225,21 @@ finished stat-box (the building IS the stats, Pillar 1).
     system, invisible to Voxel World's data layer. [TR-building-system-052]
 12. Blueprint cells are converted to real blocks by **villager
     construction**. The job contract:
-    - **Every blueprint cell is one job.** The queue is ordered by commit
-      time; ordering defines *availability for display and tie-breaking*,
-      not forced servicing order — Villager AI may choose among available
-      jobs by its own criteria (e.g., proximity). [TR-building-system-053]
+    - **Every blueprint cell is one job** *(Slice revision 2026-07-23 —
+      narrowed)*: **only for cells belonging to a Build Project in the
+      BUILDING state** (see the new Build Projects subsection below). A
+      Draft cell — one whose project has not yet been released, or whose
+      change-order batch has not yet been released — generates no job and
+      is invisible to `claim_job`; villagers ignore it entirely. The queue
+      of BUILDING-eligible cells is ordered by commit time; ordering
+      defines *availability for display and tie-breaking*, not forced
+      servicing order — Villager AI may choose among available jobs by its
+      own criteria (e.g., proximity, or the outside-in/edge-first build
+      ordering flagged as a Production requirement — Open Questions). [TR-building-system-053] [TR-building-system-106]
+    - **`claim_job` records the claiming villager** against the cell (and
+      rolls up onto its project) for **worker attribution** — a queryable,
+      display-only fact (Building UI's project window; a future
+      Township/reputation input), never a mechanical gate. [TR-building-system-109]
     - **One job per villager at a time**; a villager finishes or abandons
       its current job before claiming another. [TR-building-system-054]
     - **Per-cell claims allow parallelism**: N villagers may simultaneously
@@ -191,9 +264,83 @@ finished stat-box (the building IS the stats, Pillar 1).
     tier-0 bootstrap, Resource & Item Database Core Rule 6). [TR-building-system-059] The blueprint
     pipeline is the future seam where Alpha resource costs attach (reserve/
     consume at construction, per the Stonehearth hauling model) — costs are
-    NOT designed here.
+    NOT designed here. **(Slice revision 2026-07-23, user decision
+    2026-07-22 — reaffirmed)** the Build Project entity (below) is
+    explicitly named as that future cost carrier; this GDD still does not
+    design the economy.
 
-**Removal and undo**
+**Build Projects (persistent lifecycle)** *(new subsection, Slice
+revision 2026-07-23 — validated end-to-end by the vertical slice as the
+game's core build UX, not an afterthought)*
+
+14c. **Grouping.** Every valid commit's new blueprint cells are grouped
+    into a **Build Project** entity by spatial adjacency: any new cell that
+    is **26-neighbor-adjacent** (full 3D Moore neighborhood, F6) to a cell
+    already belonging to an existing project of the **same kind** (Rule
+    14i) attaches to that project instead of starting a new one. When a
+    single commit's cells touch two or more previously separate projects at
+    once, all of them merge into one. Grouping is resolved by a **union-find
+    pass over the whole batch** before any single cell's membership is
+    finalized, so the outcome never depends on iteration order within the
+    batch (parallel villager completions and multi-cell commits are
+    equally deterministic). If merged projects disagree only in
+    attribution/history, the lowest-numbered (earliest-created) project id
+    survives and absorbs the others' cells and worker-attribution
+    records. [TR-building-system-107]
+14d. **A single higher-level tool commit is always one batch** for the
+    purposes of Rule 14c, regardless of how many primitive cell-sets it
+    internally produces (a house-template stamp emits walls + floor + roof
+    in one pass) — guaranteeing one project even for a geometry where two
+    sub-shapes would not otherwise be mutually 26-adjacent (e.g. a roof cap
+    with a gap before its supporting wall completes). Room-rect, auto-roof,
+    and house-template tools (Building UI's domain for their UX) satisfy
+    this system's contract by emitting a normal batch of Draft blueprint
+    cells into exactly one project — they add no new system-level
+    behavior beyond Rules 14c/14d. [TR-building-system-126]
+14e. **Project states** (rollup over its cells, not a flag set
+    independently): **DRAFT** (every cell is a Draft cell; no job exists;
+    villagers ignore it entirely) → **BUILDING** (released — see Rule 14f
+    — at least one cell is queued/UnderConstruction and none of its Draft
+    batches are the ENTIRE remaining content) → **PAUSED** (player-paused;
+    no new jobs offered, existing claims revoked per the existing graceful-
+    abandon contract, Villager AI's Rule 3/Edge Case 4) → **DONE** (every
+    cell in the project has reached Built/Removed — see Rule 14i for dig
+    projects — and no Draft batch is pending). [TR-building-system-108]
+14f. **Release ("Bau starten")** is a **per-project** action: it transitions
+    every Draft cell currently in the project (or, for a change order on an
+    already-built project, just that pending batch — Rule 14h) into
+    BUILDING, making them job-eligible per Rule 12. `claim_job` serves
+    BUILDING-state work only — never DRAFT, PAUSED, or a project's
+    not-yet-released change-order batch. [TR-building-system-109]
+14g. **Pause/Resume**: pausing a BUILDING project stops offering new jobs
+    and revokes any in-flight claims (villagers abandon gracefully, exactly
+    as an undo-triggered revocation already does — Edge Case 4); the
+    project's cells remain queued. Resuming re-offers the same remaining
+    cells as jobs and returns the project to BUILDING. Pause/resume never
+    touches Built cells or Draft cells outside the paused batch. [TR-building-system-110]
+14h. **Change orders**: a new commit whose cells are 26-adjacent (Rule 14c)
+    to an existing project that is BUILDING, PAUSED, or DONE does **not**
+    start a new project — it attaches as a new **pending batch** on that
+    project, displayed as "Änderungen geplant" (changes planned) until the
+    player releases that batch specifically (Rule 14f). A DONE project
+    that gains a pending change-order batch is no longer fully DONE for
+    rollup purposes (Rule 14e) until the batch, too, reaches Built or is
+    canceled — the project's overall state simply reflects whichever of
+    its cells/batches are least-finished. [TR-building-system-112]
+14i. **Project persistence.** A project is a **long-lived entity**: reaching
+    DONE does not delete it — it persists as the future carrier for
+    resource costs, scaffolding state, and saved templates (Open
+    Questions). **A project disappears only when it becomes empty** —
+    every one of its cells has been canceled (Draft, free) or demolished/
+    excavated away (Built/Removed, via Rules 14j–14m). Clicking any cell
+    that belongs to a project **selects that project** (its info surface,
+    owned by Building UI) in **any** mode and with **no tool armed** —
+    this is the one form of building-system interaction that works even
+    outside Build Mode (Rule 8d's exception). [TR-building-system-111] [TR-building-system-113]
+
+**Removal, demolition, dig orders, and undo** *(retitled and substantially
+revised, Slice revision 2026-07-23 — supersedes the "instant removal"
+model the 2026-07-10 review had accepted; see Core Rules 16–17 below)*
 
 14b. **Occupancy authority split.** *Physical* occupancy (collision,
     pathing, line-of-sight) is Voxel World's authority — blueprint cells
@@ -205,16 +352,37 @@ finished stat-box (the building IS the stats, Pillar 1).
     blueprint cells). Consumers must never treat raw Voxel World state as
     "what the player has built or plans to build." [TR-building-system-060]
 
-15. **Terrain is not removable.** Only player-built cells (blueprint or
-    constructed) and player-placed furniture can be removed. [TR-building-system-061] This is the
+15. **Terrain is not removable** *(Slice revision 2026-07-23 — narrowed,
+    not reversed)*: terrain can never be removed **instantly** or by the
+    plain single-cell removal path. Only player-built cells (blueprint or
+    constructed) and player-placed furniture can be removed that way. [TR-building-system-061] This is the
     MVP implementation of the anti-pillar "no unbounded terraforming" —
     and it resolves Voxel World's Open Question ("do consuming systems
     need a natural/built distinction?") with **yes**: the game must be able
     to distinguish terrain cells from built cells. [TR-building-system-062] *(How — a Voxel World
     data flag vs. this system's own built-cell record — is an
-    implementation choice for the building ADR.)*
-16. Removal of built cells is instant in MVP (no deconstruction time, no
-    villager involvement). Removing a blueprint cell simply cancels it. [TR-building-system-063]
+    implementation choice for the building ADR.)* The one narrow exception
+    validated by the slice is **dig-order mining** (Rule 14m,
+    TR-building-system-121): terrain becomes removable only through a
+    bounded, job-gated project, never at player-fiat instant speed —
+    preserving the anti-pillar's actual intent (no *unbounded or
+    instant* terraforming) rather than relaxing it.
+16. **Removal of built cells is job-gated, not instant** *(Slice revision
+    2026-07-23 — supersedes the 2026-07-10 review's "instant in MVP"
+    rule)*: targeting a Built cell with the removal tool (or a project-wide
+    cancel, Rule 14k) creates a **demolition order** instead of writing the
+    removal immediately — see Rules 14j–14m. Removing a **blueprint**
+    (not-yet-Built) cell is unchanged and remains instant/free: the removal
+    tool's behavior branches on the target cell's own micro-state — Draft
+    → instant cancel, no job (also reachable via undo, unchanged); Queued/
+    UnderConstruction (released but not yet Built) → instant cancel and the
+    claiming villager's job is revoked, exactly as before; Built → a
+    demolition order (new). [TR-building-system-063] [TR-building-system-123]
+    **Furniture is explicitly exempted from this rule and remains
+    instant** regardless of Built state (Rule 17b below is unchanged) —
+    an in-use bed must be removable immediately for the interruption
+    contract to hold; only structural block cells and terrain go through
+    demolition/dig jobs.
     **17b — Furniture-revocation contract** *(added 2026-07-10, from the
     needs-mood review — Edge Case 11's interruption previously had no
     notification mechanism: Villager AI's Rule 10b covers only MOVING
@@ -225,11 +393,63 @@ finished stat-box (the building IS the stats, Pillar 1).
     consumes it in its Edge Cases 5–6; Needs learns via the villager's
     `stop_recovery` call. Removal itself remains instant and never
     blocked (Edge Case 11). [TR-building-system-064]
+
+14j. **Demolition orders** (Slice revision 2026-07-23, new): a demolition
+    order is created **already released** — unlike build/dig Draft cells it
+    has no staging step, since tearing something down needs no blueprint
+    to reconsider. It is executed by villagers **block by block**,
+    mirroring Rule 12's construction job contract in reverse (one cell =
+    one job; on-site rules per Rule 12 unchanged), taking
+    `base_demolition_ticks` per cell. Once a cell's demolition completes,
+    this system issues the Voxel World clear and the cell is gone; if the
+    cell was a floor-excavation replacement of terrain (Rule 14l), the
+    original terrain's `restore_value` is written back instead of leaving
+    an empty cell. [TR-building-system-114] [TR-building-system-115]
+14k. **Project cancel ("Abriss")** converts an entire project at once:
+    every remaining Draft cell (including any not-yet-released change-order
+    batch) is canceled for free, exactly as a single Draft cancel already
+    was; every Built cell is converted to an already-released demolition
+    order (Rule 14j) in the same action — the player does not additionally
+    press "Bau starten" to tear a canceled project down. [TR-building-system-117]
+14l. **Floor excavation** (Slice revision 2026-07-23, new): a floor-tool
+    drag that starts on a terrain top surface **replaces the terrain cell
+    flush** (Stonehearth-style) rather than stacking a floor cell on top of
+    it (which would create an unwanted step). Because Core Rule 15 still
+    forbids terrain removal outside a job, this is a narrow, tracked
+    exception: the original terrain cell's value is stored as
+    `restore_value` on the blueprint entry. If that entry is later
+    canceled (Draft), undone (still-pending), or demolished (Built, Rule
+    14j), the stored terrain is restored rather than left empty — no floor
+    replacement can ever result in unbounded/permanent terrain loss. [TR-building-system-120]
+14m. **Terrain dig orders / mining zones** (Slice revision 2026-07-23, new):
+    the removal tool, when it targets terrain instead of a player cell,
+    marks Draft dig cells inside a new or existing project of **kind
+    `dig`** (Rule 14c's adjacency/merge rule applies identically, but a
+    dig-kind project only ever merges with other dig-kind projects — it
+    never merges with a `build`-kind project even if spatially adjacent).
+    Dig projects follow the exact same DRAFT → BUILDING (released) →
+    PAUSED/DONE lifecycle (Rules 14e–14h); their terminal per-cell state is
+    **Removed**, not Built. Released dig cells are subject to the same
+    `max_cells_per_command` cap as any other command (Core Rule 9) — mining
+    is bounded, never a free-form terraform. **On-site amendment**: for a
+    dig job specifically, the target cell itself is EXCLUDED from the
+    "on site" set defined by TR-building-system-056 — a villager may stand
+    only on an orthogonal neighbor of the cell it is excavating, never on
+    the cell itself. *(Slice-validated fix: the unamended rule let a
+    villager dig the block directly under its own feet and become
+    trapped.)* [TR-building-system-121] [TR-building-system-122]
 17. **Undo/redo** operates on player *commands* (one wall drag = one
     command = one undo step, exactly as prototyped). Undoing a command
-    cancels its blueprint cells; if some cells were already constructed,
-    those blocks are removed instantly. Redo replays the command as new
-    blueprint cells. [TR-building-system-065] The stack is bounded (default 50 commands); it is
+    cancels its still-pending blueprint cells. **(Slice revision
+    2026-07-23 — supersedes "if some cells were already constructed, those
+    blocks are removed instantly")**: undo/redo now operate on **plan
+    entries exclusively and never reach a Built cell**. If some of a
+    command's cells have already reached Built, undoing that command
+    cancels only the cells still in Draft/Queued/UnderConstruction and
+    leaves the Built cells standing exactly as they are — undo does not
+    even queue a demolition order for them; a player who wants those torn
+    down must use the removal tool or Abriss (Rule 14k) separately. Redo
+    replays the command as new blueprint cells. [TR-building-system-065] [TR-building-system-119] The stack is bounded (default 50 commands); it is
     cleared when a scene transition **completes** (the transition-COMPLETE
     signal, never transition-begin — an aborted/failed transition must
     leave the stack untouched; per Scene/World Management's side-effect
@@ -238,23 +458,46 @@ finished stat-box (the building IS the stats, Pillar 1).
 
 ### States and Transitions
 
-**Tool state machine** (player-facing):
+**Build Mode state machine** (Slice revision 2026-07-23, new — gates
+everything below it):
 
 | State | Entry | Exit | Behavior |
 |-------|-------|------|----------|
-| Idle (no tool) | Boot, cancel, tool deactivation | Tool selected | Camera-only; no ghost, no commits |
+| Off | Boot; explicit UI toggle off; Esc while at Idle (last link, Rule 8c) | Explicit UI toggle on; any tool armed from the palette (auto-enter) | World clicks belong to villager/project selection (Camera & Input's arbitration, ADR-0010); no tool reachable, no ghost [TR-building-system-105] |
+| On | UI toggle on; arming a tool | Explicit UI toggle off; Esc while at Idle | Tool state machine below is live; clicking any project cell still selects it regardless of tool-armed state (Rule 14i) [TR-building-system-102] [TR-building-system-103] |
+
+**Tool state machine** (player-facing; only reachable while Build Mode is On):
+
+| State | Entry | Exit | Behavior |
+|-------|-------|------|----------|
+| Idle (no tool) | Boot **into Build Mode**, cancel, tool deactivation | Tool selected (stays On), **or a further Esc exits Build Mode itself (Rule 8c, Slice revision 2026-07-23)** | Camera-only; no ghost, no commits |
 | ToolArmed | Tool selected | Cancel / other tool / drag start | Ghost preview follows the pick each frame [TR-building-system-026] |
 | Dragging | Drag threshold reached (`cursor_travel_px >= drag_threshold_px`, F4) with `build_place` held | Release (commit), cancel (abort), or other tool selected (abort) | Preview **re-rasterizes every frame** as the cursor moves — the full pending result (wall segment, floor rect, roof footprint) is always current, never frozen at drag start; above `preview_degradation_threshold` cells the preview degrades to an outline (see Tuning Knobs); working plane locked per Core Rule 3 [TR-building-system-003] |
 | Suspended | Camera & Input enters Suspended (scene transition) | Camera & Input reactivates | All interaction halted mid-anything: an in-progress drag is aborted without commit [TR-building-system-067] |
 
-**Blueprint cell lifecycle** (per cell):
+**Blueprint cell lifecycle** (per cell; also called a "Draft cell" while its
+project/change-order batch has not been released — same system state, UX
+term only, Slice revision 2026-07-23):
 
 | State | Entry | Exit | Behavior |
 |-------|-------|------|----------|
-| Planned | Valid commit created it | Job claimed, or canceled | Ghost visual; occupies no grid cell; counted as "pending" for its command's undo step [TR-building-system-068] |
+| Planned (= Draft) | Valid commit created it | Job claimed, or canceled | Ghost visual; occupies no grid cell; counted as "pending" for its command's undo step; **job-eligible only once its project is BUILDING** (Core Rule 12, Slice revision 2026-07-23) [TR-building-system-068] [TR-building-system-106] |
 | UnderConstruction | Villager claims its job and is on site | Build time elapses, or canceled | Progress accumulates per game tick; visually distinct from Planned (see Visual/Audio) [TR-building-system-069] |
-| Built (terminal) | Build time complete | — (cell now lives in Voxel World) | This system writes the block via Voxel World and forgets the cell (undo bookkeeping aside) |
-| Canceled (terminal) | Player removal/undo before Built | — | Ghost removed; any claimed job is revoked (villager abandons gracefully — provisional, Villager AI GDD) |
+| Built (terminal for the cell; not for the project) | Build time complete | Demolition order created (Rule 14j) | This system writes the block via Voxel World; the cell itself is terminal, but **its project persists and only a demolition order can move it onward** (Slice revision 2026-07-23 — supersedes the old "instant removal" path) |
+| Canceled (terminal) | Player removal/undo while still Draft/Queued/UnderConstruction | — | Ghost removed; any claimed job is revoked (villager abandons gracefully — provisional, Villager AI GDD). **Never reachable from Built** (Slice revision 2026-07-23) — see Rule 16/17 |
+
+**Build Project lifecycle** (Slice revision 2026-07-23, new — rolls up
+over the cells above; applies identically to `build`-kind and `dig`-kind
+projects, Rule 14m, except the terminal per-cell state is Removed instead
+of Built for `dig`):
+
+| State | Entry | Exit | Behavior |
+|-------|-------|------|----------|
+| DRAFT | First commit whose cells don't 26-adjoin any existing project | Release ("Bau starten") | No jobs exist; villagers ignore every cell entirely; free to edit (draft eraser) or fully undo [TR-building-system-108] |
+| BUILDING | Release of the project or of a pending change-order batch | Pause; or every cell reaches Built/Removed with no pending batch (→ DONE) | Cells are job-eligible; `claim_job` serves them; worker attribution recorded per claim [TR-building-system-109] |
+| PAUSED | Player pause | Resume (→ BUILDING) | No new jobs offered; in-flight claims revoked gracefully; queued cells untouched [TR-building-system-110] |
+| DONE | Every cell Built/Removed, no pending Draft batch | A new adjacent commit attaches a change-order batch (→ BUILDING once released); or Abriss (Rule 14k) demolishes it back toward empty | Persists as a long-lived entity — does NOT disappear on reaching DONE [TR-building-system-111] |
+| *(deleted)* | Every cell in the project has been canceled or demolished/excavated away — the cell set is empty | — | The project entity itself is removed only at this point (Rule 14i) [TR-building-system-111] |
 
 ### Interactions with Other Systems
 
@@ -291,6 +534,22 @@ finished stat-box (the building IS the stats, Pillar 1).
   consumes the construction-job queue (claim job → path to site → work →
   report done). This GDD defines the queue's behavior; the AI GDD must
   confirm claiming, pathing-failure, and abandonment semantics.
+  **(Slice revision 2026-07-23)** `claim_job` now serves only BUILDING-
+  project cells (Core Rule 12/14f) and must record worker attribution per
+  claim; demolition jobs (Rule 14j) reuse the same claim/on-site contract;
+  dig jobs (Rule 14m) use an amended on-site set that excludes the target
+  cell itself. Three Production requirements surfaced by the slice remain
+  **owned by Villager AI, not this GDD** — recorded here only as the seam
+  this system's job supply must not preclude: (1) **outside-in/edge-first
+  build-order planning** (this system's queue ordering is commit-time only,
+  Core Rule 12 — job *selection* among available cells is entirely
+  Villager AI's criteria to extend); (2) **scaffolding/ladders** for tall
+  builds (no system-level change here; a future seam, like resource costs);
+  (3) **stuck telemetry as a hard requirement** — the slice's unstuck
+  watchdog (~3s) plus seal-prevention with a livelock guard is a
+  **validated interim safety net, not the final solution** (Villager AI's
+  Tuning Knobs own the actual tick value — pointer only, see this GDD's
+  Tuning Knobs).
 - **Build Validation & Navigability** (MVP, downstream): reads completed
   structures (and possibly blueprints) to judge enclosure/livability.
   This system exposes "a construction completed" signals for it —
@@ -303,6 +562,13 @@ finished stat-box (the building IS the stats, Pillar 1).
 - **Building UI** (MVP, downstream): renders the tool palette, material
   selection, wall-height stepper, roof-formation picker, and undo/redo
   buttons; displays validity feedback. All state it shows lives here. [TR-building-system-076]
+  **(Slice revision 2026-07-23)** also renders the Build Mode toggle, the
+  per-project window (state, release/pause/resume/Abriss controls, worker
+  attribution) and project-click selection; the room-rect/auto-roof/house-
+  template higher-level tools are entirely Building UI's UX to design —
+  this GDD only guarantees they land as one project batch (Rule 14d). This
+  is a **flagged reciprocal update building-ui.md still needs** (not made
+  in this pass — out of scope for this document).
 - **Scene/World Management** (Foundation, upstream): hosting; the undo
   stack clears on transition-COMPLETE (Core Rule 17 — never on begin, so
   a load-failure abort leaves undo intact) [TR-building-system-066]; tool state machine suspends
@@ -373,6 +639,15 @@ assuming one villager. Total real-time-to-complete for an N-cell command is
 deliberately NOT modeled here: it depends on villager count, pathing, and
 job scheduling (Villager AI & Behavior's domain).*
 
+**(Slice revision 2026-07-23)** Demolition orders (Rule 14j) use the
+identical mechanism with a separate base value, `base_demolition_ticks`
+(Tuning Knobs) — `cell_demolition_ticks = base_demolition_ticks[category]`,
+same burst rule, same warp-invariance. The slice validated the job-gated
+*mechanism* (a villager walks to a Built cell and tears it down block by
+block) but did not measure or tune a specific pace — the default below is
+an `[assumption]`, not a playtest-validated value (per this doc's
+provenance rule), pending a dedicated demolition-pacing playtest.
+
 ### F4 — Click vs drag discrimination
 
 `is_drag = cursor_travel_px >= drag_threshold_px` while `build_place` is
@@ -391,8 +666,41 @@ specified now** (unblocking AC15 for MVP):
 `flat_roof_cell_count = (|dx| + 1) × (|dz| + 1)` — identical to F2, one
 cell thick on the plane above the footprint's highest picked surface.
 Gable/Hip/Shed functions are specified alongside the shape algorithm at
-Vertical Slice detail (see below). [TR-building-system-007] `furniture_cell_count = 1` for all MVP
-furniture (`bed`). [TR-building-system-082]
+Vertical Slice detail (see below). [TR-building-system-007]
+
+`furniture_cell_count = |footprint(item)|` **(Slice revision 2026-07-23 —
+supersedes "= 1 for all MVP furniture")**: furniture now occupies a
+per-item footprint (a fixed list of cell offsets, Core Rule 8), not
+always a single cell. MVP's only furniture item, `bed`, has a 1×2
+footprint → `furniture_cell_count = 2`. [TR-building-system-082] [TR-building-system-124]
+
+| Variable | Type | Range | Description |
+|----------|------|-------|--------------|
+| `footprint(item)` | array of Vector3i offsets | 1–N cells, fixed per item definition | The item's cell shape relative to its anchor (picked) cell; MVP `bed` = 2 offsets |
+
+Example: placing `bed` → `furniture_cell_count = 2` (was 1 before the
+slice's multi-cell furniture finding).
+
+### F6 — 26-neighbor adjacency predicate (Slice revision 2026-07-23, new)
+
+`is_26_adjacent(cell_a, cell_b) = (chebyshev_distance(cell_a, cell_b) == 1)`,
+where `chebyshev_distance(a, b) = max(|a.x−b.x|, |a.y−b.y|, |a.z−b.z|)`.
+This is the exact test Core Rule 14c (project grouping/change orders) and
+Rule 14m (dig-project grouping) apply between every pair of candidate
+cells — full 3D Moore neighborhood (including edge- and corner-touching
+cells), not face-only (6-neighbor) or edge-only (18-neighbor). [TR-building-system-107]
+
+| Variable | Type | Range | Description |
+|----------|------|-------|--------------|
+| `cell_a`, `cell_b` | Vector3i | within world bounds | The two cells being tested for project-merge adjacency |
+| `chebyshev_distance` | int | ≥ 0 | Max per-axis absolute difference; 0 = same cell |
+| `is_26_adjacent` | bool | {true, false} | true iff the cells are neighbors (including diagonally) in 3D — the merge/attach trigger |
+
+Output is a boolean, unbounded input domain (any two in-bounds cells).
+Example: `cell_a = (4, 1, 4)`, `cell_b = (5, 1, 5)` → distance = max(1, 0,
+1) = 1 → `is_26_adjacent = true` (a purely diagonal touch still merges).
+`cell_b = (6, 1, 4)` → distance = 2 → `false` (one cell of empty space
+between them does not merge).
 
 ### Deliberately NOT formulas (and why)
 
@@ -403,6 +711,13 @@ furniture (`bed`). [TR-building-system-082]
 - **Pick raycast** — owned by Voxel World (its GDD: native/DDA, deferred
   to the building ADR).
 - **Undo stack behavior** — rules (Core Rule 17), not math.
+- **Project batch-merge/union-find grouping** *(Slice revision
+  2026-07-23)* — a graph algorithm (which cells belong to which project),
+  not a scalar computation; F6 supplies its one reusable predicate, but the
+  union-find pass itself (Core Rule 14c) is a rule, not a formula.
+- **Outside-in/edge-first build-order sequencing** *(Slice revision
+  2026-07-23)* — a Villager AI job-selection policy over this system's job
+  supply (Core Rule 12), not owned or computed here.
 
 ## Edge Cases
 
@@ -468,6 +783,54 @@ furniture (`bed`). [TR-building-system-082]
     without commit (States table); no partial blueprint is ever created by
     an aborted drag. [TR-building-system-067]
 
+**Added by the vertical slice (Slice revision 2026-07-23)**
+
+13. **A single commit batch touches two or more previously separate
+    projects of the same kind at once.** All touched projects merge into
+    one (Core Rule 14c); the lowest-numbered (earliest-created) project id
+    survives and absorbs the others' cells and worker-attribution history —
+    a deterministic, order-independent choice, never an arbitrary winner. [TR-building-system-107]
+14. **A new draft is 26-adjacent to a `dig`-kind project while drawing a
+    `build`-kind command (or vice versa).** No merge occurs — kind is a
+    hard partition (Rule 14m); a second, separate project is created even
+    though the cells touch. [TR-building-system-121]
+15. **A change-order batch is drawn against a DONE project.** The project's
+    rollup state leaves DONE and shows "Änderungen geplant" (Rule 14h)
+    until the new batch is separately released; the project's already-Built
+    cells and worker-attribution history are untouched. [TR-building-system-112]
+16. **Draft eraser used to carve a gap out of an unreleased wall draft**
+    (e.g. a door gap before release). The targeted cells, still in Draft
+    micro-state, are erased instantly with no job and no notification —
+    this is plan editing, indistinguishable in cost from never having
+    drawn them (Rule 16/TR-building-system-123). [TR-building-system-123]
+17. **Removal tool targets a Built cell that is mid-demolition-claim by
+    another action (e.g. Abriss fires while a lone `build_remove` demolition
+    order on the same cell is already queued).** The second request is a
+    no-op on an already-queued demolition cell — exactly one demolition job
+    exists per cell, never a duplicate (mirrors Core Rule 3's "already
+    holds a blueprint cell" invalid-commit rule, applied to the demolition
+    queue). [TR-building-system-114]
+18. **A canceled/demolished floor-excavation cell's stored terrain has
+    itself changed since replacement** (e.g. Voxel World's terrain data
+    was altered by an unrelated system in the interim — not possible in
+    MVP's static terrain, but the bookkeeping must not assume otherwise).
+    `restore_value` writes back exactly the value captured at the moment
+    of replacement, not a re-derived "current" terrain state — restoration
+    is a snapshot, never a live query. [TR-building-system-120]
+19. **A multi-cell furniture footprint's cells are only partially
+    supported or only partially free** (e.g. a 1×2 bed where one of the
+    two cells lacks support, or overlaps an existing blueprint/built
+    cell). The entire commit is invalid — Core Rule 9's availability check
+    and Core Rule 8's support check apply to every footprint cell
+    independently; there is no partial placement of a multi-cell
+    furniture item. [TR-building-system-124]
+20. **A dig job's target cell is directly beneath a villager's current
+    standing cell.** The villager is never considered "on site" for that
+    job while standing on the target (Rule 14m's on-site amendment) — it
+    must stand on an orthogonal neighbor instead, which the job-claim logic
+    (Villager AI's domain) must select in preference to the now-excluded
+    cell. [TR-building-system-122]
+
 ## Dependencies
 
 ### Upstream (systems this one depends on)
@@ -478,7 +841,7 @@ furniture (`bed`). [TR-building-system-082]
 | Camera & Input | ✅ Designed | InputMap action signals (`build_place`, `build_remove`, tool selects), mouse world-ray query, Suspended state |
 | Resource & Item Database | ✅ Designed | Palette queries (`building_material`, `furniture_fixture`), `tier` (free set), `material_family`, `visual_asset` |
 | Time & Tick System | ✅ Designed | Tick events for construction progress (F3); pause/warp semantics via game time |
-| Villager AI & Behavior | ✅ Designed (2026-07-10) | Job claiming, on-site presence, pathing failure/abandon semantics for the construction queue (Core Rule 12) — **contract CONFIRMED** by villager-ai-behavior.md (its Core Rules 3–7 + F1 arrival rule, F4 nudge-aside); `unreachable_retry_ticks` is owned there |
+| Villager AI & Behavior | ✅ Designed (2026-07-10); slice extensions flagged 2026-07-23, not yet reciprocated in that GDD | Job claiming, on-site presence, pathing failure/abandon semantics for the construction queue (Core Rule 12) — **contract CONFIRMED** by villager-ai-behavior.md (its Core Rules 3–7 + F1 arrival rule, F4 nudge-aside); `unreachable_retry_ticks` is owned there. **(Slice revision 2026-07-23)** additionally: worker-attribution recording on claim (Rule 14f), the dig-job on-site exclusion (Rule 14m), and the three Production requirements this system's job supply must not preclude — outside-in/edge-first build ordering, scaffolding/ladders, and stuck telemetry (unstuck watchdog + seal-prevention, validated interim only) — all owned there, **flagged here as a reciprocal update that GDD still needs, not made in this pass** |
 
 ### Downstream (systems that depend on this one)
 
@@ -486,11 +849,12 @@ furniture (`bed`). [TR-building-system-082]
 |--------|------|-----------|------------------|
 | Villager AI & Behavior | MVP | ✅ Designed | The mutual seam's other direction: consumes this system's construction-job queue as its work supply (its Rules 4–7) — listed upstream above for what this system consumes FROM it, listed here because it cannot do its Work activity without this queue (added 2026-07-10, cross-review fix) |
 | Build Validation & Navigability | MVP | ✅ Designed | Completed structures + construction-completed signals (contract confirmed by build-validation-navigability.md) |
-| Building UI | MVP | Undesigned | Tool state, palette selection, wall-height, roof formation, undo/redo state, validity feedback *(provisional)* |
-| Onboarding / Tutorial | Vertical Slice | Undesigned | The MVP toolset as teachable verbs *(provisional)* |
+| Building UI | MVP | Undesigned | Tool state, palette selection, wall-height, roof formation, undo/redo state, validity feedback *(provisional)*. **(Slice revision 2026-07-23)** additionally: Build Mode toggle, per-project window (state/release/pause/resume/Abriss/worker attribution), project-click selection, room-rect/auto-roof/house-template tool UX — **flagged reciprocal update, not made in this pass** |
+| Onboarding / Tutorial | Vertical Slice | Undesigned | The MVP toolset as teachable verbs *(provisional)*. **(Slice revision 2026-07-23)** the slice's own tester needed one explanation round for the draft→release→build workflow and never discovered the door-gap convention unaided — both are now named onboarding-content requirements, not just "teach the six tools" |
 | Township Progression | Alpha | Undesigned | Built structures as prosperity inputs *(provisional — prosperity variable itself still open)* |
-| Economy Balance (Sinks) | Alpha | Undesigned | Future build costs as a resource sink *(provisional — costs not designed here, Core Rule 14)* |
-| Save/Load & World Persistence | Vertical Slice | Undesigned | Blueprint cells + construction progress serialization; undo stack explicitly excluded *(provisional)* [TR-building-system-023] [TR-building-system-033] |
+| Economy Balance (Sinks) | Alpha | Undesigned | Future build costs as a resource sink *(provisional — costs not designed here, Core Rule 14; explicitly reaffirmed deferred by user decision 2026-07-22 — the Build Project entity, Rule 14e, is the confirmed future cost carrier)* |
+| Save/Load & World Persistence | Vertical Slice | Undesigned | Blueprint cells + construction progress serialization; undo stack explicitly excluded *(provisional)* [TR-building-system-023] [TR-building-system-033]. **(Slice revision 2026-07-23)** must now also serialize: Build Project entities (state, kind, cell membership, worker-attribution history — the persistence Rule 14i explicitly requires), pending demolition orders, and floor-excavation `restore_value` entries |
+| Resource & Item Database | Vertical Slice (Production) | Undesigned | **(Slice revision 2026-07-23, new)** a future `door`/`window` fixture category — pathing-transparent items that keep a room sealed for shelter analysis (Open Question 6); this system would place them via the existing Furniture tool pipeline (Core Rule 8) once they exist |
 
 ## Tuning Knobs
 
@@ -504,6 +868,11 @@ furniture (`bed`). [TR-building-system-082]
 | `preview_degradation_threshold` | 128 | 32–512 | Above this cell count, the live drag preview degrades from per-cell ghosts to an outline/bounding representation (Dragging state) — protects the frame budget on large drags while keeping the commit exact [TR-building-system-035] |
 | `undo_stack_depth` | 50 | 10–200 | How far back a player can undo (Core Rule 17, Edge Case 9). Worst-case memory is now bounded and checkable: 200 commands × 512 cells × a small per-cell record ≈ low single-digit MB — negligible against the 4 GB ceiling. The cap exists for predictability |
 | Unreachable-job retry cadence | see `unreachable_retry_ticks` (20) | — | Owned by the Villager AI GDD's Tuning Knobs (confirmed 2026-07-10) — pointer only, value not duplicated here |
+| `project_merge_neighborhood` (Slice revision 2026-07-23) | 26 (full Moore) | {6, 18, 26} | Which cells count as adjacent for project grouping/change orders (F6, Core Rule 14c). 6 = face-only (stricter merging, more separate projects for the same footprint); 26 = default, matches the slice's "contiguous drafts merge" behavior including diagonal touches. Raising strictness (toward 6) makes projects feel more fragmented; the slice validated 26 only — 6/18 are named as an enum-safe range, not separately playtested `[assumption for the non-26 values]` |
+| `draft_ghost_alpha` (Slice revision 2026-07-23) | 0.50 | 0.30–0.70 | Translucency of a Draft/Planned (unreleased or paused) blueprint ghost — the more tentative visual tier. Distinguishes an unreleased plan from released/queued work at a glance, alongside the existing Planned-vs-UnderConstruction distinctness requirement (TR-building-system-069) |
+| `queued_ghost_alpha` (Slice revision 2026-07-23) | 0.70 | 0.50–0.90 | Translucency of a released/queued (BUILDING, not yet claimed) blueprint ghost — more opaque than Draft, reading as "committed to," short of UnderConstruction's progress-fill treatment. Must stay `> draft_ghost_alpha` or the two tiers become indistinguishable |
+| `base_demolition_ticks[block]` (Slice revision 2026-07-23) | 4 `[assumption]` | 1–20 | Demolition pacing per block (F3 addendum, Rule 14j) — mirrors `base_build_ticks[block]`'s default as a neutral placeholder; the slice validated the job-gated *mechanism*, not this specific pace. Needs a dedicated tuning pass before Production |
+| Unstuck watchdog cadence (Slice revision 2026-07-23) | ~3s interim (validated as a safety net, not final) | — | Owned by the Villager AI GDD's Tuning Knobs — pointer only, value not duplicated here. The slice's watchdog + seal-prevention livelock guard is the interim mitigation; stuck telemetry (frequency counters) is the named Production requirement that will drive its real tuning |
 
 All values are data-driven per the coding standard (no hardcoding); the
 Building UI exposes only `wall_height` to the player — the rest are
@@ -614,6 +983,8 @@ and triggers, never owns. [TR-building-system-076]
 | Palette, tier-0 set, `bed`, visual_asset | `design/gdd/resource-item-database.md` | Core Rules 5–8, Open Question 1 | Data contract; this GDD resolves its Open Question 1 (bed only) |
 | MVP definition, Pillar 1, anti-pillar (no terraforming) | `design/gdd/game-concept.md` | MVP Definition, Pillars | Scope authority |
 | Construction-job queue contract | `design/gdd/villager-ai-behavior.md` | Job claim/abandon (its Rules 3–7, F1, F4) | CONFIRMED 2026-07-10 |
+| Vertical slice validation — build/editor mode, projects, dig orders, draft eraser, floor excavation, multi-cell furniture, worker attribution, anti-stuck package | `prototypes/last-seal-vertical-slice/REPORT.md` | Playtest observations + Production requirements list | Source of ALL Slice revision 2026-07-23 content in this document — USER-CONFIRMED, not proposals (2026-07-22/23) |
+| Door/window discoverability affordance handoff | `design/art/art-bible.md` §7.6 | Confirmed slice failure: "door = wall gap" undiscoverable without explanation | Cross-reference for Open Question 6; the affordance question stands until door/window ITEMS ship |
 
 ## Acceptance Criteria
 
@@ -643,7 +1014,8 @@ batch atomicity.)*
 10. **GIVEN** a commit targets a cell already holding a constructed block or terrain (not replace-in-place), **WHEN** `build_place` fires, **THEN** it is rejected with visible feedback and no blueprint is created. [TR-building-system-049]
 11. **GIVEN** a commit targets a cell holding a blueprint cell, **WHEN** `build_place` fires, **THEN** it is rejected (Edge Case 3). [TR-building-system-085]
 12. **GIVEN** a terrain cell, **WHEN** `build_remove` targets it, **THEN** removal is rejected (Core Rule 15). [TR-building-system-061]
-13. **GIVEN** a built cell, **WHEN** `build_remove` targets it, **THEN** it is removed instantly (Core Rule 16). [TR-building-system-063]
+13. **GIVEN** a built cell, **WHEN** `build_remove` targets it, **THEN** a demolition order is created and the cell is NOT removed immediately — the write occurs only once a claiming villager completes `base_demolition_ticks` on site (Core Rule 16, Slice revision 2026-07-23 — supersedes the prior "removed instantly" behavior). [TR-building-system-114]
+13b. **GIVEN** a Draft or Queued/UnderConstruction (not-yet-Built) cell, **WHEN** `build_remove` targets it, **THEN** it is canceled instantly with no job — unchanged from before the slice (Core Rule 16's micro-state branch). [TR-building-system-123]
 14. **GIVEN** a terrain cell, **WHEN** replace-in-place targets it, **THEN** the commit is rejected (Edge Case 2). [TR-building-system-084]
 15. **GIVEN** the roof tool with the Flat formation and a 3×4 footprint drag, **WHEN** committed, **THEN** exactly 20 blueprint cells are created one plane above the footprint's highest picked surface (F5 Flat — testable now). [TR-building-system-082]
 15b. **[PROVISIONAL — shape spec at VS]** **GIVEN** the roof tool with Gable/Hip/Shed and a footprint drag, **WHEN** committed, **THEN** a deterministic, non-zero cell set matching that formation is created, with the preview shown pre-commit (F5). [TR-building-system-007]
@@ -662,14 +1034,14 @@ batch atomicity.)*
 26. **GIVEN** the game is paused, **WHEN** a tool commits, **THEN** blueprint cells are created identically to the unpaused case (AC4); **WHEN** undo/redo fires, **THEN** the stack mutates and blueprints update exactly as when unpaused (building-while-paused, Game Feel). [TR-building-system-097]
 
 **Undo/redo**
-27. **GIVEN** a command with pending and already-built cells, **WHEN** undone, **THEN** pending cells are canceled and built cells are removed instantly (Core Rule 17, Edge Case 7). [TR-building-system-065]
+27. **GIVEN** a command with pending and already-built cells, **WHEN** undone, **THEN** pending cells are canceled and the already-Built cells are left standing untouched — no removal, no demolition order queued (Core Rule 17, Edge Case 7, Slice revision 2026-07-23 — supersedes "built cells are removed instantly"). [TR-building-system-119]
 28. **GIVEN** an undone command whose cells are now partially occupied, **WHEN** redone, **THEN** only still-valid cells are re-created; invalid ones are dropped with feedback (Edge Case 8). [TR-building-system-088]
-29. **GIVEN** a 15-cell wall command, **WHEN** undo fires once, **THEN** all 15 cells cancel/remove in a single step (per-command granularity). [TR-building-system-065]
+29. **GIVEN** a 15-cell wall command with a mix of still-pending and already-Built cells, **WHEN** undo fires once, **THEN** all still-pending cells cancel in that single step and the Built cells are left standing (per-command granularity is unchanged; Built-cell exclusion is new, Slice revision 2026-07-23). [TR-building-system-065] [TR-building-system-119]
 30. **GIVEN** the stack holds `undo_stack_depth` commands, **WHEN** a new command commits, **THEN** the oldest is discarded silently (Edge Case 9). [TR-building-system-089]
 31. **GIVEN** any undo has occurred, **WHEN** a new command commits, **THEN** the redo branch is cleared. [TR-building-system-089]
 32. **GIVEN** a scene transition, **WHEN** it completes, **THEN** the undo stack is empty (Core Rule 17). [TR-building-system-066]
 32b. **GIVEN** a 3-command undo stack, **WHEN** a transition is triggered but ABORTS (target scene fails to load), **THEN** all 3 commands remain undoable — no begin-signal side effect touched the stack *(added 2026-07-10 re-review: the undo-abort trap fix)*. [TR-building-system-066]
-33. **GIVEN** a command's built cell was modified by another system, **WHEN** that command is undone, **THEN** the stale entry is skipped without error or double-removal (undo bookkeeping, Interactions). [TR-building-system-071]
+33. **GIVEN** a command's built cell was modified by another system, **WHEN** that command is undone, **THEN** the stale entry is skipped without error or double-removal (undo bookkeeping, Interactions). *(Slice revision 2026-07-23 — narrower in practice now: since undo never targets Built cells at all (AC27/29), this guards only the self-write-exemption bookkeeping around still-pending entries, not a built-cell removal race.)* [TR-building-system-071]
 
 **Lifecycle and edge behavior**
 34. **GIVEN** a scene transition, **WHEN** it completes, **THEN** pending blueprint cells and their construction progress persist — only the undo stack clears (Edge Case 10). [TR-building-system-090]
@@ -695,6 +1067,61 @@ batch atomicity.)*
 **Added by re-review (2026-07-10)**
 50. **GIVEN** a drag whose pending cell count exceeds `preview_degradation_threshold`, **WHEN** the preview updates, **THEN** it renders as an outline/bounding representation rather than per-cell ghosts, while the eventual commit remains cell-exact (Dragging state, Tuning Knobs). [TR-building-system-039]
 51. *(Cross-reference, not a Building AC)*: the full claim→build→report integration cycle promised by AC21 is concretely owned by **Villager AI AC40/40b** (added 2026-07-10); AC21 is fulfilled by those tests. Performance at population scale is gated by **Villager AI AC39** (milestone-gated) — this system's per-villager burst cost (F3) is part of what that AC measures.
+
+**Added by the vertical slice (2026-07-23) — Build Mode, Projects, Demolition/Dig, Undo scope, Floor Excavation, Multi-Cell Furniture**
+*(all BLOCKING logic/state-machine unit tests per the testing standard unless marked otherwise; items citing Villager AI's claim/on-site mechanics are marked PROVISIONAL, mirroring AC21/36b)*
+
+**Build/editor mode**
+52. **GIVEN** Build Mode Off, **WHEN** a tool-select action fires, **THEN** Build Mode transitions to On and the selected tool arms in the same action (Rule 8b). [TR-building-system-102] [TR-building-system-103]
+53. **GIVEN** Build Mode On at Idle (no tool armed), **WHEN** Esc fires, **THEN** Build Mode transitions to Off and world clicks return to selection; **GIVEN** a tool armed or a drag in progress, **WHEN** Esc fires, **THEN** only that layer exits and Build Mode remains On (Esc chain, Rule 8c). [TR-building-system-104]
+54. **GIVEN** Build Mode Off, **WHEN** a world click fires, **THEN** this system does not consume it at all — no tool, ghost, or commit is reachable (Rule 8d). [TR-building-system-105]
+
+**Project grouping and merge**
+55. **GIVEN** two separate commits whose cells are 26-adjacent (F6), **WHEN** the second commits, **THEN** both sets of cells belong to exactly one Build Project (Rule 14c). [TR-building-system-107]
+56. **GIVEN** a single commit batch that touches two previously separate same-kind projects at once, **WHEN** resolved, **THEN** both merge into one project keyed by the lower (earlier-created) project id, deterministically regardless of cell iteration order (Rule 14c, Edge Case 13). [TR-building-system-107]
+
+**Per-project release and worker attribution**
+57. **GIVEN** a project in DRAFT, **WHEN** "Bau starten" is pressed, **THEN** every one of its cells becomes job-eligible BUILDING work, and none of them were claimable before that action (Rule 14f). [TR-building-system-109]
+58. **[PROVISIONAL — Villager AI]** **GIVEN** a villager claims a job on a BUILDING project's cell, **WHEN** the claim registers, **THEN** the villager's id is recorded on that cell and rolled up onto the project's worker-attribution record, queryable by Building UI (Rule 12/14f — the claim mechanic itself is Villager AI's, the recording contract is this system's). [TR-building-system-109]
+
+**Pause/Resume**
+59. **GIVEN** a BUILDING project, **WHEN** paused, **THEN** no new jobs are offered and any in-flight claim is revoked gracefully (mirrors Edge Case 4); **WHEN** later resumed, **THEN** the same remaining cells become job-eligible again without re-creating them (Rule 14g). [TR-building-system-110]
+
+**Persistence and click-selection**
+60. **GIVEN** a project whose every cell has reached Built/Removed, **WHEN** checked, **THEN** the project entity still exists as DONE — it is never deleted on completion (Rule 14i). [TR-building-system-111]
+61. **GIVEN** a project whose last remaining cell is canceled or demolished/excavated away, **WHEN** that resolves, **THEN** the project entity itself is deleted — the one and only condition under which a project disappears (Rule 14i). [TR-building-system-111]
+62. **GIVEN** any project in any state (DRAFT/BUILDING/PAUSED/DONE) and no tool armed, **WHEN** one of its cells is clicked, **THEN** the project is selected — this works in Build Mode Off too, the sole exception to AC54 (Rule 14i/8d). [TR-building-system-113]
+
+**Change orders**
+63. **GIVEN** a DONE project, **WHEN** a new 26-adjacent commit is made, **THEN** it attaches as a pending "Änderungen geplant" batch on the SAME project (not a new project) and the project's already-Built cells are unaffected (Rule 14h). [TR-building-system-112]
+64. **GIVEN** that pending batch, **WHEN** it alone is released, **THEN** only its cells become job-eligible BUILDING work — the project's other, already-Built cells are untouched by that release (Rule 14f/14h). [TR-building-system-112]
+
+**Demolition orders and Abriss**
+65. **GIVEN** a Built cell targeted by the removal tool, **WHEN** it fires, **THEN** a demolition order is created already in released/BUILDING state — no separate "Bau starten" step is needed for teardown (Rule 14j). [TR-building-system-114] [TR-building-system-115]
+66. **GIVEN** a demolition job fed `base_demolition_ticks` worth of on-site tick events via a mocked claim (mirrors AC20's mocked-job pattern), **WHEN** the last tick applies, **THEN** the Voxel World clear occurs and the cell is gone (Rule 14j). [TR-building-system-115]
+67. **GIVEN** a project with both remaining Draft cells and Built cells, **WHEN** Abriss (project cancel) fires, **THEN** the Draft cells cancel for free instantly AND every Built cell receives an already-released demolition order, all in one action (Rule 14k). [TR-building-system-117]
+
+**Undo scope (plan-only)**
+68. **GIVEN** a command whose cells have all already reached Built (nothing pending remains), **WHEN** undo fires, **THEN** nothing happens to those cells — undo has zero effect on fully-Built work, not even queuing a demolition order (Rule 17, companion to AC27/29). [TR-building-system-119]
+
+**Floor excavation**
+69. **GIVEN** a floor-tool drag started on a terrain top surface, **WHEN** committed, **THEN** the terrain cell is replaced flush (not stacked into a step) and its original value is captured as `restore_value` on the blueprint entry (Rule 14l). [TR-building-system-120]
+70. **GIVEN** such an entry is later canceled, undone while still pending, or demolished, **WHEN** resolved, **THEN** the captured `restore_value` is written back in place of the cell — never left empty (Rule 14l, Edge Case 18). [TR-building-system-120]
+
+**Dig projects and on-site exclusion**
+71. **GIVEN** the removal tool targets a terrain cell, **WHEN** committed, **THEN** Draft dig cells are created in a new or existing `dig`-kind project, and this project never merges with an adjacent `build`-kind project even if 26-adjacent (Rule 14m, Edge Case 14). [TR-building-system-121]
+72. **[PROVISIONAL — Villager AI]** **GIVEN** a released dig cell, **WHEN** a villager's on-site eligibility is evaluated, **THEN** standing on the target cell itself never counts as on-site — only an orthogonal neighbor cell does (Rule 14m's amendment to TR-building-system-056, Edge Case 20). [TR-building-system-122]
+
+**Draft eraser (removal-tool branching)**
+73. **GIVEN** the removal tool targets a cell still in Draft micro-state, **WHEN** it fires, **THEN** the cell is erased instantly with no job created and no notification (Rule 16, Edge Case 16). [TR-building-system-123]
+74. **GIVEN** the removal tool targets a Queued/UnderConstruction (released but not yet Built) cell, **WHEN** it fires, **THEN** it cancels instantly and any claimed job is revoked — unchanged from the pre-slice behavior (Rule 16's micro-state branch). [TR-building-system-123]
+
+**Multi-cell furniture**
+75. **GIVEN** the furniture tool with `bed` selected targeting an anchor cell whose 1×2 footprint is only partially supported or partially blocked, **WHEN** committed, **THEN** the entire commit is rejected — there is no partial placement of a multi-cell item (Rule 8, Edge Case 19). [TR-building-system-124]
+76. **GIVEN** a valid `bed` commit, **WHEN** it resolves, **THEN** exactly one furniture entity is created spanning both footprint cells, each cell referencing the same occupant id (F5, `furniture_cell_count = 2`). [TR-building-system-124]
+
+**Higher-level tools (system-side contract only)**
+77. **GIVEN** a house-template stamp whose internally-generated sub-shapes (walls/floor/roof) would not all be mutually 26-adjacent on their own, **WHEN** committed as one action, **THEN** every resulting cell belongs to exactly one project (Rule 14d) — the tool's own UX (room-rect, auto-roof, template picker) is Building UI's to design; this AC covers only this system's batch-merge guarantee. [TR-building-system-126]
 
 ## Open Questions
 

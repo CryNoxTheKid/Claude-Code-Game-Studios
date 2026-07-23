@@ -1,9 +1,9 @@
 # Building UI
 
-> **Status**: Approved (2026-07-10 — MAJOR REVISION NEEDED → toast model rebuilt; re-review NEEDS REVISION (narrow) → grace-clock rewrite + patches; verification pass CLEAN)
+> **Status**: Approved (2026-07-10 — MAJOR REVISION NEEDED → toast model rebuilt; re-review NEEDS REVISION (narrow) → grace-clock rewrite + patches; verification pass CLEAN) — **Slice revision 2026-07-23**: scope expanded from "pure toolbar HUD" to the full build-mode interaction layer (build mode entry, picking/hover contracts, ghost presentation, higher-level tools, slice view, projects panel) per the vertical slice's Stonehearth-style build workflow; USER-CONFIRMED 2026-07-22/23, slice-validated.
 > **Author**: user + Claude Code Game Studios agents
-> **Last Updated**: 2026-07-10
-> **Last Verified**: 2026-07-10
+> **Last Updated**: 2026-07-23
+> **Last Verified**: 2026-07-23 (Slice revision — see `prototypes/last-seal-vertical-slice/REPORT.md`)
 > **Implements Pillar**: Pillar 4 — Clarity over complexity (primary); Pillar 1 — The building IS the game (the toolset's face)
 
 ## Summary
@@ -19,7 +19,22 @@ resolving the Time & Tick GDD's open UI-trigger question). It renders
 and triggers; it owns no state — every displayed value lives in the
 system it mirrors (Building System, Build Validation, Time & Tick).
 
-> **Quick reference** — Layer: `Presentation` · Priority: `MVP` · Key deps: `Building System, Build Validation & Navigability, Resource & Item Database, Time & Tick System`
+**(Slice revision 2026-07-23)** The vertical slice validated a much larger
+build-interaction surface than the MVP toast/toolbar model above, and this
+GDD's scope now covers it: **Build Mode** as the explicit entry point
+(a master "Bauen" toggle gating every build tool), the **picking and
+always-on hover contract** (ghost cells pick as solid, dig-orders and
+water do not), **ghost/marker presentation** (material-tinted alpha
+ghosts, inflated-box replace/dig markers), the **higher-level tools**
+(Room, Auto-roof, House stamp) as HUD/interaction surfaces over Building
+System's cell-generation, the **Slice View** (world horizontal cutoff for
+interiors), and the **Projects Panel** (per-project cards driving the
+Stonehearth-style draft → release → build → demolish workflow). The
+slice's own verdict: this workflow "emerged as CORE UX during the slice
+and must be first-class in the building GDDs, not an afterthought"
+(REPORT.md). See Detailed Rules 13–23.
+
+> **Quick reference** — Layer: `Presentation` · Priority: `MVP` · Key deps: `Building System, Build Validation & Navigability, Resource & Item Database, Time & Tick System, Art Bible §7 (visual direction — Slice revision 2026-07-23)`
 
 ## Overview
 
@@ -34,11 +49,19 @@ the cozy valley view. Per Pillar 1, the toolbar IS the game's verb list
 (active tool, selected material, wall height, roof formation, undo/redo
 availability, time state, validation events) and sends player intents
 back as the same InputMap actions and calls the source systems already
-define — it never interprets world clicks itself (Camera & Input →
-Building System own that pipeline) and never stores gameplay state.
-MVP scope is exactly one screen context: the Valley build HUD. Menus,
-settings, and additional HUDs (combat, township) are separate future
-systems.
+define — it never interprets world clicks *for placement* itself
+(Camera & Input → Building System own that pipeline) and never stores
+gameplay state. **(Slice revision 2026-07-23)** It DOES own click-routing
+**arbitration** and the resulting **Selection** state once a tool is not
+consuming the pick: outside Build Mode, a world click resolves to either
+a villager selection or a project selection (Rule 15) — this is a
+routing/mirroring decision (which consumer's query wins), not placement
+interpretation, and stays consistent with the existing shared-gate
+pattern this GDD already owns for hover suppression (Rule 11). MVP scope
+is exactly one screen context: the Valley build HUD, now spanning two
+top-level interaction modes (World Navigation and Build Mode — Rule 13).
+Menus, settings, and additional HUDs (combat, township) are separate
+future systems.
 
 ## Player Fantasy
 
@@ -279,15 +302,219 @@ dense RTS command card, nested ribbon menus, or modal dialog churn.
     `palette_next`, `palette_prev`, `formation_next`, `formation_prev`,
     `height_step_up`, `height_step_down` per Rule 9b) are registered
     under Camera & Input's action ownership (its Core Rule 7 — it owns
-    definitions, consumers own meaning). [TR-building-ui-065]
+    definitions, consumers own meaning). [TR-building-ui-065] **(Slice
+    revision 2026-07-23)** extends this list with `build_mode_toggle`,
+    `slice_up`, `slice_down`, `slice_reset`, and tool-select actions for
+    the three higher-level tools (Room, Auto-roof, House stamp — Rule
+    19); same ownership model as Rule 9b — `slice_up`/`slice_down`/
+    `slice_reset` retain their slice-validated `PageUp`/`PageDown`/`Home`
+    defaults pending a `/ux-design` collision check, while the
+    higher-level-tool keys are `[assumption]` (Open Question 13).
+
+**Build Mode, picking, ghosts, higher-level tools, slice view, projects
+panel** *(Rules 13–23 added 2026-07-23 — vertical slice validation;
+USER-CONFIRMED 2026-07-22/23. The vertical slice ran this workflow as a
+single always-on build layer; the rules below formalize it as two
+top-level interaction modes, World Navigation and Build Mode, per the
+production requirement that clicks outside building intent must resolve
+to villager/project selection instead.)*
+
+13. **Build Mode is the explicit entry point** for every build tool: a
+    master **"Bauen"** toggle (button in the toolbar zone + a bound key,
+    `build_mode_toggle`) switches the HUD between **World Navigation**
+    (default — camera/selection only, no build chrome) and **Build
+    Mode** (toolbar tools + higher-level tools + the build grid become
+    available). None of the six base tools, nor Room/Auto-roof/House
+    stamp (Rule 19), can arm while in World Navigation. [TR-building-ui-075]
+    **Arming auto-enters**: firing a tool-select action (button, key
+    1–5, or a higher-level-tool key) while in World Navigation enters
+    Build Mode AND arms that tool in the same frame — one player action,
+    not two — so a player never has to consciously "turn on building"
+    before using a tool; the toggle exists for the reverse action
+    (leaving build context explicitly) and for players who prefer to
+    browse the toolbar before choosing a tool. [TR-building-ui-075]
+14. **The Esc chain** resolves exactly one step per press, highest
+    priority first, and is never skipped or combined: (1) if a toast/
+    anchor holds HUD keyboard focus, Esc releases that focus only (old
+    Rule 9b, unchanged); else (2) if a tool is armed, Esc cancels it back
+    to Build Mode with no tool armed (old Rule 3, unchanged); else (3) if
+    a Selection is active (villager or project, Rule 15), Esc clears it;
+    else (4) if Build Mode is on, Esc exits to World Navigation. A press
+    with no applicable step (World Navigation, nothing selected) is a
+    no-op. [TR-building-ui-076]
+15. **Outside Build Mode, world clicks route to Selection.** In World
+    Navigation, a world click resolves to exactly one outcome:
+    - If the picked cell is occupied by a villager, the villager claims
+      the selection (Villager Info UI's existing query, its Rule 1) —
+      **villager wins ties**: a villager standing on/in a project cell
+      takes selection precedence over the project underneath it, since a
+      person is always the more specific target than the space they
+      occupy.
+    - Else, if the picked cell belongs to any Building System project
+      (a Draft, Released, UnderConstruction, or Built cell that is part
+      of a persistent project — pending that GDD's own project-lifecycle
+      propagation, see Dependencies), that project becomes the Selection:
+      its world-space outline renders around the project's full
+      footprint and its Projects Panel card highlights in the same frame
+      (Rule 21's reciprocal highlight).
+    - Else (bare terrain, water, or empty space), the click clears any
+      existing Selection.
+    Selection is mutually exclusive (villager XOR project XOR none) —
+    selecting one clears the other, mirroring the existing "exactly one
+    tool active" invariant (old Rule 3/AC 21). [TR-building-ui-077]
+16. **Picking treats blueprint/ghost cells as solid geometry, with two
+    exemptions.** The shared pick ray (Building System's pick contract)
+    resolves a Planned or Released ghost cell's face exactly as it would
+    a real block's — this is what lets a roof tool target a drafted
+    (not-yet-built) wall run. Two cell classes are exempt from
+    pickable-solid:
+    - **Dig-order cells** ("holes-to-be" — a queued excavation/removal
+      marker) are never a solid pick target; the ray passes through to
+      whatever lies behind or beneath them.
+    - **Water** is never pickable-solid regardless of any marker/ghost
+      state layered over it — a player cannot target a build action at
+      a water surface as if it were solid ground.
+    A ray that resolves nothing after these exemptions behaves exactly as
+    the existing no-pick case (old Building System Edge Case 4: hidden
+    ghost, no-op). [TR-building-ui-078]
+17. **Always-on hover feedback.** Whenever the pick ray resolves to a
+    valid target cell — in World Navigation OR Build Mode, tool armed or
+    not — the target cell renders a wireframe outline plus a hit-face
+    quad showing which face was hit, reusing the same pick-ray data any
+    active tool preview or Selection query already consumes (one source
+    of truth, several presentation consumers; extends the shared-gate
+    principle of old Rule 11). In Build Mode specifically, an additional
+    **build grid** — cell-edge lines on the picked working plane around
+    the cursor — renders at `build_grid_opacity` (Tuning Knobs) in the
+    Valley-Ochre-family per Art Bible §7.1; the grid never renders in
+    World Navigation, where Pillar 4's calm valley view takes priority
+    over a placement aid nobody is using yet. [TR-building-ui-079]
+18. **Ghost and marker presentation.** Ghosts render as a translucent
+    tint of the ACTUAL material selected for placement (not a generic
+    "blueprint" hue) — a Draft (not-yet-Released) ghost renders at
+    `ghost_alpha_draft`, a Released ghost (queued, no longer an editable
+    draft) at the higher `ghost_alpha_released` (Tuning Knobs); the alpha
+    step itself communicates commitment level, no new hue needed.
+    **Invalid** placement, in any state, overrides the material tint with
+    the State Orange tint (reuses old Rule 8's invalid-signal language —
+    one invalid channel, not two). **Replace and dig/demolition markers**
+    (terrain-replace, e.g. the floor tool flushing terrain; and
+    dig/demolition orders) both render as an **inflated overlay box**
+    around the affected cell — visibly larger than a flush ghost, the
+    shared "this cell's content is changing to something not-yet-real"
+    tell. Within that shared inflated-box language the two marker kinds
+    still differ by **shape**, never shade or pulse alone (Art Bible
+    §7.1's same-hue-differs-by-shape rule): both sit in the State-Orange
+    family (the slice's red demolition tint does **not** survive — Art
+    Bible §9 Prohibition 2), and their exact silhouette pairing is an
+    Art Bible §7.3 shape-budget item (Open Question 12), not decided
+    here. [TR-building-ui-080] [TR-building-ui-081]
+19. **Higher-level tools** — HUD/interaction surface only; the
+    mechanical cell-generation algorithms are Building System's domain
+    and require that GDD's own propagation (Open Question 9). All three
+    arm only in Build Mode (Rule 13) and follow the same pick → preview →
+    commit pipeline as the base tools (Building System Core Rule 2):
+    - **Room tool**: drags a ground-plane rectangle (minimum 3×3 cells);
+      commit generates a full-height perimeter wall run at the current
+      `wall_height` around the rectangle's edge, with one 1-cell door
+      gap automatically omitted from whichever perimeter edge faces the
+      camera **at commit time** (recomputed on commit, not drag start —
+      the player may orbit mid-drag). The whole result is ONE draft
+      project (Rule 21), not N separate wall commands.
+    - **Auto-roof tool**: one click on any cell belonging to an existing
+      project computes that project's footprint bounding box and
+      generates a Flat-formation roof (Building System F5) at the bbox's
+      top height, joining the SAME project — the slice-validated
+      "cap the box" affordance that removes per-edge roof dragging for
+      simple huts.
+    - **House template stamp**: one click centers a fixed 7×7 footprint —
+      flush floor + perimeter walls with one camera-facing door gap (Room
+      rule) + a Flat roof at wall-height above — and creates ALL of it as
+      ONE draft project in a single action. Precondition: the 7×7
+      footprint must sit on uniform terrain height (no internal
+      height-step) and have a clear volume up to roof height; an
+      ineligible footprint shows the standard invalid-commit cue (old
+      Rule 8) and commits nothing. [TR-building-ui-082] [TR-building-ui-083] [TR-building-ui-084]
+20. **Slice View** — a player-controlled horizontal world cutoff: cells
+    above the current level are hidden from render (world geometry,
+    ghosts, and characters — simulation is unaffected, this is
+    presentation-only). Controlled by `PageUp`/`PageDown` (step one
+    cell) and `Home` (reset to show everything), plus a HUD **"Ebene"**
+    indicator with +/− buttons mirroring the keys (same interaction
+    pattern as the wall-height stepper, old Rule 6). Available in BOTH
+    World Navigation and Build Mode — it is a camera/visibility aid, not
+    a build-exclusive tool — and is the essential path to furnishing
+    interiors once a roof is on. A cell hidden by the cutoff cannot
+    become a NEW hover target (Rule 17) or Selection target (Rule 15)
+    simply because it is not there to click; anything already selected
+    or armed is unaffected by slicing (Edge Case 18). [TR-building-ui-085]
+21. **Projects Panel** — a new screen-space chrome zone (joining the
+    toolbar/time-controls/toast zones of old Rule 1), showing one card
+    per Building System project: name, status text (e.g. "Geplant" /
+    "Im Bau" / "Pausiert" / "Änderungen geplant" / "Wird abgerissen" /
+    "Fertig" — exact string set pending Building System's own
+    project-lifecycle propagation, Open Question 9), a progress readout
+    `X/Y` cells built plus a bar (no easing — raw value every frame, Art
+    Bible §7.4), the names of villagers currently working the project,
+    and state-dependent action buttons (Bau starten / Verwerfen while
+    Draft; Pause / Abbrechen while active; Fortsetzen while paused;
+    Abriss once built). Clicking a card selects that project identically
+    to clicking one of its world cells (Rule 15) — the world outline and
+    the panel highlight are two renders of one Selection, never two
+    independent states. **Provisional layout flag**: functionally
+    slice-validated but with **no written UX spec** — production layout
+    must not lock until `design/ux/projects-panel.md` exists (via
+    `/ux-design`); the slice's card arrangement is provisional guidance
+    only (Art Bible §7.5/§7.6 handoff). [TR-building-ui-086]
+22. **Door-gap discoverability.** Confirmed playtest failure
+    (`REPORT.md`, 2026-07-23): a wall gap functioning as a door was not
+    discoverable without explanation. This GDD requires a dedicated
+    visual affordance class marking "this gap is a functional doorway,"
+    distinct from an unfinished or accidental gap — obeying the existing
+    shape+label-never-hue convention (old Rule 9's icon rule, Art Bible
+    §4.6/§7.1). Exact treatment is undesigned pending the Art Bible §7.6
+    handoff; this rule commits only to the requirement existing. It is
+    explicitly **superseded, not duplicated**, the moment door/window
+    ITEMS ship (a building-system.md production requirement per
+    `REPORT.md`) — a placed door object is its own affordance, and this
+    rule retires at that point (Open Question 11). [TR-building-ui-087]
+23. **Undo/redo scope: plan entries only.** Undo/redo (old Rule 7)
+    reaches ONLY Draft commands not yet Released and Released-but-not-
+    yet-Built blueprint cells, per Building System's per-command undo
+    model (its Core Rule 17). Once a cell is Built, undo can never reach
+    it again — reverting built work is exclusively a demolition order
+    (the Projects Panel's Abriss button, Rule 21), a worker-executed job,
+    never an instant undo. **Consequence this GDD owns** (the UX surface
+    of a Building System rule): there is no "undo my demolished house"
+    path — a queued or executed demolition is never an undo-tracked step,
+    and the undo button/binding never lists one. Deliberate asymmetry,
+    mirroring the already-accepted room-recognition-celebration asymmetry
+    (old Rule 9d). [TR-building-ui-088]
 
 ### States and Transitions
 
 | State | Entry | Exit | Behavior |
 |-------|-------|------|----------|
-| Idle | Boot, cancel, tool deactivated | Tool selected | Toolbar + time controls visible; context panel hidden |
-| ToolArmed(tool) | Tool selected (button or key 1–5) | Cancel / other tool / Suspended | Context panel for that tool; active button highlighted |
+| **WorldNav** *(Slice revision 2026-07-23)* | Boot, Build Mode toggled off, Esc chain's final step (Rule 14) | Build Mode entered (toggle, or auto-enter via tool-arm, Rule 13) | Only the "Bauen" toggle + time controls visible; no context panel, no build grid; world clicks route to Selection (Rule 15); always-on hover highlight still active (Rule 17) |
+| Idle *(Build Mode, no tool)* | Build Mode entered with no tool armed; tool canceled (Rule 14 step 2) | Tool selected (arms); Esc exits to WorldNav (Rule 14 step 4) | Toolbar + tool buttons + higher-level tools + time controls visible; context panel hidden; build grid visible around cursor (Rule 17) |
+| ToolArmed(tool) | Tool selected (button, key 1–5, or auto-enter from WorldNav) | Cancel / other tool / Suspended | Context panel for that tool; active button highlighted; ghost preview follows the pick (Rule 18) |
 | Suspended | Camera & Input enters Suspended (scene transition) | Reactivation | Entire HUD hidden; all input ignored (mirrors Building's tool state machine) [TR-building-ui-066] |
+
+**Selection lifecycle (orthogonal to the states above, added 2026-07-23):**
+None ↔ VillagerSelected ↔ ProjectSelected — mutually exclusive (Rule 15).
+Entered by a qualifying world click or a Projects Panel card click;
+cleared by clicking empty terrain/water, selecting the other kind, or
+the Esc chain's third step (Rule 14). Selection persists across a Build
+Mode toggle (selecting a project, then entering Build Mode to edit it,
+keeps it selected) and across Slice View changes (Edge Case 18) — it is
+UI state, not render state.
+
+**Esc priority chain (Rule 14):** each press resolves exactly the
+highest-priority applicable step and never more than one: (1) HUD
+keyboard focus release if a toast/anchor holds it (old Rule 9b — never
+dismisses, never falls through) → (2) armed tool cancels to Idle → (3)
+active Selection clears → (4) Build Mode exits to WorldNav. A press with
+no applicable step is a no-op (Edge Case 19).
 
 **Per-key toast lifecycle (Rule 9):** Grace(new key, hidden — wall-clock
 timer) → Shown | AnchorOnly(overflow) → Dismissed(debounce window —
@@ -307,6 +534,13 @@ from the live issue set plus one expanded/collapsed flag.
   tool/material/height/formation/undo state; triggers it exclusively via
   the shared InputMap actions and its existing selection calls. Mirrors,
   never owns (its UI Requirements section is this GDD's contract).
+  **(Slice revision 2026-07-23)** also the source of the pick-solid/
+  dig-order/water exemption contract (Rule 16), the per-command undo
+  scope this GDD surfaces as a UX consequence (Rule 23), and — pending
+  that GDD's own propagation — the project/draft/release/demolition
+  lifecycle the Projects Panel (Rule 21) and higher-level tools (Rule
+  19) render; this GDD documents the UI-visible contract now, the
+  mechanical ownership needs formal propagation there (Open Question 9).
 - **Build Validation & Navigability** (upstream, MVP): consumes its
   warning/info events + why-strings (Rule 9) and its queryable state
   for the issues anchor (Rule 9c); implements all four items of its UI
@@ -324,7 +558,19 @@ from the live issue set plus one expanded/collapsed flag.
   suppression coordinates with its mouse-ray consumers.
 - **Villager Info UI** (MVP sibling, undesigned): separate GDD —
   villager-related display lives there; this GDD is strictly the
-  build-and-time HUD.
+  build-and-time HUD. **(Slice revision 2026-07-23)** the two GDDs now
+  share the Selection outcome of Rule 15 (villager-wins-ties precedence)
+  and the extended 4-step Esc chain (Rule 14, step 3) — a reciprocal
+  update to that GDD's Rule 1 is flagged (Open Question 10), mirroring
+  the existing reciprocal-clause pattern between these two documents.
+- **Art Bible** (upstream, MVP — **new dependency, Slice revision
+  2026-07-23**): §7.1 governs ghost/marker tint, alpha-as-commitment,
+  build-grid color family, and the same-hue-differs-by-shape rule for
+  replace/dig markers (Rule 18); §7.5 governs panel anatomy (Rule 21);
+  §7.2/§7.4 govern the Projects Panel's typography and no-easing
+  progress-bar convention. Supersedes the Visual Direction Note as this
+  GDD's presentation authority per the Art Bible's own foundation note
+  (its rules carry forward where not explicitly revised).
 - **Scene/World Management** (upstream): hosting; Suspended during
   transitions.
 
@@ -338,7 +584,13 @@ number the player sees (wall height, time speed, undo depth) is owned
 and derived by an upstream system; the only UI-local numeric behaviors
 (toast cap, fade durations, FIFO overflow) are authored constants and
 ordering rules — recorded in Tuning Knobs and Edge Cases respectively,
-not as formulas.
+not as formulas. **(Slice revision 2026-07-23)** the same verdict holds
+for the new Rules 13–23: the Room tool's 3×3 minimum, the House stamp's
+fixed 7×7 footprint, and the ghost alpha/grid-opacity values are
+authored constants (Tuning Knobs), not derived math; the mechanical cell
+counts the Room/Auto-roof/House-stamp tools generate reuse Building
+System's existing F1/F2/F5 formulas over a computed footprint — no new
+formula is introduced here.
 
 ## Edge Cases
 
@@ -417,6 +669,38 @@ not as formulas.
     feature requiring focus to survive dynamic Control add/remove —
     OQ7's 4.6 dual-focus verification is BLOCKING for Rule 9b's
     implementation specifically.)*
+14. **Selection precedence tie** *(added 2026-07-23)*: a villager
+    standing on/in a cell that also belongs to a project. The villager
+    claims the selection; the project underneath is not selected (Rule
+    15) — the player can still select that project by clicking a
+    different one of its cells. [TR-building-ui-077]
+15. **Dig-order pick-through with nothing behind it** *(added
+    2026-07-23)*: the ray passes through the dig-order marker (Rule 16)
+    and, finding no further geometry, resolves as a miss — identical to
+    the existing no-pick case (hidden ghost, no-op commit). [TR-building-ui-078]
+16. **Auto-roof clicked on a cell belonging to no project** *(added
+    2026-07-23)*: bare terrain or an unowned lone block gives the tool no
+    bounding box to compute. The invalid-commit cue appears (old Rule 8)
+    and nothing is created. [TR-building-ui-083]
+17. **House stamp on an ineligible footprint** *(added 2026-07-23)*: any
+    height-stepped cell within the 7×7 area, or any obstruction up to
+    roof height, fails the precondition (Rule 19). The invalid-commit cue
+    appears and no project is created — never a partial stamp. [TR-building-ui-084]
+18. **Selection persists under a Slice-View cutoff** *(added 2026-07-23)*:
+    if the current Selection (villager or project) is hidden by the
+    slice level, the Selection state itself is untouched — it is UI
+    state, not render state (States and Transitions). The world-space
+    outline simply does not render while hidden; the Projects Panel
+    highlight (or Villager Info UI's panel) still shows normally. [TR-building-ui-085]
+19. **Rapid Esc presses through the full chain** *(added 2026-07-23)*: a
+    tool armed, a Selection active, and Build Mode on, all at once — each
+    Esc press consumes exactly one chain step in priority order (Rule
+    14); three presses are required to reach WorldNav, never fewer, and
+    no press ever resolves two steps at once. [TR-building-ui-076]
+20. **Room tool dragged below the 3×3 minimum** *(added 2026-07-23)*: the
+    invalid-commit cue appears (old Rule 8) and no project is created —
+    mirrors the existing clamped-drag feedback language elsewhere in this
+    GDD (e.g. Edge Case 1). [TR-building-ui-082]
 
 ## Dependencies
 
@@ -424,19 +708,21 @@ not as formulas.
 
 | System | GDD Status | What this system consumes |
 |--------|-----------|---------------------------|
-| Building System | ✅ Approved | Tool/material/height/formation/undo state + the UI Requirements contract; triggered via shared InputMap actions |
+| Building System | ✅ Approved (project/draft/release/demolition lifecycle, room/auto-roof/house-stamp cell generation, and the pick-solid/dig-order/water contract are slice-validated but **not yet propagated into that GDD's text** — Slice revision 2026-07-23; Open Question 9) | Tool/material/height/formation/undo state + the UI Requirements contract; triggered via shared InputMap actions; **(Slice revision)** project lifecycle state for the Projects Panel (Rule 21), higher-level tool cell generation (Rule 19), and the pick-solid/dig-order/water exemption (Rule 16) |
 | Build Validation & Navigability | ✅ Approved | Warning/info events + why-strings + queryable state (its Rule 10); the four-item UI seam contract (its UI Requirements) — implemented by Rules 9–9c |
 | Resource & Item Database | ✅ Approved | Palette contents, `visual_asset` icons, `display_name` tooltips, tier-0 rule |
 | Time & Tick System | ✅ Approved | Pause/warp API + state display (resolves its Core Rule 2 UI-trigger question) |
 | Camera & Input | ✅ Approved | InputMap action ownership for new bindings (Rule 12); Suspended state; raw-delta pattern |
 | Scene/World Management | ✅ Approved | Hosting; Suspended during transitions |
+| Art Bible | ✅ COMPLETE (§7 — **new dependency, Slice revision 2026-07-23**) | Ghost/marker tint + alpha-as-commitment rules, build-grid color family, same-hue-differs-by-shape rule for replace/dig markers (§7.1); panel anatomy (§7.5); typography/no-easing progress convention (§7.2/§7.4) |
 
 ### Downstream (systems that depend on this one)
 
 | System | Tier | GDD Status | What it consumes |
 |--------|------|-----------|------------------|
-| Villager Info UI | MVP | ✅ Designed | The click-ownership rule (armed tool ⇒ Building pipeline; Idle ⇒ villager selection may claim hits — its Rule 1) (added 2026-07-10, cross-review bidirectional fix) |
-| Onboarding / Tutorial | Vertical Slice | Undesigned | The toolbar as the teachable surface *(provisional)* |
+| Villager Info UI | MVP | ✅ Designed (reciprocal update pending — Open Question 10) | The click-ownership rule (armed tool ⇒ Building pipeline; Idle ⇒ villager selection may claim hits — its Rule 1) (added 2026-07-10, cross-review bidirectional fix); **(Slice revision 2026-07-23)** the extended Selection routing (villager-wins-ties, Rule 15) and the 4-step Esc chain (Rule 14) |
+| Onboarding / Tutorial | Vertical Slice | Undesigned | The toolbar as the teachable surface *(provisional)*; **(Slice revision)** the Build Mode entry point and door-gap discoverability gap (Rule 22) are confirmed onboarding-relevant findings |
+| Projects Panel UX Spec | Pre-Production | Undesigned — **new downstream, Slice revision 2026-07-23** | This GDD's provisional card content/behavior (Rule 21) as its starting contract; `/ux-design` must formalize layout before production lock (Art Bible §7.5/§7.6 handoff) |
 
 ## Tuning Knobs
 
@@ -446,6 +732,10 @@ not as formulas.
 | `min_reshow_interval` | 30s | 10–120s | Dismissal debounce (Rule 9, seam item 2): how long a dismissed toast stays hidden through re-emissions. `[assumption]` until playtest |
 | `warning_grace_delay` | 3s | 1–8s | First-appearance grace (Rule 9, seam item 3): how long a new issue must persist before surfacing at all. `[assumption]` until playtest |
 | `invalid_cue_fade` | 1s | 0.5–2s | Duration of the at-cursor invalid marker |
+| `ghost_alpha_draft` *(Slice revision 2026-07-23)* | 0.50 | 0.30–0.70 | Draft-ghost translucency (Rule 18) — slice-validated value |
+| `ghost_alpha_released` *(Slice revision 2026-07-23)* | 0.70 | `ghost_alpha_draft`–0.90 (floor is the current draft value, not a fixed number) | Released-ghost translucency (Rule 18) — the floor tracks `ghost_alpha_draft` so retuning one can never collapse the draft→released ordering invariant that carries the "increased commitment" read (cross-parameter coherence check) |
+| `build_grid_opacity` *(Slice revision 2026-07-23)* | 0.30 | 0.15–0.45 | Build-mode cursor grid opacity (Rule 17) — user-tuned in the slice; too high competes with the calm valley view (Pillar 4), too low fails as a placement aid |
+| Slice View keys *(Slice revision 2026-07-23)* | `PageUp`/`PageDown` (step one level) / `Home` (reset to show-all) | — | Slice-validated as a working scheme in the prototype (REPORT.md — no confusion reported); retained as the default pending a `/ux-design` collision check against every other binding (same status class as Rule 9b's bindings, Open Question 13) — the ACTIONS (`slice_up`/`slice_down`/`slice_reset`) are the commitment, not the keys |
 
 *(`toast_confirm_fade` deleted 2026-07-10 — room confirmations are no
 longer toasts, Rule 9d.)*
@@ -472,6 +762,18 @@ room-recognized chime by Build Validation (no duplication — Rule 9d).
 time-control icons, toast frames (2 severity tiers — warning / info),
 issues-anchor icon + badge.
 
+**(Slice revision 2026-07-23)** Art Bible §7 now governs this section's
+world-space additions (superseding the Visual Direction Note where
+revised, per its own foundation note): the material-tinted ghost shader
+(alpha per Tuning Knobs), the always-on hover wireframe + hit-face quad,
+the build grid (Valley-Ochre family, §7.1), the inflated-box replace/dig
+markers (shared shape language, distinct silhouettes per marker kind —
+§7.1/§7.3), 3 higher-level tool icons (Room, Auto-roof, House stamp), the
+Projects Panel's card frame + status icon set (Draft/Released/Paused/
+Built/DemolitionQueued — §7.3's shape-budget table), the "Ebene" slice
+indicator icon, and the (undesigned pending §7.6 handoff) door-gap
+affordance icon.
+
 ## Game Feel
 
 Every UI reaction lands the same frame as its input (raw-delta path) [TR-building-ui-005];
@@ -479,7 +781,14 @@ context-panel swaps are snappy (no slide animations in MVP — speed over
 ornament); the HUD never disappears unexpectedly. **Feel acceptance
 criteria** (playtest): a first-time player finds tool + material
 unaided in under a minute (covers the concept's onboarding beat);
-nobody calls the HUD "in the way."
+nobody calls the HUD "in the way." **(Slice revision 2026-07-23)**
+Confirmed by the vertical slice (REPORT.md): the tester discovered the
+Build Mode toolbar and the draft → release → build project workflow
+unaided ("mehr als genug für einen Prototypen") and reacted with
+unprompted enthusiasm to the persistent-projects build ("Ich bin sehr
+begeistert"). **One confirmed failure to carry forward**: the door-gap
+affordance (Rule 22) was NOT discoverable without explanation — now a
+tracked requirement, not an assumption of "it'll be obvious."
 
 ## UI Requirements
 
@@ -498,7 +807,9 @@ This GDD *is* the UI — this section points forward instead:
 | Pause/warp trigger ("Building UI/HUD") | `design/gdd/time-tick-system.md` | Core Rule 2 | **Resolved by this GDD** (Rules 1/10 — patch note there) |
 | Action ownership, Suspended, raw-delta pattern | `design/gdd/camera-input.md` | Core Rules 7–10 (Rules 9–10 authored 2026-07-10) | New actions under its ownership (Rule 12) |
 | Palette data (`display_name`, `visual_asset`, tier-0) | `design/gdd/resource-item-database.md` | Core Rules 4–8 | Data contract |
-| Blue–orange axis, material colors | `design/art/visual-direction-note.md` | State axis | Visual constraint |
+| Blue–orange axis, material colors | `design/art/visual-direction-note.md` | State axis | Visual constraint (superseded where revised by Art Bible §7 — Slice revision 2026-07-23) |
+| Ghost/marker tint + alpha, build grid, same-hue-differs-by-shape, panel anatomy, typography/no-easing bars | `design/art/art-bible.md` | §7.1, §7.2, §7.3, §7.4, §7.5, §7.6 | **New (Slice revision 2026-07-23)** — this GDD's presentation authority for Rules 16–21 |
+| Vertical slice validation, playtest findings, propagation list | `prototypes/last-seal-vertical-slice/REPORT.md` | Playtest Results, Observations, "If Proceeding" | **New (Slice revision 2026-07-23)** — source of Rules 13–23 and Open Questions 9–13 |
 
 ## Acceptance Criteria
 
@@ -555,11 +866,46 @@ checks are ADVISORY (interaction test or walkthrough doc).)* [TR-building-ui-038
 40. **GIVEN** a subject in Grace, **WHEN** the game is PAUSED past the remaining delay, **THEN** the expiry still fires and the queryable-state check decides surfacing — grace/debounce timers are wall-clock, frozen only by Suspended (Rule 9, Edge Case 6). [TR-building-ui-053]
 41. **GIVEN** the focused toast auto-retires or is promoted away, **THEN** keyboard focus transfers to the next visible toast, or the anchor if none — never null while any focusable notification element exists (Edge Case 13). [TR-building-ui-073]
 
+**Added by Slice revision (2026-07-23) — blocking headless (Build Mode, picking, ghosts, higher-level tools, slice view, projects panel, undo scope)**
+42. **GIVEN** WorldNav, **WHEN** the `build_mode_toggle` action fires, **THEN** the state becomes Build-Mode/Idle and tool/higher-level-tool buttons become available (Rule 13). [TR-building-ui-075]
+43. **GIVEN** WorldNav, **WHEN** any tool-select action fires (button, key 1–5, or a higher-level-tool key), **THEN** Build Mode enters AND the tool arms in the same frame — no intermediate Build-Mode/Idle frame is ever observable (Rule 13 auto-enter). [TR-building-ui-075]
+44. **GIVEN** a tool armed inside Build Mode, **WHEN** Esc fires, **THEN** the state returns to Build-Mode/Idle only — never further (Rule 14, chain step 2). [TR-building-ui-076]
+45. **GIVEN** Build-Mode/Idle with no tool armed and an active Selection, **WHEN** Esc fires, **THEN** the Selection clears and Build Mode remains ON (Rule 14, chain step 3). [TR-building-ui-076]
+46. **GIVEN** Build-Mode/Idle with no tool armed and no active Selection, **WHEN** Esc fires, **THEN** the state returns to WorldNav (Rule 14, chain step 4). [TR-building-ui-076]
+47. **GIVEN** WorldNav, **WHEN** a world click resolves to a cell occupied by both a villager and a project, **THEN** the villager claims the Selection and the project is NOT selected (Rule 15 precedence, Edge Case 14). [TR-building-ui-077]
+48. **GIVEN** WorldNav, **WHEN** a world click resolves to a project cell with no villager on it, **THEN** that project becomes the Selection, its world-space outline renders, and its Projects Panel card highlights the same frame (Rule 15). [TR-building-ui-077]
+49. **GIVEN** a project selected via its Projects Panel card, **THEN** the identical world-space outline appears as a world-click selection would produce — one Selection, two renders (Rule 21 reciprocal highlight). [TR-building-ui-086]
+50. **GIVEN** a Planned or Released (not yet Built) blueprint ghost cell, **WHEN** the pick ray targets its face, **THEN** it resolves exactly as picking solid geometry would (Rule 16). [TR-building-ui-078]
+51. **GIVEN** a dig-order marker cell, **WHEN** the pick ray targets it, **THEN** the ray passes through to whatever lies behind/beneath it — the dig-order cell is never the resolved pick target (Rule 16 exemption, Edge Case 15). [TR-building-ui-078]
+52. **GIVEN** a water cell, **WHEN** the pick ray targets its surface, **THEN** it never resolves as a solid pick target regardless of any overlaid marker/ghost state (Rule 16). [TR-building-ui-078]
+53. **GIVEN** any valid pick resolution in ANY mode (WorldNav or Build Mode), **THEN** the target cell renders its wireframe + hit-face quad highlight the same frame (Rule 17, always-on). [TR-building-ui-079]
+54. **GIVEN** Build Mode, **THEN** the build grid renders around the cursor at `build_grid_opacity`; **GIVEN** WorldNav, **THEN** the build grid does not render (Rule 17). [TR-building-ui-079]
+55. **GIVEN** a Draft ghost cell, **THEN** it renders at `ghost_alpha_draft`; **GIVEN** the same cell Released, **THEN** it renders at `ghost_alpha_released` — a visibly different alpha, same material tint (Rule 18). [TR-building-ui-080]
+56. **GIVEN** any tool's preview resolves invalid, **THEN** the ghost renders in the State-Orange tint regardless of the selected material (Rule 18 override). [TR-building-ui-080]
+57. **GIVEN** a terrain-replace marker and a dig/demolition marker both visible, **THEN** both render as inflated overlay boxes but with distinct icon/overlay SHAPE — never distinguished by shade or pulse-timing alone (Rule 18). [TR-building-ui-081]
+58. **GIVEN** the Room tool with a 4×5 ground-plane drag, **WHEN** committed, **THEN** a single draft project is created containing the full perimeter wall run plus exactly one camera-facing door-gap cell omitted from that run (Rule 19). [TR-building-ui-082]
+59. **GIVEN** the Room tool dragged below the 3×3 minimum, **WHEN** committed, **THEN** the invalid-commit cue appears and no project is created (Edge Case 20). [TR-building-ui-082]
+60. **GIVEN** Auto-roof clicked on a cell belonging to an existing project, **WHEN** committed, **THEN** a Flat roof is generated over that project's bounding box at its top height and joins the SAME project id (Rule 19). [TR-building-ui-083]
+61. **GIVEN** Auto-roof clicked on a cell belonging to no project, **WHEN** committed, **THEN** the invalid-commit cue appears and nothing is created (Edge Case 16). [TR-building-ui-083]
+62. **GIVEN** the House stamp tool clicked on a 7×7-eligible footprint (uniform terrain height, clear volume), **WHEN** committed, **THEN** exactly ONE new draft project is created containing the flush floor, perimeter walls with one door gap, and roof (Rule 19). [TR-building-ui-084]
+63. **GIVEN** the House stamp tool clicked on a footprint with a height-stepped cell or an obstruction, **WHEN** committed, **THEN** the invalid-commit cue appears and no project is created (Edge Case 17). [TR-building-ui-084]
+64. **GIVEN** any slice level, **WHEN** `slice_up`/`slice_down`/`slice_reset` fire, **THEN** the render cutoff changes by exactly one cell / resets to show-all, and the "Ebene" HUD indicator reflects the new level the same frame (Rule 20). [TR-building-ui-085]
+65. **GIVEN** a slice level hiding the villager or project that is the current Selection, **THEN** the Selection state is unchanged (still queryable, panel highlight still shows) even though no world-space outline renders (Edge Case 18). [TR-building-ui-085]
+66. **GIVEN** a project transitions between lifecycle states (Draft/Released/Paused/Built/DemolitionQueued), **THEN** its Projects Panel card's status text and available action buttons update to match exactly that state, same frame (Rule 21). [TR-building-ui-086]
+67. **GIVEN** a project with 0 of Y cells built, **THEN** its progress readout renders `0/Y`; **GIVEN** Y of Y, **THEN** `Y/Y` and the status text reflects completion — no easing on the bar (Rule 21, Art Bible §7.2/§7.4). [TR-building-ui-086]
+68. **GIVEN** a Built cell (no surviving undo entry — already retired or beyond `undo_stack_depth`), **WHEN** undo fires, **THEN** it is a silent no-op — Built cells are never reachable by undo regardless of stack state (Rule 23, extends AC8/old Edge Case 4). [TR-building-ui-088]
+69. **GIVEN** a project queued for or undergoing demolition, **THEN** no undo entry for it exists at any point in its demolition lifecycle — the undo button/stack never lists a demolition step (Rule 23). [TR-building-ui-088]
+
 **Advisory — interaction test / manual walkthrough (UI evidence gate)**
 23. **GIVEN** a drag begun in the world, **WHEN** the cursor enters HUD space, **THEN** the drag is NOT canceled (UI half); **WHEN** released over the HUD, **THEN** the commit uses the last valid world preview (integration with Camera & Input/Building — Edge Case 5, Rule 11's event-routing requirement). [TR-building-ui-069]
 24. **GIVEN** a toast dismissal click in a live viewport, **THEN** the click is consumed — nothing beneath receives it (Edge Case 9). [TR-building-ui-072]
 25. **GIVEN** a 1280×720 window, **THEN** the three zones' bounding rects lie fully in-viewport and do not intersect (screenshot/rect assertion — Edge Case 8). [TR-building-ui-071]
 26. **GIVEN** a first-time playtester, **THEN** tool + material found unaided in under a minute (Game Feel criterion — playtest evidence doc).
+
+**Added by Slice revision (2026-07-23) — advisory**
+27. **GIVEN** a first-time player in WorldNav, **THEN** the "Bauen" toggle is discovered and Build Mode entered unaided within the existing one-minute Game Feel criterion (extends AC 26; Rule 13). [TR-building-ui-075]
+28. **GIVEN** a completed house with its door gap, **THEN** a first-time player without prior explanation identifies the gap as a functional doorway — the confirmed 2026-07-23 playtest failure this AC is designed to catch (Rule 22). [TR-building-ui-087]
+29. **GIVEN** the Projects Panel's provisional slice layout at 1280×720, **THEN** a walkthrough confirms cards remain legible and usable pending the formal `design/ux/projects-panel.md` spec (Rule 21 provisional flag). [TR-building-ui-086]
 
 ## Open Questions
 
@@ -589,7 +935,35 @@ checks are ADVISORY (interaction test or walkthrough doc).)* [TR-building-ui-038
    4.5's AccessKit accessibility APIs postdate the model's training
    data; verify against the pinned 4.7 docs before implementing the
    HUD input layer → *Technical Setup / building ADR*
-8. **Timer architecture** — **RESOLVED 2026-07-11 via ADR-0011**: a
+9. **Cross-GDD propagation (Slice revision, 2026-07-23)** — Building
+   System needs its own revision to formally own: the project/draft/
+   release/demolition lifecycle (Rule 21), the room/auto-roof/
+   house-stamp cell-generation algorithms (Rule 19, reusing F1/F2/F5
+   over a computed footprint), and the ghost pick-solid/dig-order/water
+   picking contract (Rule 16) — this GDD documents the UI-visible
+   contract now, but the mechanical ownership is not yet formalized
+   there. → `/propagate-design-change` per REPORT.md's recommendation.
+10. **Villager Info UI reciprocal update (Slice revision, 2026-07-23)** —
+   its Rule 1 (Esc/selection) needs a reciprocal update for the new
+   4-step Esc chain (Rule 14) and the villager-wins-ties Selection
+   precedence (Rule 15), mirroring the existing reciprocal-clause
+   pattern between these two GDDs. → next revision of that GDD.
+11. **Door/window ITEMS vs. the door-gap affordance (Slice revision,
+   2026-07-23)** — door/window items (a building-system.md production
+   requirement) may fully supersede Rule 22's affordance requirement;
+   track together, do not design the visual language twice.
+12. **Replace/dig marker shape pairing (Slice revision, 2026-07-23)** —
+   exact orange-family shade + silhouette pairing for terrain-replace vs.
+   dig/demolition markers (Rule 18) → Art Bible §7.3's shape-budget
+   table, first production icon pass.
+13. **Default keybindings for the new actions (Slice revision,
+   2026-07-23)** — `build_mode_toggle` and the Room/Auto-roof/
+   House-stamp tool-selects are `[assumption]` until `/ux-design`;
+   `slice_up`/`slice_down`/`slice_reset` retain their slice-validated
+   `PageUp`/`PageDown`/`Home` defaults pending only a collision check
+   against every other binding — same status class as Rule 9b's
+   bindings (the ACTIONS are the commitment, not the keys).
+14. **Timer architecture** — **RESOLVED 2026-07-11 via ADR-0011**: a
    single centralized expiry-timestamp manager (`Dictionary[key,
    TimerRecord]` + one shared `_process` loop), not N Godot `Timer`
    nodes — chosen for zero per-timer Node-lifecycle overhead at

@@ -62,6 +62,35 @@ and unexplored terrain that make leaving the settlement an expedition.
 > To be designed in dedicated GDDs before the dungeon/exploration epics;
 > answers the CD gate condition "far world must not read hollow".
 
+> **World-scale production target (2026-07-23, slice revision)**: the
+> production target is now **16,000×16,000×32 cells** — up from the
+> 2026-07-11 target of 2000×2000×32 recorded above. The 2000×2000×32 figure
+> is not superseded as a claim; it is now the **slice-validated baseline**:
+> the vertical slice built and held 60 FPS on a 2000×2000×32 view window
+> (ADR-0014), so that scale is proven, not merely feasibility-projected. The
+> 8x linear jump to 16,000×16,000 is GATED on a storage/streaming spike: a
+> naive projection of the slice's packed-chunk storage at 16k×16k×32 is
+> ≈11 GB of chunk data resident at boot — roughly 3x over the project's
+> 4 GB memory ceiling (`.claude/docs/technical-preferences.md`). This is a
+> **storage problem, not a rendering problem** — draw calls are already
+> decoupled from world size via the streamed view window (the slice held
+> 60 FPS regardless of how much world existed outside that window); the open
+> question is how much of the 16k world's cell data can stay resident vs.
+> paged/on-demand. Until that spike resolves, treat 16,000×16,000×32 as the
+> target and 2000×2000×32 as the currently-built, currently-proven floor.
+> Full detail: `design/gdd/voxel-world.md` Tuning Knobs and Open Questions.
+> (Slice revision 2026-07-23)
+>
+> **Character scale (2026-07-23, slice revision)**: villagers and other
+> characters are **2 blocks (cells) tall** — a Minecraft-proportions
+> direction (blocky, no rounding) with a Stonehearth-chibi head ratio
+> (bigger head-to-body weight than a realistic 2-block figure would carry).
+> This was validated in the vertical slice's Minecraft-readability pass. The
+> full visual spec (head:body split, limb block count, silhouette rules) is
+> owned by **Art Bible §5.2 "Villager Visual Archetype — 2-Block
+> Proportions"** (`design/art/art-bible.md`) — this document defers to it
+> rather than duplicating the spec. (Slice revision 2026-07-23)
+
 
 ---
 

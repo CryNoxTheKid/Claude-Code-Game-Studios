@@ -2,9 +2,11 @@
 
 > **Status**: APPROVED (2026-07-10 — full review NEEDS REVISION → all findings
 > revised in-session → verification pass CLEAN; see
-> design/gdd/reviews/resource-item-database-review-log.md)
+> design/gdd/reviews/resource-item-database-review-log.md); Slice-revised
+> 2026-07-23 (multi-cell furniture footprint field — see
+> prototypes/last-seal-vertical-slice/REPORT.md)
 > **Author**: user + Claude Code Game Studios agents
-> **Last Updated**: 2026-07-10
+> **Last Updated**: 2026-07-23
 > **Last Verified**: 2026-07-10
 > **Implements Pillar**: None directly — Foundation infrastructure for Pillar 1 (building materials) and Pillar 2 (settlement economy)
 
@@ -105,10 +107,13 @@ top can make each material feel distinct rather than interchangeable.
    | `max_stack_size` | int ≥ 1 | Authored, unused until Alpha | Only meaningful when `stackable` |
    | `haulable` | bool | Authored, unused until Alpha | Pre-provisioned for Villager AI hauling |
    | `storage_category` | enum | Authored, unused until Alpha | Which stockpile type accepts this item |
+   | `footprint` | Vector2i (`width_cells`, `depth_cells`), both ≥ 1 | Yes for `furniture_fixture`; implicitly `(1,1)` for every other category — never authored on them *(added by the 2026-07-23 slice revision)* | The horizontal cell span the placed item's single model occupies, anchored at its origin cell — see Rule 10 |
 
    Fields marked "Authored, unused until Alpha" are required-present in MVP
    data files (boot validation enforces presence); only their *consumption*
-   is deferred to Alpha. [TR-resource-item-database-028]
+   is deferred to Alpha. [TR-resource-item-database-028] `footprint` is
+   NOT one of these deferred fields — it is consumed immediately at MVP
+   (the `bed` entry needs it now).
 
 5. **Fixed category set.** The schema defines five authorable categories
    from day one; MVP fills only the first two with content:
@@ -154,6 +159,18 @@ top can make each material feel distinct rather than interchangeable.
    sharing the underlying data safe. The guarantee covers accidental/
    idiomatic mutation; deliberate `Object.get()`/`set()` reflection bypass
    is a documented residual risk in ADR-0006, not fully closed. [TR-resource-item-database-010]
+10. **Multi-cell furniture footprint** *(added by the 2026-07-23 slice
+    revision — user-locked, slice-validated: 2-cell-tall villagers need a
+    2-cell bed; resolves Open Question 9)*: `furniture_fixture` entries
+    carry a `footprint` (`width_cells` × `depth_cells`, both ≥ 1)
+    declaring the horizontal cells the placed item's single model spans,
+    anchored at its origin cell. `bed` is `(1, 2)`. Placement remains
+    strictly on-grid — this field states only the fact of the span; it
+    does not define placement, collision, rotation, or rendering rules
+    (Building System owns placement; Art Bible §8.5 owns authoring the
+    multi-cell model as one asset, not `width_cells × depth_cells`
+    separate pieces). Building materials are voxel blocks and are
+    implicitly `(1, 1)` — they never carry this field (Edge Case 10). [TR-resource-item-database-052]
 
 ### States and Transitions
 
@@ -163,7 +180,7 @@ immutable data.)*
 | State | Entry Condition | Exit Condition | Behavior |
 |-------|-----------------|-----------------|----------|
 | Unloaded | Before boot loading runs | Loading begins (data files read) *(wording aligned with Validating's entry at the 2026-07-10 review)* | No query is valid [TR-resource-item-database-034] |
-| Validating | Data files read | Validation passes or fails | Checks: id uniqueness, id format, known category, known material family, required fields present, `max_stack_size ≥ 1` where stackable, `tier ≥ 0` (integer), category↔material_family pairing (`building_material` requires a family from the Visual Direction Note set; every other category requires `none`), tier-0 family coverage (the tier-0 `building_material` set contains ≥ 1 entry per material family — the Core Rule 6 invariant, now boot-enforced), reserved-id rejection (`missing_item`, category `missing`), retired-ids ledger *(three checks added + invariants formalized at the 2026-07-10 review — the schema declared them but the checklist never enforced them)* [TR-resource-item-database-005] |
+| Validating | Data files read | Validation passes or fails | Checks: id uniqueness, id format, known category, known material family, required fields present, `max_stack_size ≥ 1` where stackable, `tier ≥ 0` (integer), category↔material_family pairing (`building_material` requires a family from the Visual Direction Note set; every other category requires `none`), tier-0 family coverage (the tier-0 `building_material` set contains ≥ 1 entry per material family — the Core Rule 6 invariant, now boot-enforced), reserved-id rejection (`missing_item`, category `missing`), retired-ids ledger *(three checks added + invariants formalized at the 2026-07-10 review — the schema declared them but the checklist never enforced them)*, category↔footprint pairing — `furniture_fixture` requires an explicit `footprint` with both dimensions ≥ 1; every other category must omit it (implicit `(1,1)`) *(added by the 2026-07-23 slice revision, Core Rule 10)* [TR-resource-item-database-005] |
 | Ready | Validation passes | Never (persists for the session) | All queries valid; contents immutable [TR-resource-item-database-025] |
 | Failed | Validation fails | None — TERMINAL *(aligned 2026-07-10 review with scene-world-management.md's boot-HALT model: an error screen is shown, the Valley scene is never attached, nothing further is instantiated, and recovery requires fixing the data and restarting the application — NOT "session ends" process-exit wording, and NOT `SceneTree.paused`)* [TR-resource-item-database-006] | Boot halts with an error naming every invalid entry and its source file (fail loudly at boot — never launch with a partially valid database) [TR-resource-item-database-035] |
 
@@ -295,6 +312,17 @@ Deliberately NOT formulas (and why):
    default. The Building System's MVP palette therefore shows exactly the
    tier-0 set plus the MVP furniture list — a tier-3 item authored early
    must never leak into the palette just because it exists in the database. [TR-resource-item-database-045]
+10. **`footprint` authored on a non-`furniture_fixture` entry** *(added by
+    the 2026-07-23 slice revision)*. Boot validation fails naming the
+    entry — the field applies only to placed multi-cell furniture (Core
+    Rule 10); building materials are implicitly `(1,1)` voxel blocks and
+    never carry it. [TR-resource-item-database-053]
+11. **A `furniture_fixture` entry omits `footprint`, or authors a
+    non-positive dimension** *(added by the 2026-07-23 slice revision)*.
+    Boot validation fails naming the entry and the invalid dimension —
+    unlike the Alpha-deferred fields in Rule 4, `footprint` is consumed
+    immediately at MVP by placement and ghost preview, so it cannot be
+    silently defaulted. [TR-resource-item-database-054]
 
 ## Dependencies
 
@@ -314,7 +342,7 @@ since-approved scene-world-management.md)*. [TR-resource-item-database-019]
 
 | System | Tier | GDD Status | What it consumes |
 |--------|------|-----------|------------------|
-| Building System | MVP | **Approved** — contract CONFIRMED (its Upstream table + Core Rules 8–9, F5) *(status refreshed 2026-07-10 review; was "Next in design order")* | Palette contents (`building_material`, `furniture_fixture`), `tier` for the free set, `material_family` + `visual_asset` for rendering |
+| Building System | MVP | **Approved** — contract CONFIRMED (its Upstream table + Core Rules 8–9, F5) *(status refreshed 2026-07-10 review; was "Next in design order")* | Palette contents (`building_material`, `furniture_fixture`), `tier` for the free set, `material_family` + `visual_asset` for rendering. *(Slice revision 2026-07-23)*: `footprint` for multi-cell furniture placement (Core Rule 10) — a contract amendment Building System's own placement-rule GDD revision must confirm |
 | Scene/World Management | MVP | **Approved** — *(row added 2026-07-10 review, bidirectional)* | Gates its Booting state on this DB reaching Ready; its boot-HALT presents this system's Failed state (its Edge Case "Boot ordering" + AC17a/b) |
 | Voxel World | MVP | **Approved** | *Shared vocabulary only, not a runtime dependency*: block-type identifier = this DB's `id`, material identifier = `material_family` (see Interactions — mapping pinned 2026-07-10), treated opaquely |
 | Needs & Mood System | MVP | Designed — *(row added 2026-07-10 review)* | *Shared vocabulary only*: recovery source→rate table keyed by item ids (`bed`); no runtime call either direction |
@@ -331,6 +359,20 @@ those GDDs must confirm or renegotiate these interfaces when authored.
 Rows for designed/approved systems reflect CONFIRMED contracts as of
 2026-07-10.
 
+**Per-item resource cost — deferred, schema anticipates it only** *(note
+added by the 2026-07-23 slice revision, user decision)*: the vertical
+slice shipped with zero resource costs (all tier-0 materials and `bed`
+placed free, per Core Rule 6). Per-item build/placement COSTS remain
+owned by the Building System (Core Rule 6's "this database owns what
+exists," never costs) and are deferred to a future Production-tier
+economy revision (Gathering & Production Chains / Economy Balance
+(Sinks) — see Open Questions). This is a distinct fact from Open
+Question 7's `base_value` (trade/worth). Consistent with the existing
+2026-07-10 field-policy decision (do NOT stub speculative schema
+fields), this schema does **not** gain a `cost` field yet — adding a
+nullable field later is non-breaking, so the slot is earned only when
+its owning GDD is authored, not reserved speculatively now.
+
 ## Tuning Knobs
 
 This system is itself the game's primary tuning surface: every definition
@@ -344,6 +386,7 @@ edits must stay within.
 | `max_stack_size` (per entry) | 50 `[assumption]` | 1–999 `[assumption]` | Storage density and hauling trip counts (Alpha). The "values above ~200 risk trivializing storage" guidance is likewise `[assumption]` — no storage system exists to derive it from; revisit when Storage & Inventory is designed |
 | `stackable` / `haulable` (per entry) | true | — | Whether Storage & Inventory / Villager AI hauling can interact with the item at all (Alpha) |
 | Tier-0 set composition | `wood_block`, `stone_block`, `thatch_block` | ≥ 1 entry per material family | What players can build with for free in the MVP — changing this changes the entire early-game building experience and must stay aligned with the Visual Direction Note's three material families [TR-resource-item-database-031] |
+| `footprint` (per `furniture_fixture` entry) *(added 2026-07-23)* | `bed` = `(1, 2)` (slice-validated, user-locked) | both dims 1–4 `[assumption]` | Placement footprint size (ghost preview, on-grid collision — Building System's rules); larger footprints tighten valid placement spots in small rooms |
 
 Not tuning knobs (and why): `id` (immutable contract — see Edge Case 6),
 `category` / `material_family` enums (schema changes, design decisions per
@@ -416,7 +459,7 @@ assert on the STRUCTURED validation result (see the contract under States
 and Transitions), never on log strings.)*
 
 1. **GIVEN** valid data files, **WHEN** the game boots, **THEN** the database reaches Ready and every authored entry is queryable by id. *[Logic, MVP]* [TR-resource-item-database-025]
-2. **GIVEN** any authored entry, **WHEN** queried by id, **THEN** every returned field matches the authored data exactly — the test fixture must populate ALL ten schema fields, including the four Alpha-deferred ones, so a partial-field comparison cannot silently pass. *[Logic, MVP]* [TR-resource-item-database-027]
+2. **GIVEN** any authored entry, **WHEN** queried by id, **THEN** every returned field matches the authored data exactly — the test fixture must populate ALL eleven schema fields (raised from ten by the 2026-07-23 slice revision's `footprint` field), including the four Alpha-deferred ones, so a partial-field comparison cannot silently pass. *[Logic, MVP]* [TR-resource-item-database-027]
 3. **GIVEN** two entries with the same id, **WHEN** the game boots, **THEN** boot halts in Failed state with an error naming both entries AND both source files *(harmonized 2026-07-10 with Edge Case 4 — the two locations previously asserted "entries" vs "files")*. *[Logic, MVP]* [TR-resource-item-database-040]
 4. **GIVEN** an entry with an unknown category (4a) or an unknown material_family value (4b), **WHEN** the game boots, **THEN** boot halts naming the entry — both sub-cases independently tested. *[Logic, MVP]* [TR-resource-item-database-041]
 5. **GIVEN** an entry missing a required field, **WHEN** the game boots, **THEN** boot halts naming the entry and the field — tested at least twice: once for an always-consumed field (5a, e.g. `display_name`) and once for an Alpha-deferred required-present field (5b, e.g. `storage_category`), so presence-validation of deferred fields cannot silently be skipped. *[Logic, MVP]* [TR-resource-item-database-028]
@@ -448,6 +491,12 @@ and Transitions), never on log strings.)*
 27. **GIVEN** the database is Ready, **WHEN** any listing query runs (by category `missing`, by family, by tier, list-all), **THEN** `missing_item` never appears in any result. *[Logic, MVP]* [TR-resource-item-database-033]
 28. **GIVEN** the database is Ready, **WHEN** a second load/initialize call is made mid-session, **THEN** it is rejected (error result) and the Ready contents are unchanged (Core Rule 2 "loads once", now tested). *[Logic, MVP]* [TR-resource-item-database-025]
 29. **GIVEN** the tier-0 palette in the Building UI, **WHEN** a first-time playtester views the material picker, **THEN** each of the three materials is identifiable without reading its tooltip — screenshot + lead sign-off, per the Visual Direction Note's material↔meaning language. *[Visual/Feel, Advisory, MVP — the one AC tracing to this GDD's Player Fantasy obligation]*
+
+**Added by the 2026-07-23 slice revision (multi-cell furniture footprint)**
+30. **GIVEN** a `furniture_fixture` entry with a valid `footprint` (both dimensions ≥ 1), **WHEN** the game boots, **THEN** it is accepted and `footprint` is queryable exactly as authored. *[Logic, MVP]* [TR-resource-item-database-052]
+31. **GIVEN** a `furniture_fixture` entry missing `footprint` (31a) or with a non-positive dimension (31b), **WHEN** the game boots, **THEN** boot halts naming the entry and the violated dimension — both sub-cases independently tested. *[Logic, MVP]* [TR-resource-item-database-054]
+32. **GIVEN** a non-`furniture_fixture` entry (e.g. `building_material`) with an authored `footprint` field, **WHEN** the game boots, **THEN** boot halts naming the entry (category↔footprint pairing). *[Logic, MVP]* [TR-resource-item-database-053]
+33. **GIVEN** the MVP `bed` entry, **WHEN** queried by id, **THEN** `footprint` returns exactly `(1, 2)` — the slice-validated, user-locked bed footprint. *[Config/Data, MVP]* [TR-resource-item-database-052]
 
 ## Open Questions
 
@@ -498,7 +547,14 @@ are earned by a designed consumer, not reserved speculatively):**
    hardcodes `furniture_cell_count = 1` for all MVP furniture; multi-cell
    furniture (tables, wardrobes — the ~6 VS types) will need a schema field
    or an explicit Building-System-owned table. → *Building System VS
-   revision*
+   revision* **RESOLVED 2026-07-23 (slice revision, user-locked)**: this
+   GDD gains a `footprint` field (Core Rule 10) — `width_cells` ×
+   `depth_cells`, both ≥ 1, required for `furniture_fixture` entries.
+   `bed` = `(1, 2)`, slice-validated (2-cell-tall villagers need a 2-cell
+   bed). Building System's F5 `furniture_cell_count = 1` hardcode is now
+   stale for multi-cell entries and must be reconciled against this
+   field in its own VS revision — this GDD only states the fact of the
+   span, not how placement/collision consumes it.
 10. **`description`/flavor text** — the one identity field this GDD's own
     Player Fantasy obligation ("materials feel distinct") implies but the
     schema lacks; MVP's 3-material palette carries identity via
@@ -517,3 +573,11 @@ are earned by a designed consumer, not reserved speculatively):**
     Vertical Slice revision"). The one-tier gap is now owned: the VS
     revision of this GDD populates `consumable` alongside the food need.
     → *this GDD's VS revision + Gathering & Production Chains GDD*
+13. **Per-item resource cost (build/placement cost)** *(added by the
+    2026-07-23 slice revision — user decision)*: the slice shipped with
+    zero resource costs (Dependencies note above). This is a DIFFERENT
+    fact from OQ7's `base_value` (trade/worth) — it's what an item costs
+    to PLACE, not what it's worth to trade. Per the OQ-track field
+    policy above (do not stub), this schema does not gain a `cost` field
+    yet; it anticipates one structurally. → *Gathering & Production
+    Chains / Economy Balance (Sinks) GDD, Production milestone*

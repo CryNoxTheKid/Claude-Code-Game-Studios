@@ -126,14 +126,16 @@ items:
     referenced_by:
       - design/gdd/resource-item-database.md
       - design/gdd/building-system.md   # names it as the entire MVP furniture list (Core Rule 8); build time 8 ticks (F3)
-      - design/gdd/villager-ai-behavior.md   # bed ownership/claiming = the move-in moment (its Core Rules 11-13)
+      - design/gdd/villager-ai-behavior.md   # bed ownership/claiming = the move-in moment (its Core Rules 11-13); character-scale rationale (Rule 8a)
       - design/gdd/needs-mood-system.md      # top rungs of the recovery ladder (sheltered/unsheltered bed)
     category: furniture_fixture
     material_family: none
     tier: 0                       # free in MVP (Building System Core Rule 14)
     stackable: false
+    footprint: [1, 2]             # width_cells x depth_cells — slice-validated, user-locked
+                                   # (2-cell-tall villagers need a 2-cell bed); resource-item-database.md Core Rule 10
     added: 2026-07-09
-    revised: ""
+    revised: "2026-07-23"         # added footprint field — resource-item-database.md slice revision
 
 # Example:
 #
@@ -349,6 +351,31 @@ constants:
     unit: cells (max roof height above an interior cell)
     # invariant: must stay >= Building System's max wall_height — retune in lockstep
     added: 2026-07-10
+    revised: ""
+
+  - name: unstuck_watchdog_threshold_ticks
+    status: active
+    source: design/gdd/villager-ai-behavior.md
+    referenced_by:
+      - design/gdd/villager-ai-behavior.md
+    value: 12
+    unit: ticks (= 6.0 game-seconds at 1x, ticks_per_second=2.0)
+    # slice-validated interim anti-stuck safety net (commit 64ff918, 2026-07-23)
+    # tick count is authoritative; the slice's own ad-hoc debug clock logged
+    # "~3s" against an internal 4-ticks/sec instrumentation timer, not this
+    # GDD's registered ticks_per_second
+    added: 2026-07-23
+    revised: ""
+
+  - name: seal_prevention_abandon_limit
+    status: active
+    source: design/gdd/villager-ai-behavior.md
+    referenced_by:
+      - design/gdd/villager-ai-behavior.md
+    value: 3
+    unit: refusals (per job+villager pair, before the write proceeds unconditionally)
+    # slice-validated interim anti-stuck safety net (commit 64ff918, 2026-07-23)
+    added: 2026-07-23
     revised: ""
 
 # Example:

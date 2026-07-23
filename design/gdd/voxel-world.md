@@ -2,9 +2,14 @@
 
 > **Status**: Approved (2026-07-10 — full review APPROVED-with-patches, applied; see design/gdd/reviews/voxel-world-review-log.md)
 > **Author**: user + Claude Code Game Studios agents
-> **Last Updated**: 2026-07-09
+> **Last Updated**: 2026-07-23
 > **Last Verified**: 2026-07-09
 > **Implements Pillar**: None directly — Foundation infrastructure for Pillar 1 (The building IS the game)
+> **Slice Revision (2026-07-23)**: user-confirmed vertical-slice findings applied
+> — terrain-removal exceptions (floor terrain-replace, terrain dig orders),
+> a mesher winding/culling hard requirement, and a 16k world-size scope note.
+> Source: `prototypes/last-seal-vertical-slice/REPORT.md`. All touched
+> passages are marked "(Slice revision 2026-07-23)" inline.
 
 ## Summary
 
@@ -87,6 +92,28 @@ non-high-risk sections. Review manually before production.)*
 6. Every write emits a signal identifying the changed cell and its
    before/after contents, so dependent systems (rendering, the Building
    System's undo stack, Villager AI navigation) can react without polling. [TR-voxel-world-032]
+7. **Floor terrain-replace** (slice-validated exception to the terrain
+   permanence described in the Open Questions resolution below): when a
+   Building System floor blueprint is placed starting on a terrain top-surface
+   cell, the write API replaces that terrain cell flush with the floor block
+   — it does NOT stack the floor on top of or leave the terrain cell
+   untouched — and the write record stores the terrain cell's original value
+   as `restore_value`, so a later undo, cancel, or demolition of that floor
+   restores the original terrain cell exactly. The cell must never be left
+   as empty/AIR as a side effect of this exchange. [TR-voxel-world-050]
+   *(Slice revision 2026-07-23)*
+8. **Terrain dig orders** (slice-validated second exception): a bounded set
+   of terrain block-type values — terrain bands and sand, informally "the
+   1..5 value family," explicitly EXCLUDING water and EXCLUDING trunk/leaves
+   values — may be fully removed (the cell becomes empty) via a released dig
+   order executed by a villager. This removal goes through the SAME
+   batched write API used for every other removal in this system (no special
+   dig-order API surface); it emits the standard change signal so downstream
+   consumers (Build Validation & Navigability, in particular) observe the
+   `cells_removed` change like any other write and re-evaluate room/shelter
+   analysis correctly. Values outside the 1..5 family (water, trunk, leaves)
+   are not eligible for removal via a dig order. [TR-voxel-world-051]
+   *(Slice revision 2026-07-23)*
 
 ### States and Transitions
 
@@ -108,6 +135,12 @@ non-high-risk sections. Review manually before production.)*
   determine what's under the cursor. Building System owns: placement
   validity rules, drag-to-area logic, undo/redo composition, ghost-preview
   rendering. Voxel World owns: the actual data mutation and raw picking.
+  *(Slice revision 2026-07-23)*: this now includes two slice-validated
+  exception write paths — floor terrain-replace (Core Rule 7) and terrain
+  dig-order removal (Core Rule 8) — both routed through the same write API;
+  Building System still owns deciding WHEN these apply (e.g. which cells are
+  dig-orderable, when a floor blueprint is release-worthy), Voxel World still
+  only owns the mechanical data exchange and its signal.
 - **Villager AI & Behavior** (MVP, downstream): queries the read API for
   pathfinding-relevant occupancy (which cells are solid/walkable) — does NOT
   mutate the grid.
@@ -213,11 +246,44 @@ against memory/draw-call budget. See Tuning Knobs.
   UNCHANGED public accessor API (O(1) `get`/`set` by `Vector3i`,
   `cell_changed`, `raycast_cells`). [TR-voxel-world-041] See ADR-0014. The `Dictionary[Vector3i]`
   guidance above remains valid for small lookup tables, not bulk cell storage.
+  *(Slice revision 2026-07-23)*: the 2000×2000×32 figure above (~172 MB
+  packed) is now the **slice-validated baseline** — the vertical slice built
+  and held 60 FPS at this scale (ADR-0014). The production target is now
+  **16,000×16,000×32** (see Tuning Knobs) — an 8x linear / ~64x areal jump.
+  A naive linear projection of packed-chunk storage at that scale is
+  ≈11 GB of resident chunk data at boot (172 MB × ~64), roughly 3x over the
+  project's 4 GB memory ceiling (`.claude/docs/technical-preferences.md`) —
+  a **storage/residency problem, not a rendering problem**: draw calls are
+  already decoupled from world size via the streamed view window, so this
+  does not reopen the rendering/FPS question, only whether all 16k×16k×32
+  cell data can stay resident at once. This gates the 16,000×16,000
+  production target behind a dedicated storage/streaming spike (a successor
+  to ADR-0014) that must resolve one of: paged/on-demand chunk loading,
+  sparse storage for far/unvisited regions, or a reduced persisted
+  footprint. Save files scale with the same ~64x factor and need the same
+  resolution (see Dependencies, Save/Load row). [TR-voxel-world-053]
 - Collider strategy is a rendering-ADR concern *(2026-07-10 review note)*:
   if raycast picking is implemented via physics (rather than manual DDA),
   per-cell colliders for tens of thousands of terrain cells are a known
   Jolt/scene-tree scalability trap — the ADR must decide picking mechanism
   and collider granularity together, not separately. [TR-voxel-world-018]
+- **Mesher winding/culling — hard engine requirement** *(Slice revision
+  2026-07-23)*: Godot 4.7's front-face convention is **clockwise (CW)**, and
+  the engine expects backface culling **ENABLED** — this is an engine fact,
+  not a project convention, and the mesher (wherever it is finally owned —
+  see the rendering ADR) must wind generated triangles CW and ship with
+  culling enabled. [TR-voxel-world-052] The vertical slice shipped **CCW
+  winding + `CULL_DISABLED`** as a documented, deliberate mitigation (see
+  Edge Cases) after a multi-session "missing faces" investigation — doubling
+  overdraw was an accepted slice-only cost (60 FPS held with ~10x headroom on
+  the 2000×2000×32 window), but the rewind to CW + culling-enabled must land
+  before asset counts scale beyond slice levels, since the 2x overdraw
+  headroom will not survive a large jump in scene complexity. **Lesson**:
+  face-winding geometry audits must validate against the ENGINE's actual
+  convention, never a self-stored or assumed convention — the slice's
+  "missing faces" reports survived multiple internal audits precisely
+  because those audits checked consistency with the project's own (incorrect)
+  assumption, not against Godot's documented behavior.
 - A single read or write must be O(1) relative to grid size (see Acceptance
   Criteria). [TR-voxel-world-019]
 - Bulk-write operations (drag-to-area placement) should emit ONE batched
@@ -235,6 +301,11 @@ against memory/draw-call budget. See Tuning Knobs.
 | `base_height` is misconfigured above `max_y` | The entire terrain clamps flat at `max_y` (no crash, but visibly wrong) [TR-voxel-world-046] | The formula clamps correctly; the designer must notice the tuning mistake — documented as a warning |
 | Read/raycast queries are called very frequently per frame (e.g., every mouse-move for hover picking) | Never mutate grid state; remain cheap (O(1)) regardless of call frequency [TR-voxel-world-047] | Hover-picking is the most frequent query pattern in the Building System |
 | Save/Load iterates occupied cells while a write is in progress | Iteration only observes fully-committed cell states, never a write in progress [TR-voxel-world-048] | Mutations are serialized (see States) — no torn reads |
+| *(Slice revision 2026-07-23)* A floor blueprint is placed starting on a terrain top-surface cell | The terrain cell is replaced flush with the floor block; the write record stores the terrain cell's original value as `restore_value`; the cell is never left empty/AIR [TR-voxel-world-050] | Prevents floor construction from either stacking on terrain or leaving holes; keeps the exchange reversible |
+| *(Slice revision 2026-07-23)* A floor built via terrain-replace is undone, cancelled, or demolished | The stored `restore_value` replaces the floor block, restoring the original terrain cell exactly — never left empty [TR-voxel-world-050] | Terrain must never be permanently lost as a side effect of a reversed build action |
+| *(Slice revision 2026-07-23)* A released dig order targets a cell whose value is water, trunk, or leaves | The cell is NOT eligible for removal via a dig order — only the terrain-band/sand "1..5 family" is removable this way [TR-voxel-world-051] | Keeps the terrain-removal exception narrow and intentional; prevents accidental removal of water bodies or trees through the dig-order path |
+| *(Slice revision 2026-07-23)* A terrain dig order removes a cell that changes an enclosed room's shelter status | The standard `cells_removed`-class change signal fires exactly as it would for any other removal (Core Rule 6/8), so Build Validation & Navigability re-evaluates room/shelter analysis on the same event path | Terrain removal must not create a blind spot for room/shelter analysis just because the removed cell was terrain |
+| *(Slice revision 2026-07-23)* Mesher ships with non-engine-native winding (CCW) + `CULL_DISABLED` as a mitigation | Accepted ONLY as a documented, temporary mitigation — doubles overdraw, and the rewind to Godot's native CW winding + culling-enabled must land before asset counts scale beyond vertical-slice levels [TR-voxel-world-052] | Prevents the "missing faces" failure class from recurring silently; geometry audits must check against the engine's actual convention, not a self-stored assumption |
 
 ## Dependencies
 
@@ -242,9 +313,9 @@ against memory/draw-call budget. See Tuning Knobs.
 |--------|-----------|----------------------|
 | *(none)* | This system depends on | Foundation layer — zero upstream dependencies |
 | Scene/World Management | Depended on by (structural) | This system's root attaches under the scene Scene/World Management loads (hosting, not data) |
-| Save/Load & World Persistence | Depended on by | Iterates occupied cells via the read API to serialize world state |
+| Save/Load & World Persistence | Depended on by | Iterates occupied cells via the read API to serialize world state. *(Slice revision 2026-07-23)*: at the 16,000×16,000×32 production target, the persisted payload scales with the same ~64x areal factor as chunk storage (see Formulas Memory back-of-envelope note) — gated by the same storage/streaming spike, not yet resolved. |
 | Building System | Depended on by | Primary consumer — calls the write API to place/remove blocks, the read API for picking |
-| Villager AI & Behavior | Depended on by | Queries the read API for pathfinding-relevant occupancy |
+| Villager AI & Behavior | Depended on by | Queries the read API for pathfinding-relevant occupancy. *(Slice revision 2026-07-23)*: a villager's completion of a released terrain dig order (Core Rule 8) is the trigger for a write to this grid, but the write call itself is still made through the Building System's order-execution path, not directly by Villager AI — see Core Rule 8 and the Building System row above. |
 | Squad & Combat System | Depended on by (Vertical Slice) | Queries occupancy for line-of-sight/collision |
 | Wave Defense | Depended on by (Vertical Slice) | Queries occupancy; may need to mutate the grid if waves can destroy blocks (see Open Questions) |
 | Build Validation & Navigability | Depended on by | Reads physical occupancy for room/region analysis — read-only, event-driven (added 2026-07-10, cross-review bidirectional fix) |
@@ -253,8 +324,8 @@ against memory/draw-call budget. See Tuning Knobs.
 
 | Parameter | Current Value | Safe Range | Effect of Increase | Effect of Decrease |
 |-----------|---------------|------------|---------------------|---------------------|
-| `world_width_cells` | 2000 *(large-world decision 2026-07-11; prototype-validated)* | 256–2048 | Larger world, more room to explore; longer initial window build | Smaller world, faster full mesh; loses the expedition feel |
-| `world_depth_cells` | 2000 *(same)* | 256–2048 | Same as width | Same as width |
+| `world_width_cells` | 2000 *(large-world decision 2026-07-11; slice-validated 2026-07-23 — held 60 FPS in the vertical slice's view window, ADR-0014)*. **Production target: 16,000** *(Slice revision 2026-07-23 — gated on a storage/streaming spike, see Formulas Memory back-of-envelope note and Open Questions; NOT yet safe to set beyond the validated range below)* | 256–2048 validated; up to 16,000 is the target but UNVALIDATED pending the storage/streaming spike | Larger world, more room to explore; longer initial window build; beyond 2048, resident chunk memory is the binding constraint, not FPS | Smaller world, faster full mesh; loses the expedition feel |
+| `world_depth_cells` | 2000 *(same)*. **Production target: 16,000** *(same gating as width — Slice revision 2026-07-23)* | 256–2048 validated; up to 16,000 is the target but UNVALIDATED | Same as width | Same as width |
 | `min_y` | 0 | fixed at 0 (recommended) | Shifts all coordinates, rarely useful | — |
 | `max_y` | 16 | 8–32 | Taller hills/multi-story buildings possible; more vertical cells to store | Flatter valley, less room for tall structures |
 | `base_height` | 4 | 0 to max_y−1 | Higher valley floor overall | Lower valley floor, deeper basin feel |
@@ -264,6 +335,13 @@ against memory/draw-call budget. See Tuning Knobs.
 *(All values are provisional starting points — final size/performance limits
 depend on the still-open performance spike before Vertical Slice, see Open
 Questions.)*
+
+*(Slice revision 2026-07-23)*: the performance spike referenced above is now
+PARTIALLY resolved — the 2000×2000×32 window is built and 60-FPS-validated
+(vertical slice, ADR-0014). What remains open is the 2000 → 16,000 jump
+specifically, which is a storage/memory-residency question, not an FPS
+question (draw calls are decoupled from world size via the streamed view
+window). See the new storage/streaming spike Open Question below.
 
 ## Visual/Audio Requirements
 
@@ -364,12 +442,20 @@ misconfiguration, raycast correctness, Save/Load iteration contents.)*
 18. **GIVEN** a bulk write affecting N cells, **WHEN** the batched signal is emitted, **THEN** its payload contains the before/after contents for ALL N affected cells (per-cell granularity inside the single signal), and the bulk-write API's return value carries the same per-cell previous contents. [TR-voxel-world-043] *[Logic]*
 19. **GIVEN** terrain generation at boot, **WHEN** the grid is populated, **THEN** at most one batched change signal is observed by any listener — never per-cell signals. [TR-voxel-world-044] *[Integration]*
 
+**Added by the 2026-07-23 slice revision (user-confirmed vertical-slice findings):**
+20. **GIVEN** a floor blueprint placed starting on a terrain top-surface cell, **WHEN** the write completes, **THEN** the terrain cell is replaced flush by the floor block, the write record stores the original terrain value as `restore_value`, and no empty/AIR gap is created. [TR-voxel-world-050] *[Logic]*
+21. **GIVEN** a floor built via terrain-replace is later undone, cancelled, or demolished, **WHEN** the reverting write completes, **THEN** the cell's stored `restore_value` replaces the floor block, restoring the original terrain exactly — never left empty. [TR-voxel-world-050] *[Integration]*
+22. **GIVEN** a released dig order targeting a cell whose value is in the terrain-band/sand "1..5 family," **WHEN** a villager executes the order, **THEN** the cell becomes empty via the standard batched write API and the standard change signal fires (observable by Build Validation & Navigability as a `cells_removed`-class event). [TR-voxel-world-051] *[Integration]*
+23. **GIVEN** a released dig order targeting a water, trunk, or leaves cell, **WHEN** validated, **THEN** the cell is NOT eligible for removal via a dig order. [TR-voxel-world-051] *[Logic]*
+24. **GIVEN** the mesher generates faces for any cell, **WHEN** the mesh is submitted to the renderer, **THEN** triangle winding matches Godot's clockwise (CW) front-face convention with backface culling enabled, verified against the engine's actual documented behavior — not a self-stored assumption. [TR-voxel-world-052] *[Performance, Advisory — milestone-gated: must land before asset counts scale beyond vertical-slice levels; the slice's CCW + `CULL_DISABLED` mitigation is tracked as a known, temporary, accepted deviation, not a pass]*
+
 ## Open Questions
 
 | Question | Owner | Deadline | Resolution |
 |----------|-------|----------|-----------|
-| Do terrain and player-placed cells need a gameplay distinction after all (e.g. "can't build directly on undisturbed terrain")? | game-designer (Building System GDD) | When the Building System GDD is authored | **RESOLVED 2026-07-09: YES** — Building System Core Rule 15: terrain is not removable, built cells are; the game must distinguish them. Mechanism (data flag here vs. Building's own record) deferred to the building ADR (see building-system.md Open Question 3) |
+| Do terrain and player-placed cells need a gameplay distinction after all (e.g. "can't build directly on undisturbed terrain")? | game-designer (Building System GDD) | When the Building System GDD is authored | **RESOLVED 2026-07-09: YES** — Building System Core Rule 15: terrain is not removable, built cells are; the game must distinguish them. Mechanism (data flag here vs. Building's own record) deferred to the building ADR (see building-system.md Open Question 3). ***(Slice revision 2026-07-23)***: two slice-validated, user-confirmed EXCEPTIONS to this resolution now exist — Core Rule 7 (floor terrain-replace) and Core Rule 8 (terrain dig orders on the 1..5 terrain-band/sand family, excluding water/trunk/leaves). Terrain remains protected from removal in the general case; these two narrow, bounded paths are the only removals. No new API surface was needed — both route through the existing write API. |
 | Can Wave Defense destroy cells (e.g. breach a wall), and if so, through which API? | game-designer (Wave Defense GDD) | After the `/prototype wave-defense` spike | — |
 | What is the concrete "hand-shaped valley" silhouette beyond the base height formula (basin shape, radial falloff)? | level-designer / art-director | Before Vertical Slice | — |
-| Which rendering implementation is used (GridMap vs. MultiMeshInstance3D vs. chunked mesher) — directly determines world-extent and performance limits? [TR-voxel-world-025] | technical-director | At `/create-architecture` (building ADR) | — |
+| Which rendering implementation is used (GridMap vs. MultiMeshInstance3D vs. chunked mesher) — directly determines world-extent and performance limits? [TR-voxel-world-025] | technical-director | At `/create-architecture` (building ADR) | **PARTIALLY RESOLVED** *(Slice revision 2026-07-23)*: chunked mesher chosen and validated at 2000×2000×32 (ADR-0014); 16,000×16,000×32 production target remains open pending the storage/streaming spike below. |
 | Which picking mechanism is used (native physics collision vs. manual DDA)? | godot-specialist | At `/create-architecture` (building ADR) | — |
+| *(Slice revision 2026-07-23)* 16,000×16,000×32 storage/streaming spike: which strategy resolves the ~11 GB naive-projection residency problem — paged/on-demand chunk loading, sparse storage for far/unvisited regions, or a reduced persisted footprint (also needed for save-file scaling)? | technical-director | Before the 16,000×16,000×32 production target can be committed to any world-size-dependent epic | — |
