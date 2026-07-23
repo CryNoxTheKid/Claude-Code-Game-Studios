@@ -1,6 +1,7 @@
 # UX Spec: Projects Panel
 
-> **Status**: Draft — pending `/ux-review`
+> **Status**: **Approved** — `/ux-review` 2026-07-23 (first pass: NEEDS REVISION,
+> 0 blocking / 4 advisory; all 4 applied and re-review verdict APPROVED, 0/0)
 > **Author**: user + ux-designer
 > **Last Updated**: 2026-07-23
 > **Journey Phase(s)**: unknown — no player journey map yet (shared gap with
@@ -117,14 +118,18 @@ actually exposes to the player.
 
 **New HUD zone: Z7 — Projects Panel.** Anchored **bottom-left corner**
 (screen edge, at the standard 16px-at-720p edge inset shared with every other
-zone), stacked **below** Z4's growth envelope: Z4 (villager panel, "left
-edge, lower half, grows upward") is measured from a baseline that sits one
-`ZONE_GAP` above Z7's top edge, not from the true screen bottom — so a
+zone), stacked **below** Z4's growth envelope. Two separate claims here:
+first, `hud.md`'s Z4 rule ("left edge, lower half, grows upward") is
+deliberately abstract about what "lower half" is measured from, and this
+spec does not rewrite that text. Second, *now that Z7 exists*, this spec
+fixes the concrete baseline Z4 grows from in practice: a baseline that sits
+one `ZONE_GAP` above Z7's top edge, not the true screen bottom — so a
 villager selection and an active project list can be on-screen
-simultaneously without ever overlapping, without moving Z4's existing anchor
-math (`hud.md` is not edited by this spec; see Open Questions for the
-required hud.md follow-up: its Zone table and 8-element Visual Budget need a
-Z7/E-number added).
+simultaneously without ever overlapping. `hud.md` itself is not edited by
+this spec; see Open Questions for the required hud.md follow-up (its Zone
+table and 8-element Visual Budget need a Z7/E-number added — that is where
+this concrete baseline should eventually be folded back into the abstract
+rule's own text).
 
 ```
 ┌─────────────────────────────────────────────┐
@@ -212,6 +217,29 @@ panel, not duplicated):
 
 ---
 
+## States & Variants
+
+Consolidated for sibling parity with `villager-panel.md`'s "States & Variants"
+section. Panel-level states first; the detailed per-project lifecycle states
+(Draft/Building/Paused/Done/Done+pending/Demolishing) are specified in full,
+with their exact per-state visible content and buttons, in **Per-State
+Actions & Button Placement** below — not duplicated here.
+
+| State / Variant | Trigger | What Changes |
+|---|---|---|
+| Hidden (default) | No project entities exist anywhere | Z7 renders nothing (see Empty & Edge States) |
+| Visible (live) | ≥ 1 project entity exists | Card list live-mirrors Building System state every refresh; see the per-project state table below for card-level detail |
+| Suspended | Scene transition | Panel, card list, and world-space outline hidden; Selection retained; restores on transition complete/abort (P14) |
+
+**No loading state**: all reads are synchronous per-frame re-queries of
+Building System state (mirrors `villager-panel.md`) — there is no
+network/disk fetch in the loop, so no spinner/skeleton state is ever needed.
+No dedicated "stale handle" state either: a project deleted while selected
+is handled as a graceful-deselect edge case (see Empty & Edge States), the
+same treatment the villager panel gives an unresolvable retained selection.
+
+---
+
 ## Scalability: Bounded Visible Count + Overflow
 
 The slice's flat list assumed a handful of projects; a production settlement
@@ -264,6 +292,16 @@ overflow (Z2/Z3, P1) — cap by priority, never by an arbitrary category rule:
   are complementary, not competing, mechanisms: scrolling handles "more cards
   than fit on screen but still within the cap," overflow handles "more
   projects than the cap allows to exist as cards at all."
+
+**Candidate pattern-library entry**: this priority-tiered bounded list +
+Selection Pin exception is generic enough to outlive this one panel — any
+future entity-list HUD surface (e.g. a caravan/expedition roster, a resource
+stockpile list) would want the identical "cap by priority, pin the selected
+item, drain the lowest tier into an expandable overflow row" behavior. Flagged
+here as a candidate addition to `interaction-patterns.md`, extending P1's
+cap+overflow-home idea from a flat severity queue to a multi-tier sorted
+list; not added to that library by this spec (scope: this document only) —
+see Open Questions.
 
 ---
 
@@ -342,6 +380,22 @@ the job a confirmation dialog would:
 2. **MVP has no resource-cost economy yet** (REPORT.md shortcut) — an Abriss
    currently has near-zero permanent cost to the player beyond rebuild time,
    which weakens the case for adding friction now.
+
+**This strengthens, rather than weakens, the no-modal case once undo is
+factored in.** Abriss/Abbrechen against a project's **Built** cells creates
+**no undo entry at all** — building-ui Rule 23/TR-building-ui-088 states the
+undo stack never lists a demolition step, and building-system's Rule 17/
+TR-building-system-119 confirms undo has zero effect on fully-Built work.
+Once triggered, tearing down Built geometry is only reversible by physically
+rebuilding it — there is no "undo my demolished house" path. This is a
+**deliberate asymmetry**, distinct from the DRAFT-state **Verwerfen**
+button, which discards only never-built plan cells and stays fully
+undo-tracked like any other plan edit (P8). A confirmation dialog would
+normally exist precisely to guard an irreversible action like this — but per
+the Decision above, this project still resolves that need through the
+job-gated delay + visible status flip rather than a modal, keeping every
+destructive action on the same instant, non-punishing footing the rest of
+the HUD already commits to.
 
 This is flagged forward in Open Questions: once a resource-cost economy
 ships, revisit whether tearing down a costly, fully-Built project needs a
@@ -430,7 +484,7 @@ none at MVP (partial, menu/camera only, post-MVP, per technical-preferences).
 | Discard a Draft project | Click "Verwerfen" | Card removed instantly (no fade, §7.4) | Project deleted (all-Draft, free) |
 | Pause a Building project | Click "Pause" | Status flips to "Pausiert", workers row hides | Project → PAUSED |
 | Resume a Paused project | Click "Fortsetzen" | Status flips to "Im Bau" | Project → BUILDING |
-| Cancel/demolish | Click "Abbrechen"/"Abriss" | Status flips to "Wird abgerissen", buttons disappear | Draft cells freed instantly; Built cells become demolition orders (no confirmation, see policy above) |
+| Cancel/demolish | Click "Abbrechen"/"Abriss" | Status flips to "Wird abgerissen", buttons disappear | Draft cells freed instantly (undo-tracked, like Verwerfen); Built cells become demolition orders — **no undo entry created, irreversible except by rebuilding** (TR-building-ui-088, TR-building-system-119; no confirmation, see policy above) |
 | Expand overflow | Click "+N weitere · Fertig ▸" | Row expands into a compact secondary list, same frame | No Selection change |
 | Collapse overflow | Click again, or Esc while it holds focus | Row collapses | — |
 | Hover a card | Mouse move | Standard control hover state (B1) | — |
@@ -450,6 +504,12 @@ none at MVP (partial, menu/camera only, post-MVP, per technical-preferences).
 
 - **No analytics events at MVP** — same deliberate omission as the villager
   panel (no analytics system exists yet).
+- **Cancel/demolish fires no undo-stack event for Built cells** — a queued or
+  executed demolition is never an undo-tracked step (TR-building-ui-088,
+  TR-building-system-119), distinct from a DRAFT-state Verwerfen, which
+  remains a normal undo-tracked plan edit (P8). This is the same "deliberate
+  asymmetry" the Confirmation Policy section already cites — noted here too
+  since it is this UI's undo-button/binding that must never list one.
 - **No persistent-state writes owned by this UI** — the panel is a pure
   renderer/router over Building System's project entities (ADR-0016,
   building-ui contract: "Building UI ... Owns no project state"). Selection
