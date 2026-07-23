@@ -118,8 +118,12 @@ const PROJECTS_REFRESH_INTERVAL := 0.5  # light periodic refresh for progress/wo
 
 var _projects_panel: PanelContainer
 var _projects_list: VBoxContainer
-var _project_row_refs: Dictionary = {}   # project_id:int -> {progress, count_label, workers_label, state}
+var _projects_scroll: ScrollContainer
+var _project_row_refs: Dictionary = {}   # project_id:int -> {progress, count_label, workers_label, state, row}
 var _projects_refresh_accum: float = 0.0
+# CLICK SELECTION (2026-07-23, task 2b/2c): id:int of the selected project, or
+# null. Drives the gold-bordered card highlight + scroll-into-view.
+var _selected_project_id: Variant = null
 
 var _pause_button: Button
 var _speed_buttons: Dictionary = {}      # warp:int -> Button
@@ -221,6 +225,7 @@ func setup(building_system: Node, camera_input: Node, villager_ai: Node, needs_m
 	building_system.undo_state_changed.connect(_on_undo_state_changed)
 	building_system.build_mode_changed.connect(_on_build_mode_changed)
 	building_system.projects_changed.connect(_on_projects_changed)
+	building_system.project_selected.connect(_on_project_selected)
 
 	build_validation.sealed_space_warning.connect(_on_sealed_space_warning)
 	build_validation.unsheltered_furniture_info.connect(_on_unsheltered_furniture_info)
@@ -422,6 +427,7 @@ func _build_projects_panel() -> void:
 	_projects_list.add_theme_constant_override("separation", 8)
 	_projects_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(_projects_list)
+	_projects_scroll = scroll
 
 
 ## Full structural rebuild: called on projects_changed (creation, merge, state
@@ -461,6 +467,10 @@ func _refresh_projects_progress() -> void:
 		count_label.text = "%d/%d" % [int(p["built_cells"]), int(p["total_cells"])]
 		if int(refs["state"]) == PROJECT_STATE_BUILDING:
 			workers_label.text = _worker_names_text(p["worker_ids"])
+		# NOTE: draft_cells/demolishing/state-label changes aren't picked up by
+		# this light refresh (button layout depends on them) -- those need the
+		# full _refresh_projects_panel() rebuild via projects_changed, same as
+		# any other structural change.
 
 
 func _project_state_label(state: int) -> String:
@@ -480,9 +490,12 @@ func _worker_names_text(worker_ids: Array) -> String:
 func _make_project_row(p: Dictionary) -> PanelContainer:
 	var id: int = int(p["id"])
 	var state: int = int(p["state"])
+	# CHANGE ORDERS (2026-07-23, task 3a): pending draft entries can exist on
+	# ANY state now (attach rule, see building_system._assign_project).
+	var draft_cells: int = int(p.get("draft_cells", 0))
+	var demolishing: bool = bool(p.get("demolishing", false))
 
 	var row := PanelContainer.new()
-	row.add_theme_stylebox_override("panel", _make_panel_style(COLOR_CHROME.lightened(0.06)))
 
 	var col := VBoxContainer.new()
 	col.add_theme_constant_override("separation", 4)
@@ -500,8 +513,13 @@ func _make_project_row(p: Dictionary) -> PanelContainer:
 	header.add_child(name_label)
 
 	var status_label := Label.new()
-	status_label.text = _project_state_label(state)
-	status_label.add_theme_color_override("font_color", COLOR_GOLD if state == PROJECT_STATE_BUILDING else COLOR_TEXT)
+	if demolishing:
+		status_label.text = "Wird abgerissen"
+	elif state == PROJECT_STATE_DONE and draft_cells > 0:
+		status_label.text = "Aenderungen geplant"
+	else:
+		status_label.text = _project_state_label(state)
+	status_label.add_theme_color_override("font_color", COLOR_GOLD if (state == PROJECT_STATE_BUILDING or draft_cells > 0) else COLOR_TEXT)
 	status_label.add_theme_font_size_override("font_size", 13)
 	header.add_child(status_label)
 
@@ -532,53 +550,110 @@ func _make_project_row(p: Dictionary) -> PanelContainer:
 	button_row.add_theme_constant_override("separation", 6)
 	col.add_child(button_row)
 
-	match state:
-		PROJECT_STATE_DRAFT:
-			var start_btn := Button.new()
-			start_btn.text = "Bau starten"
-			_apply_flat_button_style(start_btn)
-			start_btn.pressed.connect(_on_project_release_pressed.bind(id))
-			button_row.add_child(start_btn)
-			var discard_btn := Button.new()
-			discard_btn.text = "Verwerfen"
-			_apply_flat_button_style(discard_btn)
-			discard_btn.pressed.connect(_on_project_cancel_pressed.bind(id))
-			button_row.add_child(discard_btn)
-		PROJECT_STATE_BUILDING:
-			var pause_btn := Button.new()
-			pause_btn.text = "Pause"
-			_apply_flat_button_style(pause_btn)
-			pause_btn.pressed.connect(_on_project_pause_pressed.bind(id))
-			button_row.add_child(pause_btn)
-			var cancel_btn := Button.new()
-			cancel_btn.text = "Abbrechen"
-			_apply_flat_button_style(cancel_btn)
-			cancel_btn.pressed.connect(_on_project_cancel_pressed.bind(id))
-			button_row.add_child(cancel_btn)
-		PROJECT_STATE_PAUSED:
-			var resume_btn := Button.new()
-			resume_btn.text = "Fortsetzen"
-			_apply_flat_button_style(resume_btn)
-			resume_btn.pressed.connect(_on_project_resume_pressed.bind(id))
-			button_row.add_child(resume_btn)
-			var cancel_btn2 := Button.new()
-			cancel_btn2.text = "Abbrechen"
-			_apply_flat_button_style(cancel_btn2)
-			cancel_btn2.pressed.connect(_on_project_cancel_pressed.bind(id))
-			button_row.add_child(cancel_btn2)
-		PROJECT_STATE_DONE:
-			var done_label := Label.new()
-			done_label.text = "Fertig"
-			done_label.add_theme_color_override("font_color", COLOR_GOLD)
-			button_row.add_child(done_label)
-			var demolish_btn := Button.new()
-			demolish_btn.text = "Abriss"
-			_apply_flat_button_style(demolish_btn)
-			demolish_btn.pressed.connect(_on_project_cancel_pressed.bind(id))
-			button_row.add_child(demolish_btn)
+	if demolishing:
+		# 3c: torn down entirely through jobs already in motion -- nothing to
+		# click here; the row disappears on its own once every cell is gone.
+		pass
+	else:
+		match state:
+			PROJECT_STATE_DRAFT:
+				var start_btn := Button.new()
+				start_btn.text = "Bau starten"
+				_apply_flat_button_style(start_btn)
+				start_btn.pressed.connect(_on_project_release_pressed.bind(id))
+				button_row.add_child(start_btn)
+				var discard_btn := Button.new()
+				discard_btn.text = "Verwerfen"
+				_apply_flat_button_style(discard_btn)
+				discard_btn.pressed.connect(_on_project_cancel_pressed.bind(id))
+				button_row.add_child(discard_btn)
+			PROJECT_STATE_BUILDING:
+				var pause_btn := Button.new()
+				pause_btn.text = "Pause"
+				_apply_flat_button_style(pause_btn)
+				pause_btn.pressed.connect(_on_project_pause_pressed.bind(id))
+				button_row.add_child(pause_btn)
+				var cancel_btn := Button.new()
+				cancel_btn.text = "Abbrechen"
+				_apply_flat_button_style(cancel_btn)
+				cancel_btn.pressed.connect(_on_project_cancel_pressed.bind(id))
+				button_row.add_child(cancel_btn)
+				_maybe_add_release_drafts_button(button_row, id, draft_cells)
+			PROJECT_STATE_PAUSED:
+				var resume_btn := Button.new()
+				resume_btn.text = "Fortsetzen"
+				_apply_flat_button_style(resume_btn)
+				resume_btn.pressed.connect(_on_project_resume_pressed.bind(id))
+				button_row.add_child(resume_btn)
+				var cancel_btn2 := Button.new()
+				cancel_btn2.text = "Abbrechen"
+				_apply_flat_button_style(cancel_btn2)
+				cancel_btn2.pressed.connect(_on_project_cancel_pressed.bind(id))
+				button_row.add_child(cancel_btn2)
+				_maybe_add_release_drafts_button(button_row, id, draft_cells)
+			PROJECT_STATE_DONE:
+				if draft_cells == 0:
+					var done_label := Label.new()
+					done_label.text = "Fertig"
+					done_label.add_theme_color_override("font_color", COLOR_GOLD)
+					button_row.add_child(done_label)
+				else:
+					# CHANGE ORDERS (task 3a): "Bau starten" releases just the
+					# pending change-order drafts -- the project returns to
+					# BUILDING until they complete, then DONE again.
+					_maybe_add_release_drafts_button(button_row, id, draft_cells)
+				var demolish_btn := Button.new()
+				demolish_btn.text = "Abriss"
+				_apply_flat_button_style(demolish_btn)
+				demolish_btn.pressed.connect(_on_project_cancel_pressed.bind(id))
+				button_row.add_child(demolish_btn)
 
-	_project_row_refs[id] = {"progress": progress, "count_label": count_label, "workers_label": workers_label, "state": state}
+	_project_row_refs[id] = {"progress": progress, "count_label": count_label, "workers_label": workers_label, "state": state, "row": row}
+	_apply_project_row_style(row, id == _selected_project_id)
 	return row
+
+
+## CHANGE ORDERS (2026-07-23, task 3a): shared "Bau starten" button for a
+## project that already has SOME built/claimed work but also has pending
+## draft entries attached via the change-order attach rule. Reuses the exact
+## same release_project() call the DRAFT-state button uses -- it releases
+## only the still-draft entries, leaving already-built/claimed cells alone.
+func _maybe_add_release_drafts_button(button_row: HBoxContainer, id: int, draft_cells: int) -> void:
+	if draft_cells <= 0:
+		return
+	var btn := Button.new()
+	btn.text = "Bau starten"
+	btn.tooltip_text = "%d geplante Aenderung(en) freigeben" % draft_cells
+	_apply_flat_button_style(btn)
+	btn.pressed.connect(_on_project_release_pressed.bind(id))
+	button_row.add_child(btn)
+
+
+## CLICK SELECTION (2026-07-23, task 2b): gold border on the selected
+## project's card, matching the active-tool-button treatment; plain chrome
+## otherwise.
+func _apply_project_row_style(row: PanelContainer, selected: bool) -> void:
+	if not selected:
+		row.add_theme_stylebox_override("panel", _make_panel_style(COLOR_CHROME.lightened(0.06)))
+		return
+	var sb: StyleBoxFlat = _make_panel_style(COLOR_CHROME.lightened(0.06))
+	sb.border_width_left = 2
+	sb.border_width_top = 2
+	sb.border_width_right = 2
+	sb.border_width_bottom = 2
+	sb.border_color = COLOR_GOLD
+	row.add_theme_stylebox_override("panel", sb)
+
+
+## CLICK SELECTION (2026-07-23, task 2b/2c): restyles every visible row and
+## scrolls the selected one into view.
+func _on_project_selected(id: Variant) -> void:
+	_selected_project_id = id
+	for pid in _project_row_refs.keys():
+		var refs: Dictionary = _project_row_refs[pid]
+		_apply_project_row_style(refs["row"], pid == id)
+	if id != null and _project_row_refs.has(int(id)) and _projects_scroll != null:
+		_projects_scroll.ensure_control_visible(_project_row_refs[int(id)]["row"])
 
 
 func _on_project_release_pressed(id: int) -> void:
@@ -1115,12 +1190,29 @@ func _build_villager_panel() -> void:
 	_villager_panel.mouse_exited.connect(_set_hover.bind("villager_panel", false))
 
 
+## CLICK SELECTION (2026-07-23, task 2b): project selection works ANY time
+## (build mode or not), but tools keep priority -- a click while a tool is
+## armed never selects (matches the pre-existing villager-pick gate below).
+## Order: project cell hit -> select it (and clear any villager selection);
+## else deselect the current project and fall through to villager picking
+## (existing behavior), so clicking empty ground / a non-project cell / a
+## villager all behave exactly as before.
 func _on_build_click(pressed: bool) -> void:
 	if not pressed:
 		return
 	if _building_system.get_active_tool() != TOOL_NONE:
 		return
 	var ray: Dictionary = _camera_input.get_world_ray()
+	if _voxel_world != null:
+		var extra_solid: Callable = Callable(_building_system, "_is_blueprint_solid_for_pick")
+		var hit: Dictionary = _voxel_world.raycast_cells(ray["origin"], ray["dir"], 200.0, extra_solid)
+		if not hit.is_empty():
+			var project_id: Variant = _building_system.get_project_at_cell(hit["cell"])
+			if project_id != null:
+				_building_system.select_project(project_id)
+				_villager_panel.deselect()
+				return
+	_building_system.deselect_project()
 	var villager_id: Variant = _villager_ai.pick_villager(ray["origin"], ray["dir"], 200.0)
 	if villager_id == null:
 		_villager_panel.deselect()

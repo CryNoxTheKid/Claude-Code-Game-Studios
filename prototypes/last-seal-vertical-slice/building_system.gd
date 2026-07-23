@@ -41,7 +41,16 @@ const HIGHLIGHT_FACE_COLOR := Color(1.0, 0.98, 0.85, 0.55)  # brighter quad on t
 const HIGHLIGHT_FACE_EPSILON := 0.01                        # push out along the normal, avoid z-fighting
 const BUILD_GRID_RADIUS := 4     # 9x9 cells (radius 4 either side of the hovered column)
 const BUILD_GRID_Y_OFFSET := 0.02
-const BUILD_GRID_COLOR := Color(1.0, 0.95, 0.7, 0.35)
+# VISIBILITY PACKAGE (2026-07-23, task 1a): ~30% of the previous 0.35 alpha --
+# the grid read as too visually loud against the build-grid's purpose (a
+# faint planning aid, not a hero visual).
+const BUILD_GRID_COLOR := Color(1.0, 0.95, 0.7, 0.3)  # ~30% (user 2026-07-23)
+
+# VISIBILITY PACKAGE (2026-07-23, task 2b): project selection wireframe outline
+# -- deliberately distinct from HIGHLIGHT_BOX_COLOR (hover) so the two never
+# read as the same affordance.
+const SELECTION_BOX_COLOR := Color(0.35, 0.85, 1.0, 0.95)  # cyan
+const SELECTION_BOX_INFLATE := 0.06  # world units, applied to the whole project bbox
 
 enum Tool { NONE = 0, WALL = 1, FLOOR = 2, ROOF = 3, BLOCK = 4, FURNITURE = 5, ROOM = 6, ROOF_AUTO = 7, HOUSE = 8 }
 
@@ -106,12 +115,24 @@ const _QUAD_UV: Array[Vector2] = [Vector2(0, 0), Vector2(1, 0), Vector2(1, 1), V
 # see design/gdd/building-system.md Visual Requirements + the textured-ghost fix).
 const GHOST_TINT_NEUTRAL := Color(0.85, 0.92, 1.0, 0.55)  # valid drag/single-cell tool preview
 const GHOST_TINT_INVALID := Color(1.0, 0.6, 0.25, 0.6)    # invalid drag/single-cell preview subset
-const GHOST_TINT_DRAFT := Color(0.85, 0.92, 1.0, 0.30)    # draft blueprint cells -- not yet released
-const GHOST_TINT_RELEASED := Color(0.85, 0.92, 1.0, 0.45) # released-but-unbuilt blueprint cells
-# FEATURE 2 (2026-07-22, terrain dig orders): reddish tint so a planned
-# demolition/dig reads distinctly from a planned build at a glance.
-const GHOST_TINT_DIG_DRAFT := Color(0.85, 0.3, 0.2, 0.30)
-const GHOST_TINT_DIG_RELEASED := Color(0.85, 0.3, 0.2, 0.45)
+# VISIBILITY PACKAGE (2026-07-23, task 1b): bumped 0.30/0.45 -> 0.50/0.70 --
+# full block texture reads MUCH clearer at these alphas; the dig-order tint
+# pair is gone entirely (dig/demolition cells now render via the overlay
+# marker box below instead of a tinted textured ghost -- task 1d).
+const GHOST_TINT_DRAFT := Color(0.85, 0.92, 1.0, 0.50)    # draft blueprint cells -- not yet released
+const GHOST_TINT_RELEASED := Color(0.85, 0.92, 1.0, 0.70) # released-but-unbuilt blueprint cells
+
+# VISIBILITY PACKAGE (2026-07-23, task 1d): REPLACE/DIG overlay marker -- a
+# slightly inflated, untextured translucent box on the AFFECTED TERRAIN CELL
+# itself, orange for a Floor-tool terrain-replace, red for a dig/demolition.
+# Alpha mirrors the draft/released split above (0.5/0.7). This REPLACES the
+# old flat-tinted dig ghost mesh entirely (dig cells no longer get a textured
+# ghost at all -- the overlay is their only visual, see task 1d note).
+const OVERLAY_SCALE := 1.06
+const OVERLAY_TINT_REPLACE_DRAFT := Color(1.0, 0.55, 0.15, 0.5)
+const OVERLAY_TINT_REPLACE_RELEASED := Color(1.0, 0.55, 0.15, 0.7)
+const OVERLAY_TINT_DIG_DRAFT := Color(0.8, 0.18, 0.15, 0.5)
+const OVERLAY_TINT_DIG_RELEASED := Color(0.8, 0.18, 0.15, 0.7)
 
 signal tool_changed(tool_id: int)
 signal palette_changed(material_id: String)
@@ -132,6 +153,9 @@ signal build_mode_changed(active: bool)
 # created, merged, renamed-by-merge, changes state, gains/loses a claim, or is
 # cancelled -- HUD's projects panel does a full rebuild on this.
 signal projects_changed()
+# CONTRACT ADDITION (2026-07-23, persistent projects + click selection): fires
+# whenever the selected project changes (id:int or null on deselect).
+signal project_selected(id: Variant)
 
 # --- Private state ---
 var _voxel_world: Node3D
@@ -161,6 +185,8 @@ var _furniture_cells: Dictionary = {}  # Vector3i -> item_id (BUILT furniture on
 var _projects: Dictionary = {}
 var _next_project_id: int = 1
 var _cell_project: Dictionary = {}  # Vector3i -> project_id; reverse index, single source of truth for "who owns this cell"
+# CLICK SELECTION (2026-07-23): int project id, or null when nothing selected.
+var _selected_project_id: Variant = null
 
 var _undo_stack: Array = []  # [{cells: Array[Vector3i], item_id: String, is_furniture: bool}]
 var _redo_stack: Array = []
@@ -205,9 +231,15 @@ var _mat_ghost_invalid: StandardMaterial3D  # invalid drag/single-cell preview s
 # cells render stronger so the player can see which cells will start construction.
 var _blueprint_draft_mesh_instance: MeshInstance3D
 var _blueprint_released_mesh_instance: MeshInstance3D
-# FEATURE 2: dig orders get their own draft/released mesh pair (reddish tint).
-var _blueprint_dig_draft_mesh_instance: MeshInstance3D
-var _blueprint_dig_released_mesh_instance: MeshInstance3D
+# VISIBILITY PACKAGE (2026-07-23, task 1d): untextured overlay-marker material
+# + 4 mesh instances (dig draft/released, replace draft/released) -- see
+# _build_overlay_mesh/_refresh_overlay_mesh. Replaces the old dig-only tinted
+# ghost mesh pair entirely.
+var _mat_overlay: StandardMaterial3D
+var _overlay_dig_draft_mesh_instance: MeshInstance3D
+var _overlay_dig_released_mesh_instance: MeshInstance3D
+var _overlay_replace_draft_mesh_instance: MeshInstance3D
+var _overlay_replace_released_mesh_instance: MeshInstance3D
 var _preview_valid_mesh: MeshInstance3D
 var _preview_invalid_mesh: MeshInstance3D
 
@@ -228,6 +260,12 @@ var _mat_build_grid: StandardMaterial3D
 var _build_grid_instance: MeshInstance3D
 var _last_grid_column: Vector2i = Vector2i(999999, 999999)  # forces a rebuild on first hover
 
+# CLICK SELECTION (2026-07-23): world-space wireframe outline around the
+# selected project's cell-set bounding box. Independent of build mode/tool --
+# selection is always-on per task spec.
+var _mat_selection_box: StandardMaterial3D
+var _selection_box_instance: MeshInstance3D
+
 func _process(_delta: float) -> void:
 	if _voxel_world == null or _camera_input == null:
 		return
@@ -247,10 +285,12 @@ func setup(voxel_world: Node3D, camera_input: Node3D, hud: CanvasLayer) -> void:
 	_furniture_items = ResourceItemDatabase.list_by_category("furniture_fixture")
 	_build_ghost_visuals()
 	_build_highlight_visuals()
+	_build_selection_visuals()
 	_camera_input.action_fired.connect(_on_action_fired)
 	_camera_input.build_click.connect(_on_build_click)
 	TimeTickSystem.tick.connect(_on_tick)
 	blueprint_changed.connect(_on_blueprint_changed)
+	projects_changed.connect(_refresh_selection_visual)
 	if not _materials.is_empty():
 		var item: ResourceItemDatabase.ItemDef = _materials[_material_index]
 		palette_changed.emit(item.id)
@@ -366,10 +406,16 @@ func report_on_site(cell: Vector3i) -> void:
 	var build_ticks: int
 	var write_value: int = AIR
 	var write_item_id: String = ""
+	var is_demolition: bool = bool(entry.get("demolition", false))
 	if is_dig:
-		# FEATURE 2: dig orders have no material/def -- fixed duration, always
-		# completes to AIR (the block is removed, not replaced).
+		# FEATURE 2: dig orders have no material/def -- fixed duration.
+		# A plain terrain dig always completes to AIR (removed, not replaced).
+		# A DEMOLITION (task 3b, "a demolition is a dig on a built cell")
+		# instead completes to the project's captured restore_value, honoring
+		# a Floor-tool terrain-replace cell's original ground.
 		build_ticks = DIG_BUILD_TICKS
+		if is_demolition:
+			write_value = int(entry.get("restore_value", AIR))
 	else:
 		var def: ResourceItemDatabase.ItemDef = ResourceItemDatabase.get_by_id(String(entry["item_id"]))
 		if def == null:
@@ -392,6 +438,7 @@ func report_on_site(cell: Vector3i) -> void:
 		"item_id": write_item_id,
 		"is_furniture": bool(entry["needs_support"]),
 		"is_dig": is_dig,
+		"is_demolition": is_demolition,
 	})
 
 ## Combined Voxel World blocks + blueprint view (TR-building-system-060).
@@ -403,6 +450,36 @@ func is_cell_occupied_planned(cell: Vector3i) -> bool:
 ## BUILT furniture only (Vector3i -> item_id). Returns a deep copy.
 func get_furniture_cells() -> Dictionary:
 	return _furniture_cells.duplicate(true)
+
+# --- Click selection (2026-07-23) ---
+
+## The project owning `cell`, if any -- built OR still-blueprint (draft/
+## released/demolition) cells are all covered, since _cell_project is
+## populated the instant a cell is committed, long before it's built. Returns
+## null if `cell` belongs to no tracked project.
+func get_project_at_cell(cell: Vector3i) -> Variant:
+	if not _cell_project.has(cell):
+		return null
+	return int(_cell_project[cell])
+
+## Selects a project (drives the HUD panel card highlight + the world
+## wireframe outline). Passing an id that doesn't exist (or null) deselects.
+func select_project(id: Variant) -> void:
+	if id != null and not _projects.has(int(id)):
+		id = null
+	if _selected_project_id == id:
+		return
+	_selected_project_id = id
+	project_selected.emit(_selected_project_id)
+	_refresh_selection_visual()
+
+## Currently selected project id, or null.
+func get_selected_project() -> Variant:
+	return _selected_project_id
+
+## Convenience for click-on-empty-ground / Esc.
+func deselect_project() -> void:
+	select_project(null)
 
 # --- Build projects (2026-07-22) ---
 
@@ -420,6 +497,15 @@ func get_projects() -> Array:
 			if not seen.has(w):
 				seen[w] = true
 				worker_ids.append(w)
+		# CHANGE ORDERS (2026-07-23, task 3a): pending draft entries can now
+		# exist on a project regardless of its own top-level state (a DONE/
+		# BUILDING/PAUSED project can have newly-attached change-order drafts
+		# awaiting release) -- surfaced here so the HUD can show "Aenderungen
+		# geplant" + a release button instead of silently hiding them.
+		var draft_cells: int = 0
+		for entry in _blueprint.values():
+			if int(entry.get("project_id", -1)) == id and bool(entry.get("draft", false)):
+				draft_cells += 1
 		out.append({
 			"id": id,
 			"name": p["name"],
@@ -428,22 +514,35 @@ func get_projects() -> Array:
 			"total_cells": p["all_cells"].size(),
 			"built_cells": p["built_cells"].size(),
 			"worker_ids": worker_ids,
+			"draft_cells": draft_cells,
+			"demolishing": bool(p.get("demolishing", false)),
 		})
 	out.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return int(a["id"]) < int(b["id"]))
 	return out
 
-## DRAFT -> BUILDING: released blueprint entries become claimable by claim_job().
+## Releases every still-DRAFT blueprint entry owned by this project so
+## claim_job() can serve them. Generalized (2026-07-23, task 3a change orders)
+## beyond DRAFT-state projects: a DONE/BUILDING/PAUSED project can have
+## pending change-order drafts attached (see _assign_project) -- releasing
+## those bumps a DONE project back to BUILDING (until complete, then DONE
+## again); a BUILDING/PAUSED project's own state is left alone (PAUSED stays
+## PAUSED -- claim_job's pause gate still blocks new claims regardless of the
+## per-cell draft flag). No-op if there is nothing to release.
 func release_project(id: int) -> void:
 	if not _projects.has(id):
 		return
 	var p: Dictionary = _projects[id]
-	if int(p["state"]) != ProjectState.DRAFT:
-		return
-	p["state"] = ProjectState.BUILDING
+	var released_any: bool = false
 	for cell in _blueprint.keys():
 		var entry: Dictionary = _blueprint[cell]
-		if int(entry.get("project_id", -1)) == id:
+		if int(entry.get("project_id", -1)) == id and bool(entry.get("draft", false)):
 			entry["draft"] = false
+			released_any = true
+	if not released_any:
+		return
+	var state: int = int(p["state"])
+	if state == ProjectState.DRAFT or state == ProjectState.DONE:
+		p["state"] = ProjectState.BUILDING
 	blueprint_changed.emit()
 	projects_changed.emit()
 
@@ -471,37 +570,35 @@ func resume_project(id: int) -> void:
 	p["state"] = ProjectState.BUILDING
 	projects_changed.emit()
 
-## Any state -> gone: cancels every still-pending blueprint entry (no world
-## write needed), un-builds every already-built cell (restore_value if
-## captured at commit time, else AIR -- reusing the same restore semantics as
-## undo), drops built furniture from the furniture registry, and removes the
-## project entirely. Emits cells_removed/furniture_removed/blueprint_changed/
-## projects_changed so ghosts, the furniture registry, and the HUD all refresh.
+## "Alles ueber Auftraege" (2026-07-23, task 3c, user decision): cancel/Abriss
+## is no longer an instant world write. Any still-UNBUILT blueprint entry
+## (draft or released -- nothing built yet, so nothing to tear down) is
+## discarded instantly, since a plan is free. Every already-BUILT cell instead
+## becomes a RELEASED demolition order -- workers tear it down block by block
+## through the normal job pipeline (see _create_demolition_entry /
+## _flush_batched_signals). The project is marked "demolishing" (surfaced via
+## get_projects()) and reaches its terminal removed state -- simply dropped
+## from _projects, per _untrack_cell -- only once every one of its cells is
+## actually gone (built cells shrink out as their demolition job completes;
+## see 3b/3c). Emits blueprint_changed/projects_changed immediately; further
+## cells_removed/furniture_removed emissions land later, per completed
+## demolition job, exactly like any other build/dig completion.
 func cancel_project(id: int) -> void:
 	if not _projects.has(id):
 		return
 	var p: Dictionary = _projects[id]
 	var all_cells: Array = p["all_cells"].keys()
-	var writes: Array = []
 	for cell: Vector3i in all_cells:
 		if p["built_cells"].has(cell):
-			var restore_to: int = int(p["restore_values"].get(cell, AIR))
-			writes.append({"cell": cell, "value": restore_to})
-		elif _blueprint.has(cell):
-			_blueprint.erase(cell)
-		_cell_project.erase(cell)
-	_projects.erase(id)
-	var removed: Array[Vector3i] = []
-	if not writes.is_empty():
-		var applied: Array = _voxel_world.set_cells(writes)
-		for entry in applied:
-			removed.append(entry.cell)
-			if _furniture_cells.has(entry.cell):
-				var fid: String = _furniture_cells[entry.cell]
-				_furniture_cells.erase(entry.cell)
-				furniture_removed.emit(entry.cell, fid)
-	if not removed.is_empty():
-		cells_removed.emit(removed)
+			if not _blueprint.has(cell):
+				_create_demolition_entry(cell, id, true)  # released immediately -- no manual start step
+			else:
+				_blueprint[cell]["draft"] = false
+			p["demolishing"] = true
+		else:
+			if _blueprint.has(cell):
+				_blueprint.erase(cell)
+			_untrack_cell(cell)
 	blueprint_changed.emit()
 	projects_changed.emit()
 
@@ -591,6 +688,10 @@ func _on_cancel() -> void:
 		_tool = Tool.NONE
 		_hide_all_ghosts()
 		tool_changed.emit(_tool)
+		return
+	# CLICK SELECTION (2026-07-23, task 2b): deselect BEFORE exiting build mode.
+	if _selected_project_id != null:
+		select_project(null)
 		return
 	# FEATURE 1 Esc chain extension: no tool armed but build mode still on ->
 	# exit build mode (the toolbar/context panel closes on the next Esc).
@@ -1176,10 +1277,13 @@ func _create_house_project(layout: Dictionary) -> void:
 	var floor_cells: Array = layout["floor"]
 	var wall_cells: Array = layout["walls"]
 	var roof_cells: Array = layout["roof"]
-	var groups: Array = [[floor_cells, "wood_block"], [wall_cells, "wood_block"], [roof_cells, "thatch_block"]]
+	# floor_cells replace terrain (h-1 band) -- flagged for the overlay marker
+	# (task 1d); walls/roof are placed into open air, not a terrain replace.
+	var groups: Array = [[floor_cells, "wood_block", true], [wall_cells, "wood_block", false], [roof_cells, "thatch_block", false]]
 	for group: Array in groups:
 		var cells: Array = group[0]
 		var item_id: String = String(group[1])
+		var group_floor_replace: bool = bool(group[2])
 		for c: Vector3i in cells:
 			var restore_value: int = _voxel_world.get_cell(c)
 			restore_values[c] = restore_value
@@ -1195,6 +1299,7 @@ func _create_house_project(layout: Dictionary) -> void:
 				"restore_value": restore_value,
 				"project_id": project_id,
 				"dig": false,
+				"floor_replace": group_floor_replace,
 			}
 			all_typed.append(c)
 
@@ -1536,9 +1641,10 @@ func _erase_box_cells(a: Vector3i, b: Vector3i) -> Array[Vector3i]:
 
 ## True while `cell` is something the removal tool can act on right now: a
 ## DRAFT blueprint entry (erased instantly), a BUILT cell (10..29, queued for
-## the existing removal-job path), or legal diggable terrain (1..5, queued as
-## a dig order). False for AIR, water, trunk/leaves, non-draft blueprint
-## entries, and occupied dig targets.
+## a demolition order if it belongs to a tracked project -- task 3b -- else
+## the old instant-removal fallback), or legal diggable terrain (1..5, queued
+## as a dig order). False for AIR, water, trunk/leaves, non-draft blueprint
+## entries, and occupied dig/demolition targets.
 func _is_erasable_cell(cell: Vector3i) -> bool:
 	if not _voxel_world.is_in_region(cell):
 		return false
@@ -1547,17 +1653,23 @@ func _is_erasable_cell(cell: Vector3i) -> bool:
 		return bool(entry.get("draft", false))
 	var value: int = _voxel_world.get_cell(cell)
 	if value >= BUILT_CELL_MIN_VALUE and value < 30:
-		return true
+		if _cell_project.has(cell):
+			return _is_cell_valid_for_demolition(cell)
+		return true  # untracked built cell -- instant-removal fallback always available
 	if value >= DIGGABLE_MIN_VALUE and value <= DIGGABLE_MAX_VALUE:
 		return _is_cell_valid_for_dig(cell)
 	return false
 
 ## The real value the removal-tool ghost should texture with: a draft's own
-## material (or the terrain it will remove, for a dig entry), else whatever's
-## actually in the voxel world.
+## material, the REAL built block for a pending demolition (restore_value is
+## what it becomes AFTER demolition, not what's there now -- task 3b), the
+## terrain it will remove for a plain dig entry, else whatever's actually in
+## the voxel world.
 func _erase_preview_value(cell: Vector3i) -> int:
 	if _blueprint.has(cell):
 		var entry: Dictionary = _blueprint[cell]
+		if bool(entry.get("demolition", false)):
+			return _voxel_world.get_cell(cell)
 		if bool(entry.get("dig", false)):
 			return int(entry.get("restore_value", AIR))
 		var def: ResourceItemDatabase.ItemDef = ResourceItemDatabase.get_by_id(String(entry.get("item_id", "")))
@@ -1599,11 +1711,13 @@ func _commit_erase_drag() -> void:
 		_apply_erase_at(c, single)
 
 ## Single entry point for the removal tool (single click OR drag box):
-## drafts erase instantly (no job, FEATURE 1), built cells queue the existing
-## removal-job path, raw terrain queues a dig order (FEATURE 2).
-## `emit_invalid` is only true for the single-cell (non-drag) case, matching
-## the old click UX -- a multi-cell drag silently skips cells it can't act on
-## instead of spamming toasts.
+## drafts erase instantly (no job, FEATURE 1), a BUILT cell belonging to a
+## tracked project queues a DEMOLITION ORDER (task 3b -- villagers tear it
+## down through the job pipeline, it is no longer removed instantly), an
+## untracked built cell falls back to instant removal, raw terrain queues a
+## dig order (FEATURE 2). `emit_invalid` is only true for the single-cell
+## (non-drag) case, matching the old click UX -- a multi-cell drag silently
+## skips cells it can't act on instead of spamming toasts.
 func _apply_erase_at(cell: Vector3i, emit_invalid: bool) -> void:
 	if _erase_blueprint_draft_cell(cell):
 		return
@@ -1613,7 +1727,13 @@ func _apply_erase_at(cell: Vector3i, emit_invalid: bool) -> void:
 		return
 	var value: int = _voxel_world.get_cell(cell)
 	if value >= BUILT_CELL_MIN_VALUE and value < 30:
-		_remove_built_cell(cell)
+		if _cell_project.has(cell):
+			if _create_demolition_order(cell):
+				return
+			if emit_invalid:
+				invalid_commit.emit(_cell_center(cell), "Abriss bereits geplant oder blockiert")
+			return
+		_remove_built_cell(cell)  # untracked built cell -- no project to route through a job
 		return
 	if value >= DIGGABLE_MIN_VALUE and value <= DIGGABLE_MAX_VALUE:
 		if _create_dig_order(cell):
@@ -1625,20 +1745,25 @@ func _apply_erase_at(cell: Vector3i, emit_invalid: bool) -> void:
 		invalid_commit.emit(_cell_center(cell), "nothing to remove")
 
 ## FEATURE 1: erases a single DRAFT-state blueprint cell immediately -- no
-## villager job, it's a plan edit, not a demolition. Updates the owning
-## project's totals/reverse index (via _untrack_cell) and drops the project
-## entirely once it owns zero cells. Returns false (no-op) if `cell` isn't a
-## draft blueprint entry -- callers fall through to the BUILT-cell removal /
-## dig-order paths. Released/BUILDING/PAUSED cells are NEVER touched by this
-## path (their entries have draft == false).
+## villager job, it's a plan edit. Covers BOTH a not-yet-built draft (task
+## 3e: a draft DEMOLITION order cancels the same way -- it's just plan
+## editing) and a normal not-yet-built material draft. A demolition draft's
+## underlying cell is still a real, built, project-owned cell -- so its
+## project bookkeeping (all_cells/built_cells) is left untouched; only a
+## non-demolition draft (never built) gets fully untracked from its project.
+## Returns false (no-op) if `cell` isn't a draft blueprint entry -- callers
+## fall through to the BUILT-cell removal / dig-order paths. Released/
+## BUILDING/PAUSED entries are NEVER touched by this path (draft == false).
 func _erase_blueprint_draft_cell(cell: Vector3i) -> bool:
 	if not _blueprint.has(cell):
 		return false
 	var entry: Dictionary = _blueprint[cell]
 	if not bool(entry.get("draft", false)):
 		return false
+	var is_demolition: bool = bool(entry.get("demolition", false))
 	_blueprint.erase(cell)
-	_untrack_cell(cell)
+	if not is_demolition:
+		_untrack_cell(cell)
 	blueprint_changed.emit()
 	projects_changed.emit()
 	return true
@@ -1651,6 +1776,74 @@ func _create_dig_order(cell: Vector3i) -> bool:
 	if not _is_cell_valid_for_dig(cell):
 		return false
 	_create_blueprint_cells([cell], "", false, false, true)
+	return true
+
+# --- Demolition orders (2026-07-23, task 3b) ---
+# A demolition is "a dig on a built cell": same is_dig:true machinery (job
+# pipeline, DIG_BUILD_TICKS duration, red overlay ghost -- task 1d), plus a
+# "demolition":true sub-flag so completion writes the project's captured
+# restore_value (e.g. the terrain band under a Floor-tool cell) instead of a
+# terrain dig's hardcoded AIR, and so completion SHRINKS the owning project's
+## cell tracking (_untrack_cell) instead of marking it "built" forever the way
+# a terrain dig project does (see _flush_batched_signals/report_on_site).
+
+## True while `cell` is a legal interactive demolition target right now: a
+## real BUILT cell (10..29), tracked by a project, not already queued, and not
+## blocked by a villager currently occupying it (same occupancy provider dig
+## orders use).
+func _is_cell_valid_for_demolition(cell: Vector3i) -> bool:
+	if not _voxel_world.is_in_region(cell):
+		return false
+	if _blueprint.has(cell):
+		return false
+	if not _cell_project.has(cell):
+		return false
+	var value: int = _voxel_world.get_cell(cell)
+	if value < BUILT_CELL_MIN_VALUE or value >= 30:
+		return false
+	if _occupancy_provider.is_valid() and bool(_occupancy_provider.call(cell)):
+		return false
+	return true
+
+## Stamps the actual demolition blueprint entry on `cell` (owned by
+## `project_id`, already known to be built). `released` false = draft (needs a
+## manual release, e.g. via the interactive removal tool); true = released
+## immediately (used by cancel_project's mass teardown -- task 3c, "Alles ueber
+## Auftraege", no manual start step for an Abriss). Does NOT touch project
+## all_cells/built_cells -- the cell stays exactly as tracked until the job
+## actually completes (see _flush_batched_signals).
+func _create_demolition_entry(cell: Vector3i, project_id: int, released: bool) -> void:
+	var project: Dictionary = _projects[project_id]
+	var restore_to: int = int(project["restore_values"].get(cell, AIR))
+	_blueprint[cell] = {
+		"item_id": "",
+		"progress_ticks": 0,
+		"claimed_by": 0,
+		"needs_support": false,
+		"draft": not released,
+		"restore_value": restore_to,
+		"project_id": project_id,
+		"dig": true,
+		"demolition": true,
+		"floor_replace": false,
+	}
+
+## Interactive entry point (removal tool on a built project cell): queues a
+## DRAFT demolition order, pushed onto the undo stack like any other plan
+## edit (see 3d: undoing it before release/completion just cancels the plan,
+## same as _erase_blueprint_draft_cell). Returns false if `cell` isn't a legal
+## demolition target right now (see _is_cell_valid_for_demolition).
+func _create_demolition_order(cell: Vector3i) -> bool:
+	if not _is_cell_valid_for_demolition(cell):
+		return false
+	var project_id: int = int(_cell_project[cell])
+	if not _projects.has(project_id):
+		return false
+	_create_demolition_entry(cell, project_id, false)
+	var restore_to: int = int(_blueprint[cell]["restore_value"])
+	_push_command([cell], "", false, {cell: restore_to}, false, project_id, true, true)
+	blueprint_changed.emit()
+	projects_changed.emit()
 	return true
 
 func _create_blueprint_cells(cells: Array, item_id: String, is_furniture: bool, is_floor_replace: bool = false, is_dig: bool = false) -> void:
@@ -1683,6 +1876,7 @@ func _create_blueprint_cells(cells: Array, item_id: String, is_furniture: bool, 
 			"restore_value": restore_value,
 			"project_id": project_id,
 			"dig": is_dig,
+			"floor_replace": is_floor_replace,  # VISIBILITY PACKAGE 1d: overlay marker classification
 		}
 	_push_command(typed_cells, item_id, is_furniture, restore_values, is_floor_replace, project_id, is_dig)
 	blueprint_changed.emit()
@@ -1699,22 +1893,39 @@ func _create_blueprint_cells(cells: Array, item_id: String, is_furniture: bool, 
 ## that are ALSO dig projects -- a build wall and an adjacent dig order never
 ## fold into the same project even if they touch.
 func _assign_project(cells: Array[Vector3i], is_furniture: bool, item_id: String, is_dig: bool = false) -> int:
-	var matched: Dictionary = {}  # project_id -> true
+	# CHANGE ORDERS (2026-07-23, task 3a -- REVERSES the earlier "released
+	# projects never absorb drafts" rule): a DRAFT match is still merge-eligible
+	# (multiple touched DRAFT projects fold into one survivor, exactly as
+	# before). A BUILDING/PAUSED/DONE match is now ALSO eligible -- but as an
+	# ATTACH, not a merge: the new cells join that SAME project as fresh draft
+	# entries (see _create_blueprint_cells, which always stamps draft:true)
+	# without touching its existing state or already-built cells. A DRAFT match
+	# always wins over a released match if a batch happens to touch both (kept
+	# simple; see CONTRACTS.md for the documented judgment call).
+	var matched_draft: Dictionary = {}    # project_id -> true
+	var matched_released: int = -1        # first BUILDING/PAUSED/DONE match found
 	for c in cells:
 		for offset in _NEIGHBORHOOD_26:
 			var n: Vector3i = c + offset
 			if not _cell_project.has(n):
 				continue
 			var pid: int = int(_cell_project[n])
-			if _projects.has(pid) and int(_projects[pid]["state"]) == ProjectState.DRAFT and bool(_projects[pid].get("is_dig", false)) == is_dig:
-				matched[pid] = true
+			if not _projects.has(pid) or bool(_projects[pid].get("is_dig", false)) != is_dig:
+				continue
+			var pstate: int = int(_projects[pid]["state"])
+			if pstate == ProjectState.DRAFT:
+				matched_draft[pid] = true
+			elif matched_released == -1:
+				matched_released = pid
 	var survivor_id: int = -1
-	if not matched.is_empty():
-		var ids: Array = matched.keys()
+	if not matched_draft.is_empty():
+		var ids: Array = matched_draft.keys()
 		ids.sort()
 		survivor_id = int(ids[0])
 		for i in range(1, ids.size()):
 			_merge_project_into(survivor_id, int(ids[i]))
+	elif matched_released != -1:
+		survivor_id = matched_released
 	if survivor_id == -1:
 		survivor_id = _create_project(is_furniture, item_id, is_dig)
 	var survivor: Dictionary = _projects[survivor_id]
@@ -1747,6 +1958,7 @@ func _create_project(is_furniture: bool, item_id: String, is_dig: bool = false) 
 		"claims": {},
 		"restore_values": {},
 		"is_dig": is_dig,
+		"demolishing": false,
 	}
 	return id
 
@@ -1802,7 +2014,7 @@ func _project_has_pending_entries(pid: int) -> bool:
 
 # --- Undo / redo ---
 
-func _push_command(cells: Array[Vector3i], item_id: String, is_furniture: bool, restore_values: Dictionary, is_floor_replace: bool = false, project_id: int = -1, is_dig: bool = false) -> void:
+func _push_command(cells: Array[Vector3i], item_id: String, is_furniture: bool, restore_values: Dictionary, is_floor_replace: bool = false, project_id: int = -1, is_dig: bool = false, is_demolition: bool = false) -> void:
 	_undo_stack.append({
 		"cells": cells.duplicate(),
 		"item_id": item_id,
@@ -1811,52 +2023,59 @@ func _push_command(cells: Array[Vector3i], item_id: String, is_furniture: bool, 
 		"is_floor_replace": is_floor_replace,
 		"project_id": project_id,
 		"is_dig": is_dig,
+		"is_demolition": is_demolition,
 	})
 	if _undo_stack.size() > UNDO_STACK_DEPTH:
 		_undo_stack.pop_front()  # Edge Case 9: oldest discarded silently
 	_redo_stack.clear()
 	_emit_undo_state()
 
+## UNDO RESTRICTION (2026-07-23, task 3d): _undo operates on PLAN entries
+## ONLY. A cell still present in _blueprint is still a pending plan (draft or
+## released, never completed) -- cancelling it is safe and cheap. A cell NO
+## LONGER in _blueprint has already been RESOLVED (built by a villager, or
+## torn down by a completed demolition/dig job) -- undo is now a NO-OP for
+## that cell; built-cell removal happens exclusively through demolition jobs
+## (task 3b/3c), never through undo. SIMPLIFICATION documented here: this
+## means undoing a command after ANY of its cells finished no longer reverts
+## those finished cells (previously undo un-built completed construction and
+## re-materialized completed demolitions/digs -- both are now impossible by
+## design). A cancelled DRAFT demolition plan is un-tracked exactly like any
+## other still-pending plan cancel EXCEPT it must NOT be stripped from its
+## project's all_cells/built_cells (the underlying cell is still real, built,
+## and owned by that project -- only the pending removal PLAN is cancelled).
 func _undo() -> void:
 	if _undo_stack.is_empty():
 		return
 	var cmd: Dictionary = _undo_stack.pop_back()
-	var built_removals: Array = []
-	var is_furniture: bool = bool(cmd["is_furniture"])
-	var restore_values: Dictionary = cmd.get("restore_values", {})
+	var is_demolition: bool = bool(cmd.get("is_demolition", false))
+	var any_cancelled := false
 	for cell in cmd["cells"]:
-		if _blueprint.has(cell):
-			_blueprint.erase(cell)  # still Planned/UnderConstruction -> cancel
-		else:
-			# Cell was actually completed (blueprint entry already flushed) --
-			# restore its captured pre-existing value (FEATURE 3: terrain for a
-			# floor-replace dig, AIR otherwise) instead of assuming AIR.
-			var restore_to: int = int(restore_values.get(cell, AIR))
-			var v: int = _voxel_world.get_cell(cell)
-			if v != restore_to:
-				built_removals.append({"cell": cell, "value": restore_to})
-		# Build projects (2026-07-22): this command's cells are leaving the
-		# blueprint/voxel-world either way -- drop them from project bookkeeping.
-		_untrack_cell(cell)
-	if not built_removals.is_empty():
-		var applied: Array = _voxel_world.set_cells(built_removals)
-		var removed: Array[Vector3i] = []
-		for entry in applied:
-			removed.append(entry.cell)
-			if is_furniture and _furniture_cells.has(entry.cell):
-				var fid: String = _furniture_cells[entry.cell]
-				_furniture_cells.erase(entry.cell)
-				furniture_removed.emit(entry.cell, fid)
-		cells_removed.emit(removed)
+		if not _blueprint.has(cell):
+			continue  # already resolved (built or torn down) -- no-op, see docstring above
+		_blueprint.erase(cell)
+		if not is_demolition:
+			_untrack_cell(cell)
+		any_cancelled = true
 	_redo_stack.append(cmd)
-	blueprint_changed.emit()
+	if any_cancelled:
+		blueprint_changed.emit()
+		projects_changed.emit()
 	_emit_undo_state()
-	projects_changed.emit()
 
 func _redo() -> void:
 	if _redo_stack.is_empty():
 		return
 	var cmd: Dictionary = _redo_stack.pop_back()
+	if bool(cmd.get("is_demolition", false)):
+		# SIMPLIFICATION (task 3d): re-attaching a torn-down-order to a fresh
+		# synthetic project (the pattern every other redo below uses) would
+		# double-own a cell that's still tracked by its ORIGINAL project --
+		# out of scope for this prototype. Queue a new demolition manually via
+		# the removal tool instead.
+		invalid_commit.emit(_cell_center(cmd["cells"][0]), "redo: Abriss kann nicht wiederholt werden")
+		_emit_undo_state()
+		return
 	var is_furniture: bool = bool(cmd["is_furniture"])
 	var is_floor_replace: bool = bool(cmd.get("is_floor_replace", false))
 	var is_dig: bool = bool(cmd.get("is_dig", false))
@@ -1906,6 +2125,7 @@ func _redo() -> void:
 		"is_floor_replace": is_floor_replace,
 		"project_id": project_id,
 		"is_dig": is_dig,
+		"is_demolition": false,
 	})
 	if _undo_stack.size() > UNDO_STACK_DEPTH:
 		_undo_stack.pop_front()
@@ -1947,6 +2167,7 @@ func _flush_batched_signals() -> void:
 		var entry: Dictionary = _blueprint.get(res.cell, {})
 		var project_id: int = int(entry.get("project_id", -1))
 		var is_dig: bool = bool(meta.get("is_dig", false))
+		var is_demolition: bool = bool(meta.get("is_demolition", false))
 		_blueprint.erase(res.cell)
 		if is_dig:
 			completed_dig_cells.append(res.cell)
@@ -1955,14 +2176,27 @@ func _flush_batched_signals() -> void:
 		if bool(meta["is_furniture"]):
 			_furniture_cells[res.cell] = meta["item_id"]
 			furniture_placed.emit(res.cell, String(meta["item_id"]))
+		elif is_dig and _furniture_cells.has(res.cell):
+			# Demolished a cell that used to hold furniture (e.g. a built bed).
+			var fid: String = _furniture_cells[res.cell]
+			_furniture_cells.erase(res.cell)
+			furniture_removed.emit(res.cell, fid)
 		if project_id != -1 and _projects.has(project_id):
 			var p: Dictionary = _projects[project_id]
-			p["built_cells"][res.cell] = true
 			p["claims"].erase(res.cell)
 			touched_projects[project_id] = true
+			if is_demolition:
+				# 3b/3c: a demolished cell LEAVES the project entirely (shrinks
+				# all_cells/built_cells) instead of being marked "built" the
+				# way a plain terrain-dig completion is below.
+				_untrack_cell(res.cell)
+			else:
+				p["built_cells"][res.cell] = true
 	# Build projects (2026-07-22): a project is DONE once every cell it ever
 	# owned is built/dug and no blueprint entry still points at it.
 	for pid in touched_projects.keys():
+		if not _projects.has(pid):
+			continue  # demolished down to zero cells -- project already gone (3c)
 		var p2: Dictionary = _projects[pid]
 		if int(p2["state"]) != ProjectState.DONE and not _project_has_pending_entries(pid):
 			p2["state"] = ProjectState.DONE
@@ -1992,9 +2226,15 @@ func _build_ghost_visuals() -> void:
 	_mat_ghost_invalid = _make_textured_ghost_material()
 	_blueprint_draft_mesh_instance = _make_ghost_mesh_instance(_mat_ghost_valid)
 	_blueprint_released_mesh_instance = _make_ghost_mesh_instance(_mat_ghost_valid)
-	# FEATURE 2: dig-order ghosts share the same material (tint is per-vertex).
-	_blueprint_dig_draft_mesh_instance = _make_ghost_mesh_instance(_mat_ghost_valid)
-	_blueprint_dig_released_mesh_instance = _make_ghost_mesh_instance(_mat_ghost_valid)
+	# VISIBILITY PACKAGE (2026-07-23, task 1d): untextured overlay-marker
+	# material (shared, tint is per-vertex) -- REPLACES the old dig-only
+	# tinted textured ghost mesh pair. Dig/demolition cells get no textured
+	# ghost at all now; the inflated overlay box is their sole visual.
+	_mat_overlay = _make_overlay_material()
+	_overlay_dig_draft_mesh_instance = _make_ghost_mesh_instance(_mat_overlay)
+	_overlay_dig_released_mesh_instance = _make_ghost_mesh_instance(_mat_overlay)
+	_overlay_replace_draft_mesh_instance = _make_ghost_mesh_instance(_mat_overlay)
+	_overlay_replace_released_mesh_instance = _make_ghost_mesh_instance(_mat_overlay)
 	_preview_valid_mesh = _make_ghost_mesh_instance(_mat_ghost_valid)
 	_preview_invalid_mesh = _make_ghost_mesh_instance(_mat_ghost_invalid)
 
@@ -2031,6 +2271,26 @@ func _make_textured_ghost_material() -> StandardMaterial3D:
 	mat.vertex_color_use_as_albedo = true
 	mat.albedo_texture = _atlas_texture
 	mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	# VISIBILITY PACKAGE (2026-07-23, task 1c): the alpha bump to 0.5/0.7 (from
+	# 0.3/0.45) makes coplanar/overlapping translucent ghost faces sort far
+	# more visibly than before -- force depth writes so overlapping ghost
+	# layers (e.g. draft+released of the same project mid change-order) don't
+	# alpha-sort against each other in an unstable order frame to frame.
+	mat.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_ALWAYS
+	return mat
+
+## VISIBILITY PACKAGE (2026-07-23, task 1d): shared material for every
+## overlay-marker mesh instance (dig/replace x draft/released) -- untextured,
+## tint is per-vertex, double-sided (the inflated box is a plain color marker,
+## not a real textured block, so seeing its inside from any angle is fine).
+func _make_overlay_material() -> StandardMaterial3D:
+	var mat := StandardMaterial3D.new()
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	mat.vertex_color_use_as_albedo = true
+	mat.albedo_color = Color.WHITE
+	mat.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_ALWAYS
 	return mat
 
 func _make_ghost_mesh_instance(mat: StandardMaterial3D) -> MeshInstance3D:
@@ -2040,6 +2300,56 @@ func _make_ghost_mesh_instance(mat: StandardMaterial3D) -> MeshInstance3D:
 	mi.visible = false
 	add_child(mi)
 	return mi
+
+## VISIBILITY PACKAGE (2026-07-23, task 1d): inflated (OVERLAY_SCALE), fully
+## solid (all 6 faces always emitted, no neighbor culling -- these are sparse
+## per-cell markers, not a merged solid volume) box per cell in `cells`,
+## uniformly tinted. Reuses _FACE_DIRS/_FACE_VERTS geometry (recentered to
+## -0.5..0.5 cell-local space, scaled, then re-offset to each cell's center).
+func _build_overlay_mesh(cells: Array, tint: Color) -> ArrayMesh:
+	var mesh := ArrayMesh.new()
+	if cells.is_empty():
+		return mesh
+	var verts := PackedVector3Array()
+	var normals := PackedVector3Array()
+	var colors := PackedColorArray()
+	var indices := PackedInt32Array()
+	for c in cells:
+		var cell: Vector3i = c
+		var center := Vector3(cell.x + 0.5, cell.y + 0.5, cell.z + 0.5)
+		for i in _FACE_DIRS.size():
+			var dir: Vector3i = _FACE_DIRS[i]
+			var face_verts: Array = _FACE_VERTS[i]
+			var base_index: int = verts.size()
+			var normal := Vector3(dir.x, dir.y, dir.z)
+			for v: Vector3 in face_verts:
+				var local: Vector3 = (v - Vector3(0.5, 0.5, 0.5)) * OVERLAY_SCALE
+				verts.append(center + local)
+				normals.append(normal)
+				colors.append(tint)
+			indices.append(base_index)
+			indices.append(base_index + 1)
+			indices.append(base_index + 2)
+			indices.append(base_index)
+			indices.append(base_index + 2)
+			indices.append(base_index + 3)
+	if verts.is_empty():
+		return mesh
+	var arrays: Array = []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = verts
+	arrays[Mesh.ARRAY_NORMAL] = normals
+	arrays[Mesh.ARRAY_COLOR] = colors
+	arrays[Mesh.ARRAY_INDEX] = indices
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	return mesh
+
+func _refresh_overlay_mesh(instance: MeshInstance3D, cells: Array, tint: Color) -> void:
+	if cells.is_empty():
+		instance.visible = false
+	else:
+		instance.mesh = _build_overlay_mesh(cells, tint)
+		instance.visible = true
 
 ## Boundary-face mesh for an arbitrary cell set: emits a quad only where the
 ## 6-neighbor is absent FROM THE SET (world contents are irrelevant here). Each
@@ -2191,32 +2501,42 @@ func _hide_corner_pool() -> void:
 ## cell's real tile), since a command's cells can span multiple past commits.
 ## FEATURE 2: split by draft state so players can see what release_drafts()
 ## will affect (dim = draft, stronger = released-but-unbuilt).
+## VISIBILITY PACKAGE (2026-07-23, tasks 1b/1d): dig/demolition entries no
+## longer get a textured ghost mesh at all -- they render ONLY via the
+## inflated overlay marker (red). Non-dig entries still get the normal
+## textured draft/released ghost; ADDITIONALLY, any entry flagged
+## floor_replace (a Floor-tool terrain-replace cell) gets an orange overlay
+## marker on top, so "the ground here will be replaced" reads at a glance.
 func _refresh_blueprint_ghosts() -> void:
 	var draft_values: Dictionary = {}
 	var released_values: Dictionary = {}
-	var dig_draft_values: Dictionary = {}
-	var dig_released_values: Dictionary = {}
+	var overlay_dig_draft: Array = []
+	var overlay_dig_released: Array = []
+	var overlay_replace_draft: Array = []
+	var overlay_replace_released: Array = []
 	for cell in _blueprint.keys():
 		if not _is_cell_visible_at_slice(cell):   # SLICE VIEW: ghosts respect the cut too
 			continue
 		var entry: Dictionary = _blueprint[cell]
 		var is_dig: bool = bool(entry.get("dig", false))
-		var value: int
-		if is_dig:
-			value = int(entry.get("restore_value", AIR))  # show the real terrain block about to be removed
-		else:
-			var def: ResourceItemDatabase.ItemDef = ResourceItemDatabase.get_by_id(String(entry["item_id"]))
-			value = def.cell_value if def != null else 0
 		var draft: bool = bool(entry.get("draft", false))
 		if is_dig:
 			if draft:
-				dig_draft_values[cell] = value
+				overlay_dig_draft.append(cell)
 			else:
-				dig_released_values[cell] = value
-		elif draft:
+				overlay_dig_released.append(cell)
+			continue
+		var def: ResourceItemDatabase.ItemDef = ResourceItemDatabase.get_by_id(String(entry["item_id"]))
+		var value: int = def.cell_value if def != null else 0
+		if draft:
 			draft_values[cell] = value
 		else:
 			released_values[cell] = value
+		if bool(entry.get("floor_replace", false)):
+			if draft:
+				overlay_replace_draft.append(cell)
+			else:
+				overlay_replace_released.append(cell)
 	if draft_values.is_empty():
 		_blueprint_draft_mesh_instance.visible = false
 	else:
@@ -2227,16 +2547,80 @@ func _refresh_blueprint_ghosts() -> void:
 	else:
 		_blueprint_released_mesh_instance.mesh = _build_ghost_mesh(released_values, GHOST_TINT_RELEASED)
 		_blueprint_released_mesh_instance.visible = true
-	if dig_draft_values.is_empty():
-		_blueprint_dig_draft_mesh_instance.visible = false
-	else:
-		_blueprint_dig_draft_mesh_instance.mesh = _build_ghost_mesh(dig_draft_values, GHOST_TINT_DIG_DRAFT)
-		_blueprint_dig_draft_mesh_instance.visible = true
-	if dig_released_values.is_empty():
-		_blueprint_dig_released_mesh_instance.visible = false
-	else:
-		_blueprint_dig_released_mesh_instance.mesh = _build_ghost_mesh(dig_released_values, GHOST_TINT_DIG_RELEASED)
-		_blueprint_dig_released_mesh_instance.visible = true
+	_refresh_overlay_mesh(_overlay_dig_draft_mesh_instance, overlay_dig_draft, OVERLAY_TINT_DIG_DRAFT)
+	_refresh_overlay_mesh(_overlay_dig_released_mesh_instance, overlay_dig_released, OVERLAY_TINT_DIG_RELEASED)
+	_refresh_overlay_mesh(_overlay_replace_draft_mesh_instance, overlay_replace_draft, OVERLAY_TINT_REPLACE_DRAFT)
+	_refresh_overlay_mesh(_overlay_replace_released_mesh_instance, overlay_replace_released, OVERLAY_TINT_REPLACE_RELEASED)
+
+
+# --- Click selection visuals (2026-07-23, task 2b) ---
+
+func _build_selection_visuals() -> void:
+	_mat_selection_box = StandardMaterial3D.new()
+	_mat_selection_box.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_mat_selection_box.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_mat_selection_box.vertex_color_use_as_albedo = true
+	_mat_selection_box.albedo_color = Color.WHITE
+	_mat_selection_box.no_depth_test = true  # reads through the structure it outlines, like the hover highlight
+
+	_selection_box_instance = MeshInstance3D.new()
+	_selection_box_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_selection_box_instance.visible = false
+	add_child(_selection_box_instance)
+
+
+## Arbitrary-size wireframe box between absolute world corners `lo`/`hi`
+## (mesh vertices are ABSOLUTE coordinates -- the instance itself stays at
+## identity transform, same convention _build_ghost_mesh uses).
+func _build_wireframe_box_mesh(lo: Vector3, hi: Vector3, color: Color) -> ArrayMesh:
+	var corners: Array[Vector3] = [
+		Vector3(lo.x, lo.y, lo.z), Vector3(hi.x, lo.y, lo.z), Vector3(hi.x, lo.y, hi.z), Vector3(lo.x, lo.y, hi.z),
+		Vector3(lo.x, hi.y, lo.z), Vector3(hi.x, hi.y, lo.z), Vector3(hi.x, hi.y, hi.z), Vector3(lo.x, hi.y, hi.z),
+	]
+	var edge_pairs: Array = [[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]]
+	var verts := PackedVector3Array()
+	var colors := PackedColorArray()
+	for pair: Array in edge_pairs:
+		verts.append(corners[pair[0]])
+		verts.append(corners[pair[1]])
+		colors.append(color)
+		colors.append(color)
+	var mesh := ArrayMesh.new()
+	var arrays: Array = []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = verts
+	arrays[Mesh.ARRAY_COLOR] = colors
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_LINES, arrays)
+	mesh.surface_set_material(0, _mat_selection_box)
+	return mesh
+
+
+## Rebuilds the selection wireframe from the selected project's cell-set
+## bounding box (inflated by SELECTION_BOX_INFLATE). Connected to
+## projects_changed so it stays in sync with attach/demolish/cancel; also
+## clears the selection entirely if the selected project disappeared.
+func _refresh_selection_visual() -> void:
+	if _selected_project_id != null and not _projects.has(int(_selected_project_id)):
+		_selected_project_id = null
+		project_selected.emit(null)
+	if _selected_project_id == null:
+		_selection_box_instance.visible = false
+		return
+	var project: Dictionary = _projects[int(_selected_project_id)]
+	var cells: Array = project["all_cells"].keys()
+	if cells.is_empty():
+		_selection_box_instance.visible = false
+		return
+	var min_c: Vector3i = cells[0]
+	var max_c: Vector3i = cells[0]
+	for c: Vector3i in cells:
+		min_c = Vector3i(mini(min_c.x, c.x), mini(min_c.y, c.y), mini(min_c.z, c.z))
+		max_c = Vector3i(maxi(max_c.x, c.x), maxi(max_c.y, c.y), maxi(max_c.z, c.z))
+	var lo: Vector3 = Vector3(min_c.x, min_c.y, min_c.z) - Vector3.ONE * SELECTION_BOX_INFLATE
+	var hi: Vector3 = Vector3(max_c.x + 1, max_c.y + 1, max_c.z + 1) + Vector3.ONE * SELECTION_BOX_INFLATE
+	_selection_box_instance.mesh = _build_wireframe_box_mesh(lo, hi, SELECTION_BOX_COLOR)
+	_selection_box_instance.visible = true
+
 
 func _cell_center(cell: Vector3i) -> Vector3:
 	return Vector3(cell.x + 0.5, cell.y + 0.5, cell.z + 0.5)

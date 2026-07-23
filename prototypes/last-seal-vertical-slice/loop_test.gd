@@ -100,6 +100,13 @@ func _run() -> void:
 	_check(not hut_final.is_empty() and int(hut_final.get("built_cells", -1)) == int(hut_final.get("total_cells", -2)) and int(hut_final.get("state", -1)) == 3,
 		"hut project fully built and DONE (built=%s total=%s state=%s)" % [hut_final.get("built_cells"), hut_final.get("total_cells"), hut_final.get("state")])
 
+	# --- PERSISTENT PROJECTS (2026-07-23): a DONE project is never auto-removed
+	# and a built cell keeps resolving to its project id via the reverse index. ---
+	var hut_wall_cell := Vector3i(site.x, h + 1, site.z)
+	_check(vw.get_cell(hut_wall_cell) > 0, "sanity: hut wall cell is actually built before the persistence check")
+	_check(bs.get_project_at_cell(hut_wall_cell) == hut_project_id,
+		"persistence: a built hut cell still resolves to its (DONE) project id via get_project_at_cell")
+
 	await get_tree().process_frame  # let build_validation's deferred pass run
 	await get_tree().process_frame
 	_check(_room_recognized, "room recognized after roof closed (interior cells: %d)" % _room_cells.size())
@@ -304,6 +311,81 @@ func _run() -> void:
 	vw.reset_slice_level()
 	_check(not vw.is_slice_active() and vw.get_slice_level() == slice_before,
 		"slice view: reset returns to off/MAX_Y (level=%d active=%s)" % [vw.get_slice_level(), vw.is_slice_active()])
+
+	# ==========================================================================
+	# PERSISTENT PROJECTS + VISIBILITY PACKAGE (2026-07-23): change orders,
+	# demolition jobs, undo restriction, click selection.
+	# ==========================================================================
+
+	# --- CHANGE ORDER ADD (task 3a): a new draft cell adjacent to the DONE hut
+	# project ATTACHES to that SAME project (reverses the old "released
+	# projects never absorb drafts" rule) instead of starting a new one. ---
+	var change_cell := Vector3i(site.x - 1, h, site.z)
+	_check(vw.get_cell(change_cell) == 0, "sanity: change-order cell starts as AIR (just outside the built wall)")
+	bs._create_blueprint_cells([change_cell], "wood_block", false)
+	var hut_after_attach: Dictionary = {}
+	for p: Dictionary in bs.get_projects():
+		if int(p["id"]) == hut_project_id:
+			hut_after_attach = p
+	_check(int(hut_after_attach.get("id", -1)) == hut_project_id,
+		"change order: new adjacent draft attached to the SAME (DONE) hut project, not a new one")
+	_check(int(hut_after_attach.get("draft_cells", -1)) == 1,
+		"change order: hut project reports exactly 1 pending draft (got %s)" % hut_after_attach.get("draft_cells"))
+	_check(int(hut_after_attach.get("state", -1)) == 3,
+		"change order: hut project stays DONE while the change is still just a draft")
+	_check(bs.get_project_at_cell(change_cell) == hut_project_id,
+		"change order: the new cell already resolves to the hut project id before it's even built")
+
+	bs.release_project(hut_project_id)
+	var change_ticks := await _run_ticks_until(2000, func() -> bool: return vw.get_cell(change_cell) == 10)
+	_check(change_ticks >= 0, "change order: wood cell built (ticks=%d)" % change_ticks)
+	var hut_after_change_build: Dictionary = {}
+	for p: Dictionary in bs.get_projects():
+		if int(p["id"]) == hut_project_id:
+			hut_after_change_build = p
+	_check(int(hut_after_change_build.get("state", -1)) == 3,
+		"change order: hut project returned to DONE once the change-order cell completed")
+
+	# --- DEMOLITION (task 3b): ordering demolition of that same cell reuses
+	# the dig-order machinery (draft -> release -> job -> restore_value write). ---
+	var demo_created: bool = bs._create_demolition_order(change_cell)
+	_check(demo_created, "demolition: order created on the built change-order cell")
+	var hut_after_demo_draft: Dictionary = {}
+	for p: Dictionary in bs.get_projects():
+		if int(p["id"]) == hut_project_id:
+			hut_after_demo_draft = p
+	_check(int(hut_after_demo_draft.get("draft_cells", -1)) == 1,
+		"demolition: queued as a pending draft entry on the hut project (got %s)" % hut_after_demo_draft.get("draft_cells"))
+
+	bs.release_project(hut_project_id)
+	var demo_ticks := await _run_ticks_until(2000, func() -> bool: return vw.get_cell(change_cell) == 0)
+	_check(demo_ticks >= 0, "demolition: change-order cell reached AIR again (ticks=%d)" % demo_ticks)
+	var hut_after_demo: Dictionary = {}
+	for p: Dictionary in bs.get_projects():
+		if int(p["id"]) == hut_project_id:
+			hut_after_demo = p
+	_check(int(hut_after_demo.get("state", -1)) == 3, "demolition: hut project back to DONE once the demolition completed")
+	_check(int(hut_after_demo.get("total_cells", -1)) == int(hut_final.get("total_cells", -2)),
+		"demolition: hut project cell count returned to its original size (got %s want %s)" \
+			% [hut_after_demo.get("total_cells"), hut_final.get("total_cells")])
+	_check(not bs.get_blueprint_cells().has(change_cell), "demolition: no lingering blueprint entry for the torn-down cell")
+
+	# --- UNDO SAFETY (task 3d): _undo/_redo operate on PLAN entries only --
+	# repeated _undo must never remove a BUILT cell of a persistent project. ---
+	for _i in 5:
+		bs._undo()
+	_check(vw.get_cell(hut_wall_cell) > 0, "undo safety: repeated _undo never removed a BUILT hut cell")
+	_check(bs.get_project_at_cell(hut_wall_cell) == hut_project_id,
+		"undo safety: the built hut cell is still tracked to its project after repeated undo")
+
+	# --- SELECTION (task 2b): select_project via a built cell resolves the
+	# same id; deselect clears it. ---
+	var picked_project_id: Variant = bs.get_project_at_cell(hut_wall_cell)
+	bs.select_project(picked_project_id)
+	_check(bs.get_selected_project() == hut_project_id,
+		"selection: select_project via a built cell resolves to the hut project id (got %s)" % bs.get_selected_project())
+	bs.deselect_project()
+	_check(bs.get_selected_project() == null, "selection: deselect_project clears the selection")
 
 	# Regression (2026-07-23 crash): the preview path receives PLAIN Arrays —
 	# every helper on it must accept untyped arrays (typed params raise at runtime).

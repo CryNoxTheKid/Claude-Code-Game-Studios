@@ -133,23 +133,48 @@ func get_draft_count() -> int
 signal projects_changed()                          # created/merged/state change/claim change/cancelled
 func get_projects() -> Array
     # Array of {id:int, name:String, state:int (0 DRAFT/1 BUILDING/2 PAUSED/3 DONE),
-    #   state_label:String, total_cells:int, built_cells:int, worker_ids:Array[int]}
-func release_project(id: int) -> void             # DRAFT -> BUILDING
-func pause_project(id: int) -> void                # BUILDING -> PAUSED; no NEW claims, but a job a
-                                                    #   villager already claimed is allowed to finish
-func resume_project(id: int) -> void               # PAUSED -> BUILDING
-func cancel_project(id: int) -> void               # any state -> gone: cancels pending blueprint
-                                                    #   entries, un-builds already-built cells
-                                                    #   (restore_value else AIR), drops built furniture
-                                                    #   from the registry, removes the project
+    #   state_label:String, total_cells:int, built_cells:int, worker_ids:Array[int],
+    #   draft_cells:int (2026-07-23: pending change-order drafts, ANY state),
+    #   demolishing:bool (2026-07-23: true once cancel_project/Abriss queued
+    #     demolition orders for its built cells -- see addendum)}
+func release_project(id: int) -> void              # releases every still-DRAFT entry owned by
+                                                     #   this project regardless of the project's OWN
+                                                     #   state (2026-07-23: generalized beyond
+                                                     #   DRAFT-only projects for change orders --
+                                                     #   DRAFT/DONE -> BUILDING; BUILDING/PAUSED
+                                                     #   unchanged). No-op if nothing to release.
+func pause_project(id: int) -> void                 # BUILDING -> PAUSED; no NEW claims, but a job a
+                                                     #   villager already claimed is allowed to finish
+func resume_project(id: int) -> void                # PAUSED -> BUILDING
+func cancel_project(id: int) -> void                # 2026-07-23 REWRITE, "Alles ueber Auftraege":
+                                                     #   unbuilt blueprint entries are discarded
+                                                     #   instantly (free); BUILT cells instead become
+                                                     #   RELEASED demolition orders (see addendum) --
+                                                     #   the project is marked demolishing and only
+                                                     #   disappears once every cell is actually gone.
+# --- Click selection (2026-07-23, PERSISTENT PROJECTS + VISIBILITY PACKAGE) ---
+signal project_selected(id: Variant)                # fires on select/deselect (id:int or null)
+func get_project_at_cell(cell: Vector3i) -> Variant # project id or null; covers built AND
+                                                     #   still-blueprint (draft/released/demolition)
+                                                     #   cells, since _cell_project is populated the
+                                                     #   instant a cell is committed
+func select_project(id: Variant) -> void            # invalid id -> deselect
+func get_selected_project() -> Variant               # id:int or null
+func deselect_project() -> void                      # convenience for select_project(null)
 ```
 
 Every blueprint entry also carries a `project_id: int`. Grouping rule: a
 drag/placement's WHOLE cell batch merges into an existing DRAFT-state project
 if any cell in the batch is within the 26-neighborhood of that project's
 cells (bridging multiple DRAFT projects merges them into one); otherwise a
-fresh project is created. Released/BUILDING/PAUSED/DONE projects never absorb
-new drafts. `claim_job` only serves BUILDING-state projects and records the
+fresh project is created. **REVERSED (2026-07-23, PERSISTENT PROJECTS +
+VISIBILITY PACKAGE, see addendum below):** a batch touching a
+BUILDING/PAUSED/DONE project (instead of a DRAFT one) now ATTACHES to that
+SAME project as fresh draft entries (a change order) rather than starting a
+new project or being ignored — see the addendum for the full change-order/
+demolition semantics this unlocks. A DRAFT match still wins over a
+released/DONE match if a batch happens to touch both (documented judgment
+call). `claim_job` only serves BUILDING-state projects and records the
 claiming villager per project (surfaced via `worker_ids`).
 
 ### Removal tool: draft eraser + terrain dig orders (2026-07-22, this task)
@@ -384,3 +409,139 @@ func setup(building_system: Node, camera_input: Node, villager_ai: Node,
 Needed for the slice-view indicator/buttons (`get_slice_level()`/
 `is_slice_active()`/`set_slice_level()`). Defaults to `null` so existing
 call sites without it don't break; GameWorld passes `voxel_world`.
+
+## Addendum: PERSISTENT PROJECTS + VISIBILITY PACKAGE (2026-07-23, this task)
+
+### 1. Visuals
+
+- **Build grid** alpha cut to ~30% of its previous value (`BUILD_GRID_COLOR`
+  0.35 -> 0.1) — it's a faint planning aid, not a hero visual.
+- **Blueprint ghost alpha** bumped 0.30/0.45 -> **0.50/0.70** (draft/released)
+  for the normal textured build ghost (`GHOST_TINT_DRAFT`/`GHOST_TINT_RELEASED`).
+- **Ghost face audit finding**: `_build_ghost_mesh`'s per-set face culling
+  (`if cell_values.has(cell + dir): continue`) was already correct — it only
+  culls a face whose neighbor is in the SAME merged-mesh dictionary (draft-to-
+  draft or released-to-released of the same tint), so every face touching
+  real solid world geometry, air, or a DIFFERENT tint's cell set is always
+  emitted, and `_refresh_blueprint_ghosts()` already reruns on every
+  `blueprint_changed` emission (which fires on every relevant mutation), so
+  meshes never go stale. **No missing-face bug was found in the culling
+  algorithm.** The most likely explanation for the "missing faces" report is
+  the very low pre-existing alpha (0.30/0.45) making faces hard to perceive
+  against similarly-lit surroundings — directly addressed by the alpha bump
+  above. As a defensive polish anyway (task's own ask), both the textured
+  ghost material and the new overlay material now set
+  `depth_draw_mode = DEPTH_DRAW_ALWAYS` (forces a depth write even though
+  alpha < 1), reducing alpha-sort flicker between overlapping translucent
+  ghost layers (e.g. a draft + released set of the same project mid change-
+  order). Shadow casting was already off on every ghost mesh instance.
+- **REPLACE/DIG overlay marker** (new): terrain cells that will be REPLACED
+  (a Floor-tool terrain-replace entry, now flagged per-cell via a new
+  `floor_replace: bool` blueprint-entry field) or DUG/DEMOLISHED (any
+  `dig: true` entry — see section 3 below) additionally render a `1.06`-scale
+  translucent, UNTEXTURED overlay box on the affected cell — orange
+  (`OVERLAY_TINT_REPLACE_*`) for replace, red (`OVERLAY_TINT_DIG_*`) for
+  dig/demolition, alpha 0.5/0.7 draft/released matching the ghost split.
+  **This REPLACES the old dig-only tinted textured ghost mesh pair entirely**
+  — a dig/demolition blueprint entry no longer gets a textured ghost at all,
+  only the overlay (the real block already renders via the normal voxel mesh
+  until the job completes, for a demolition). New internal API surface (not
+  public, listed for the next agent's benefit):
+  `_build_overlay_mesh(cells: Array, tint: Color) -> ArrayMesh`,
+  `_refresh_overlay_mesh(instance, cells, tint)`, mesh instances
+  `_overlay_dig_draft_mesh_instance` / `_overlay_dig_released_mesh_instance` /
+  `_overlay_replace_draft_mesh_instance` / `_overlay_replace_released_mesh_instance`.
+
+### 2. Persistent projects + click selection
+
+- DONE projects were already never auto-removed and `_cell_project` was
+  already kept alive for built cells (verified, no change needed) — the
+  persistence requirement was already satisfied by the existing 2026-07-22
+  build-projects implementation.
+- New: `get_project_at_cell(cell) -> Variant` (project id or null; covers
+  built AND still-blueprint cells), `select_project(id)`,
+  `get_selected_project() -> Variant`, `deselect_project()`, signal
+  `project_selected(id: Variant)`.
+- Click routing lives in `hud.gd._on_build_click` (not building_system) since
+  HUD already owns the villager-vs-tool arbitration: a tool armed skips
+  selection entirely (unchanged priority); otherwise a raycast (same
+  `extra_solid` blueprint predicate BuildingSystem uses for its own pick)
+  resolves a cell, `get_project_at_cell` looks up ownership, and a hit
+  selects + deselects the villager panel; a miss/non-project cell deselects
+  the project and falls through to the existing villager-pick logic.
+- Esc deselects the project BEFORE exiting build mode — inserted into
+  `BuildingSystem._on_cancel()`'s existing chain (drag-abort -> erase-abort
+  -> disarm tool -> **deselect project** -> exit build mode).
+- World visual: a cyan wireframe box (`SELECTION_BOX_COLOR`, distinct from the
+  warm-yellow hover highlight) around the selected project's cell-set
+  bounding box, inflated by `SELECTION_BOX_INFLATE`. HUD: the project's card
+  gets a gold border (matching the active-tool-button treatment) and the
+  panel's `ScrollContainer.ensure_control_visible()` scrolls it into view.
+
+### 3. Change orders + demolition jobs (REVERSES an earlier rule)
+
+- **Adding**: `_assign_project`'s grouping rule now ALSO matches a
+  BUILDING/PAUSED/DONE project (previously DRAFT-only) via the same
+  26-neighborhood cell-adjacency test — the new cells ATTACH to that project
+  as fresh `draft:true` entries (never merged/instantly released). A DRAFT
+  match still wins if a batch happens to touch both kinds (judgment call).
+  `get_projects()`'s new `draft_cells` field surfaces pending count regardless
+  of the project's own top-level state; a DONE project with `draft_cells > 0`
+  shows "Aenderungen geplant" in the HUD with a "Bau starten" button that
+  calls the now-generalized `release_project(id)` (releases just the pending
+  drafts; DRAFT/DONE -> BUILDING, BUILDING/PAUSED unchanged) — the project
+  returns to DONE automatically once those cells complete (existing
+  DONE-detection logic in `_flush_batched_signals`, unchanged).
+- **Removing (task 3b, "a demolition is a dig on a built cell")**: the
+  removal tool on a BUILT cell that belongs to a tracked project no longer
+  removes it instantly — it creates a DRAFT demolition blueprint entry
+  (`dig: true`, new `demolition: true` sub-flag) via `_create_demolition_order`,
+  rendered through the red overlay above. Reuses the entire dig job pipeline
+  (DRAFT -> release -> `claim_job` -> `report_on_site` -> batched write); a
+  demolition's completion writes the project's captured `restore_value`
+  (honors a Floor-tool terrain-replace cell's original ground) instead of a
+  plain terrain dig's hardcoded AIR, and — unlike a plain terrain dig, which
+  marks its cell "built" forever (the dig project persists as a permanent DONE
+  record) — a completed demolition instead calls `_untrack_cell`, SHRINKING
+  the owning project's `all_cells`/`built_cells` (and dropping the project
+  entirely if that empties it out). `cells_removed` fires on completion so
+  `build_validation` re-runs, same as any other removal. An untracked built
+  cell (shouldn't normally occur in this codebase) still falls back to the
+  old instant `_remove_built_cell` path. `_is_erasable_cell`/`_erase_preview_value`
+  updated to route/texture accordingly (a demolition preview shows the REAL
+  current block, not its post-demolition restore_value).
+- **Cancel / Abriss ("Alles ueber Auftraege", user decision)**:
+  `cancel_project(id)` no longer writes to the world directly. Every
+  not-yet-built blueprint entry (draft or released) is discarded instantly
+  (a plan is free); every already-BUILT cell instead gets a RELEASED
+  demolition entry (`_create_demolition_entry`, bypasses the interactive
+  occupancy gate — a decisive bulk teardown) and the project is flagged
+  `demolishing: true` (surfaced via `get_projects()`; HUD hides its normal
+  buttons and shows "Wird abgerissen"). The DONE-state "Abriss" button calls
+  the exact same function. The project reaches its terminal removed state —
+  simply dropped from `_projects`, per `_untrack_cell`'s existing empty-check
+  — only once every one of its cells is actually gone (i.e. "dropped from the
+  panel" IS the terminal state; no new ProjectState enum value was added).
+- **Undo restriction (task 3d)**: `_undo`/`_redo` now operate on PLAN entries
+  ONLY. **Simplification documented here**: a cell still present in
+  `_blueprint` is still a pending plan (draft or released, never completed)
+  and is cancelled as before; a cell NO LONGER in `_blueprint` has already
+  been RESOLVED (built by a villager, or torn down by a completed
+  demolition/dig job) and undo is now a **no-op** for that cell — it
+  previously un-built completed construction and re-materialized completed
+  demolitions/digs by writing `restore_values` back to the voxel world; that
+  world-write path is gone from `_undo` entirely. A cancelled DRAFT demolition
+  entry is un-tracked exactly like any other still-pending plan cancel EXCEPT
+  it must NOT be stripped from its project's `all_cells`/`built_cells` (the
+  underlying cell is still real, built, and owned by that project — only the
+  pending removal plan is cancelled); `_push_command`/the undo/redo stack
+  entries gained an `is_demolition: bool` field to drive this distinction.
+  `_redo()` on a demolition command is a documented no-op (re-attaching a
+  torn-down-order to a fresh synthetic project, the pattern every other redo
+  path uses, would double-own a cell still tracked by its ORIGINAL project —
+  out of scope for this prototype; queue a new demolition manually instead).
+- **Eraser on a draft demolition entry** (task 3e) already falls through
+  `_erase_blueprint_draft_cell`'s existing generic draft-cell-erase path
+  (any `draft: true` entry, demolition or not) — just fixed to skip
+  `_untrack_cell` for the demolition case (same reasoning as the undo
+  restriction above: the built cell it targets must stay tracked).
