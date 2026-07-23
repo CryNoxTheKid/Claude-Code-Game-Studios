@@ -3,89 +3,185 @@
 #
 # Status value mapping (yaml ↔ story file Status field):
 #   backlog        ↔  Not Started
-#   complete-for-dev  ↔  Ready
+#   ready-for-dev  ↔  Ready
 #   in-progress    ↔  In Progress
 #   review         ↔  In Review
 #   done           ↔  Complete
 #   blocked        ↔  Blocked
+#
+# Active sprint: 2. Sprint 1 history retained below the Sprint 2 block.
 
-sprint: 1
-goal: "Stand up the Foundation spine (boot gate, DI scaffold, config pattern) and open the Time & Tick, Camera, and Voxel-data tracks with their first stories, proving DI-mockable modules boot behind the RID gate."
+sprint: 2
+goal: "Close out the Foundation Spine (headless boot test + CONTRACTS.md) and advance all five Foundation tracks one story past their Sprint-1 starter: RID query API, game_delta + pause/warp, InputMap passthrough, chunked voxel storage, World-Root/Valley topology + boot gate."
 start: "2026-07-23"
 end: ""
 generated: "2026-07-23"
 updated: "2026-07-23"
 
 stories:
-  - id: "spine-001"
-    name: "GameWorld root + injected-tier DI scaffold (setup() wiring)"
-    file: "production/epics/foundation-spine/story-001-gameworld-di-scaffold.md"
-    priority: must-have
-    status: complete
-    owner: "godot-gdscript-specialist"
-    estimate_days: 1
-    blocker: ""
-    completed: ""
-  - id: "rid-001"
-    name: "ItemDefinition two-type split + getter-only immutability"
-    file: "production/epics/resource-item-database/story-001-item-definition-two-type-split.md"
+  - id: "spine-004"
+    name: "Headless boot integration test — DI wiring + gate + config reads green"
+    file: "production/epics/foundation-spine/story-004-headless-boot-integration-test.md"
     priority: must-have
     status: ready-for-dev
     owner: "godot-gdscript-specialist"
     estimate_days: 1
     blocker: ""
     completed: ""
-  - id: "rid-002"
-    name: "RID Autoload + load-once + Ready state + boot-gate signal"
-    file: "production/epics/resource-item-database/story-002-autoload-boot-gate.md"
+  - id: "spine-005"
+    name: "CONTRACTS.md — spine contract sheet + data-definition immutability contract"
+    file: "production/epics/foundation-spine/story-005-contracts-md-and-data-definition-contract.md"
     priority: must-have
-    status: complete-for-dev
+    status: ready-for-dev
     owner: "godot-gdscript-specialist"
-    estimate_days: 1
-    blocker: "depends on rid-001 (in-sprint)"
+    estimate_days: 0.5
+    blocker: "finalize after spine-004 (in-sprint)"
     completed: ""
-  - id: "spine-002"
-    name: "Boot-sequencing gate — BootState machine + RID Ready/Failed gate"
-    file: "production/epics/foundation-spine/story-002-boot-sequencing-gate.md"
+  - id: "rid-003"
+    name: "Read-only lookup API — get_by_id + listing queries"
+    file: "production/epics/resource-item-database/story-003-lookup-api.md"
     priority: must-have
-    status: complete-for-dev
-    owner: "godot-gdscript-specialist"
-    estimate_days: 1
-    blocker: "depends on spine-001 (in-sprint); tests vs mock RID double"
-    completed: ""
-  - id: "spine-003"
-    name: "Config Resource pattern — typed .tres + validate() two-tier clamp/halt"
-    file: "production/epics/foundation-spine/story-003-config-resource-pattern.md"
-    priority: must-have
-    status: complete-for-dev
-    owner: "godot-gdscript-specialist"
-    estimate_days: 1
-    blocker: "depends on spine-001, spine-002 (in-sprint)"
-    completed: ""
-  - id: "tick-001"
-    name: "Time & Tick Autoload skeleton + config resource + boot defaults"
-    file: "production/epics/time-tick-system/story-001-autoload-config-boot-defaults.md"
-    priority: should-have
-    status: complete
+    status: ready-for-dev
     owner: "godot-gdscript-specialist"
     estimate_days: 1
     blocker: ""
     completed: ""
-  - id: "cam-001"
-    name: "Camera config + spherical position derivation"
-    file: "production/epics/camera-input/story-001-camera-config-spherical-derivation.md"
-    priority: should-have
-    status: complete
+  - id: "tick-002"
+    name: "game_delta computation — formula, clamp, raw-delta preservation"
+    file: "production/epics/time-tick-system/story-002-game-delta-computation.md"
+    priority: must-have
+    status: ready-for-dev
+    owner: "godot-gdscript-specialist"
+    estimate_days: 1
+    blocker: ""
+    completed: ""
+  - id: "cam-002"
+    name: "InputMap action registration + action_fired passthrough"
+    file: "production/epics/camera-input/story-002-inputmap-registration-action-passthrough.md"
+    priority: must-have
+    status: ready-for-dev
     owner: "godot-specialist"
     estimate_days: 1
     blocker: ""
     completed: ""
-  - id: "vox-001"
-    name: "Grid config + coordinate math + bounds"
-    file: "production/epics/voxel-world/story-001-grid-config-and-coordinate-math.md"
-    priority: should-have
-    status: complete
+  - id: "vox-002"
+    name: "Chunked packed-array storage + O(1) accessors + single-cell change signal"
+    file: "production/epics/voxel-world/story-002-chunked-cell-storage-and-accessors.md"
+    priority: must-have
+    status: ready-for-dev
     owner: "godot-gdscript-specialist"
     estimate_days: 1
     blocker: ""
     completed: ""
+  - id: "scene-001"
+    name: "World Root + single-Valley attach topology (NEEDS-DECISION flag carried)"
+    file: "production/epics/scene-world-management/story-001-world-root-valley-attach.md"
+    priority: must-have
+    status: ready-for-dev
+    owner: "godot-specialist"
+    estimate_days: 1
+    blocker: ""
+    completed: ""
+  - id: "tick-003"
+    name: "Pause & time-warp state — toggle, store, independence"
+    file: "production/epics/time-tick-system/story-003-pause-warp-state.md"
+    priority: should-have
+    status: backlog
+    owner: "godot-gdscript-specialist"
+    estimate_days: 1
+    blocker: "depends on tick-002 (in-sprint)"
+    completed: ""
+  - id: "scene-002"
+    name: "Boot-gate integration — Valley attaches only after RID Ready; DB-fail → HALT"
+    file: "production/epics/scene-world-management/story-002-boot-gate-integration.md"
+    priority: should-have
+    status: backlog
+    owner: "godot-specialist"
+    estimate_days: 1
+    blocker: "depends on scene-001 (in-sprint); spine-002 DONE (S1)"
+    completed: ""
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SPRINT 1 HISTORY (retained; all 8/8 Complete, suite 121/121)
+# ─────────────────────────────────────────────────────────────────────────────
+sprint_1_history:
+  sprint: 1
+  goal: "Stand up the Foundation spine (boot gate, DI scaffold, config pattern) and open the Time & Tick, Camera, and Voxel-data tracks with their first stories, proving DI-mockable modules boot behind the RID gate."
+  start: "2026-07-23"
+  end: ""
+  generated: "2026-07-23"
+  updated: "2026-07-23"
+  result: "8/8 Complete; suite 121/121 green; three upstream doc defects found-and-fixed pre-ship"
+  stories:
+    - id: "spine-001"
+      name: "GameWorld root + injected-tier DI scaffold (setup() wiring)"
+      file: "production/epics/foundation-spine/story-001-gameworld-di-scaffold.md"
+      priority: must-have
+      status: complete
+      owner: "godot-gdscript-specialist"
+      estimate_days: 1
+      blocker: ""
+      completed: "2026-07-23"
+    - id: "rid-001"
+      name: "ItemDefinition two-type split + getter-only immutability"
+      file: "production/epics/resource-item-database/story-001-item-definition-two-type-split.md"
+      priority: must-have
+      status: complete
+      owner: "godot-gdscript-specialist"
+      estimate_days: 1
+      blocker: ""
+      completed: "2026-07-23"
+    - id: "rid-002"
+      name: "RID Autoload + load-once + Ready state + boot-gate signal"
+      file: "production/epics/resource-item-database/story-002-autoload-boot-gate.md"
+      priority: must-have
+      status: complete
+      owner: "godot-gdscript-specialist"
+      estimate_days: 1
+      blocker: ""
+      completed: "2026-07-23"
+    - id: "spine-002"
+      name: "Boot-sequencing gate — BootState machine + RID Ready/Failed gate"
+      file: "production/epics/foundation-spine/story-002-boot-sequencing-gate.md"
+      priority: must-have
+      status: complete
+      owner: "godot-gdscript-specialist"
+      estimate_days: 1
+      blocker: ""
+      completed: "2026-07-23"
+    - id: "spine-003"
+      name: "Config Resource pattern — typed .tres + validate() two-tier clamp/halt"
+      file: "production/epics/foundation-spine/story-003-config-resource-pattern.md"
+      priority: must-have
+      status: complete
+      owner: "godot-gdscript-specialist"
+      estimate_days: 1
+      blocker: ""
+      completed: "2026-07-23"
+    - id: "tick-001"
+      name: "Time & Tick Autoload skeleton + config resource + boot defaults"
+      file: "production/epics/time-tick-system/story-001-autoload-config-boot-defaults.md"
+      priority: should-have
+      status: complete
+      owner: "godot-gdscript-specialist"
+      estimate_days: 1
+      blocker: ""
+      completed: "2026-07-23"
+    - id: "cam-001"
+      name: "Camera config + spherical position derivation"
+      file: "production/epics/camera-input/story-001-camera-config-spherical-derivation.md"
+      priority: should-have
+      status: complete
+      owner: "godot-specialist"
+      estimate_days: 1
+      blocker: ""
+      completed: "2026-07-23"
+    - id: "vox-001"
+      name: "Grid config + coordinate math + bounds"
+      file: "production/epics/voxel-world/story-001-grid-config-and-coordinate-math.md"
+      priority: should-have
+      status: complete
+      owner: "godot-gdscript-specialist"
+      estimate_days: 1
+      blocker: ""
+      completed: "2026-07-23"
