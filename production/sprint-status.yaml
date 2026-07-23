@@ -3,7 +3,7 @@
 #
 # Status value mapping (yaml ↔ story file Status field):
 #   backlog        ↔  Not Started
-#   ready-for-dev  ↔  Ready
+#   complete-for-dev  ↔  Ready
 #   in-progress    ↔  In Progress
 #   review         ↔  In Review
 #   done           ↔  Complete

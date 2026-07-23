@@ -1,7 +1,7 @@
 # Story 001: ItemDefinition two-type split + schema + getter-only immutability
 
 > **Epic**: Resource & Item Database
-> **Status**: Ready
+> **Status: Complete (2026-07-23 — 13/13 suite green, parent-verified)
 > **Layer**: Foundation
 > **Type**: Logic
 > **Estimate**: 1 day
