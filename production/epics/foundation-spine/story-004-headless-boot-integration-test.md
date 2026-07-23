@@ -1,7 +1,7 @@
 # Story 004: Headless boot integration test — DI wiring + gate + config reads, green
 
 > **Epic**: Foundation Spine (Boot, DI, Config & Test Harness)
-> **Status**: Ready
+> **Status: Complete (2026-07-23 — 128/128 suite green, parent-verified; Milestone SC#1 proven)
 > **Layer**: Foundation
 > **Type**: Integration
 > **Estimate**: 1 day
