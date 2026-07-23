@@ -75,7 +75,7 @@ stories:
     name: "Camera config + spherical position derivation"
     file: "production/epics/camera-input/story-001-camera-config-spherical-derivation.md"
     priority: should-have
-    status: backlog
+    status: complete
     owner: "godot-specialist"
     estimate_days: 1
     blocker: ""

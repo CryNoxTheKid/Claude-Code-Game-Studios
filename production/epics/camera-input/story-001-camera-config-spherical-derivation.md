@@ -1,7 +1,7 @@
 # Story 001: Camera config + spherical position derivation
 
 > **Epic**: Camera & Input
-> **Status**: Ready
+> **Status: Complete (2026-07-23 — 69/69 suite green, parent-verified; GDD worked-example digit slip flagged, exact formula asserted)
 > **Layer**: Foundation
 > **Type**: Logic
 > **Estimate**: 1 day
