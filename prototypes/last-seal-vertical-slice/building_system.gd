@@ -19,6 +19,13 @@ const TERRAIN_MAX_VALUE := 4
 const DIGGABLE_MIN_VALUE := 1
 const DIGGABLE_MAX_VALUE := 5
 const DIG_BUILD_TICKS := 5  # tuning knob: dig duration, same order of magnitude as material build_ticks (4..8)
+# ANTI-STUCK, FEATURE 2 (2026-07-23, "don't seal your last exit"): a non-dig
+# completion that would leave its own builder with zero legal steps is
+# refused (see report_on_site/_should_prevent_seal) -- but the SAME villager
+# is allowed through after this many refused attempts on the SAME cell, so a
+# genuinely sealed-in villager doesn't camp a job forever (the unstuck
+# watchdog is the fallback safety net if it truly seals itself).
+const SEAL_ABANDON_LIVELOCK_LIMIT := 3
 
 # --- BUILD UX PACKAGE (2026-07-22, user-prioritized) ---
 # Cell values duplicated per file per CONTRACTS.md (voxel_world.gd is the source of truth).
@@ -193,6 +200,13 @@ var _redo_stack: Array = []
 
 var _occupancy_provider: Callable = Callable()  # cb(cell: Vector3i) -> bool ; extra API, see summary
 var _tick_count: int = 0  # reserved for future watchdog/unreachable-retry use (not implemented in slice)
+
+# ANTI-STUCK, FEATURE 2 (2026-07-23): injected so report_on_site can simulate
+# "would this write seal its builder in" without BuildingSystem tracking
+# villager positions itself -- same injection pattern BuildValidation already
+# uses for VillagerAI's static movement-graph predicates.
+var _villager_ai_script: GDScript = null
+var _position_provider: Callable = Callable()  # cb(villager_id: int) -> Variant (Vector3i or null)
 
 var _pending_completions: Array[Dictionary] = []  # {cell, value, item_id, is_furniture} awaiting frame flush
 
@@ -428,6 +442,18 @@ func report_on_site(cell: Vector3i) -> void:
 		return
 	if bool(entry.get("ready", false)):
 		return  # already queued for write; the flush owns it now
+	# ANTI-STUCK FEATURE 2 ("don't seal your last exit"): a non-dig completion
+	# never gets to wall off its own claiming villager's last exit -- release
+	# the claim back to the queue instead (banked progress_ticks is kept, so
+	# whoever claims next resumes right at the completion threshold).
+	# is_job_claimed_by lets VillagerAI notice the silent release and go find
+	# different work. Digs/demolitions FREE a cell, so they can never seal
+	# anyone in and are exempt.
+	if not is_dig:
+		var claimer: int = int(entry.get("claimed_by", 0))
+		if claimer != 0 and _should_prevent_seal(cell, write_value, claimer, entry):
+			release_job(cell)
+			return
 	# Blueprint entry SURVIVES until the write actually lands (the flush
 	# re-checks occupancy at write time and erases on success) — so
 	# get_blueprint_cells() == empty always means "fully built".
@@ -440,6 +466,42 @@ func report_on_site(cell: Vector3i) -> void:
 		"is_dig": is_dig,
 		"is_demolition": is_demolition,
 	})
+
+## ANTI-STUCK FEATURE 2 livelock guard: the SAME villager re-claiming/
+## re-abandoning the SAME cell is allowed through after
+## SEAL_ABANDON_LIVELOCK_LIMIT refused attempts (the unstuck watchdog rescues
+## it afterwards if it truly sealed itself) -- keeps a single trapped-looking
+## villager from parking a job forever. Counter lives on the blueprint entry
+## itself so it survives the claimed_by resets a release causes.
+func _should_prevent_seal(cell: Vector3i, write_value: int, claimer: int, entry: Dictionary) -> bool:
+	var prior_villager: int = int(entry.get("seal_abandon_villager", 0))
+	var prior_count: int = int(entry.get("seal_abandon_count", 0)) if prior_villager == claimer else 0
+	if prior_count >= SEAL_ABANDON_LIVELOCK_LIMIT:
+		entry["seal_abandon_villager"] = 0
+		entry["seal_abandon_count"] = 0
+		return false
+	if not _would_seal_builder(cell, write_value, claimer):
+		return false
+	entry["seal_abandon_villager"] = claimer
+	entry["seal_abandon_count"] = prior_count + 1
+	return true
+
+## ANTI-STUCK FEATURE 2: true if writing `write_value` into `write_cell` would
+## leave `villager_id` with zero legal steps from its OWN current cell. Fails
+## OPEN (returns false, i.e. never blocks completion) if the villager script/
+## position provider isn't wired, the villager's position is unknown, or the
+## villager somehow already occupies the write cell itself (shouldn't happen
+## -- the on-site rules never let a builder stand in its own target cell).
+func _would_seal_builder(write_cell: Vector3i, write_value: int, villager_id: int) -> bool:
+	if _villager_ai_script == null or not _position_provider.is_valid():
+		return false
+	var builder_variant: Variant = _position_provider.call(villager_id)
+	if not (builder_variant is Vector3i):
+		return false
+	var builder_cell: Vector3i = builder_variant
+	if builder_cell == write_cell:
+		return false
+	return not _villager_ai_script.has_escape_after_write(_voxel_world, builder_cell, write_cell, write_value)
 
 ## Combined Voxel World blocks + blueprint view (TR-building-system-060).
 func is_cell_occupied_planned(cell: Vector3i) -> bool:
@@ -606,6 +668,29 @@ func cancel_project(id: int) -> void:
 ## currently occupies a cell, so construction can defer per Edge Case 6 / TR-building-system-037.
 func set_occupancy_provider(cb: Callable) -> void:
 	_occupancy_provider = cb
+
+## Extra API (not in CONTRACTS.md) -- ANTI-STUCK FEATURE 2 (2026-07-23):
+## injects VillagerAI's script so the seal-prevention check can call its
+## static is_standable/is_step_legal/has_escape_after_write helpers (same
+## injection pattern BuildValidation already uses).
+func set_villager_ai_script(script: GDScript) -> void:
+	_villager_ai_script = script
+
+## Extra API (not in CONTRACTS.md) -- ANTI-STUCK FEATURE 2: cb(villager_id:
+## int) -> Variant (Vector3i or null); lets the seal-prevention check find a
+## claiming villager's current cell without BuildingSystem tracking positions
+## itself.
+func set_position_provider(cb: Callable) -> void:
+	_position_provider = cb
+
+## ANTI-STUCK FEATURE 2: true while `cell`'s blueprint entry is currently
+## claimed by exactly `villager_id`. Lets VillagerAI detect a claim that was
+## silently released out from under it (e.g. by the seal-prevention check in
+## report_on_site) without changing report_on_site's CONTRACTS.md signature.
+func is_job_claimed_by(cell: Vector3i, villager_id: int) -> bool:
+	if not _blueprint.has(cell):
+		return false
+	return int(_blueprint[cell].get("claimed_by", 0)) == villager_id
 
 # --- Input routing ---
 

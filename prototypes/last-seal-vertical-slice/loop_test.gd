@@ -5,6 +5,25 @@
 extends Node
 
 const GameWorldScene := preload("res://GameWorld.tscn")
+const VillagerAIScript := preload("res://villager_ai.gd")
+
+# ANTI-STUCK FEATURE 2 test double: a synthetic duck-typed "world" -- only
+# get_cell(cell)->int is required by is_standable/is_step_legal/
+# has_escape_after_write (all consume `world` untyped, verbatim). Describes a
+# 1-wide, 3-cell-TALL dead-end corridor along +X: the builder's own column
+# (0,0) and the ONE exit column (1,0) are open for y in 1..3 (solid floor at
+# y=0, solid ceiling at y>=4 -- capping the corridor's height matters: without
+# it, sealing the exit's FLOOR cell still leaves a legal climb-up step onto
+# TOP of the new solid block, since the two cells above it stay open). Every
+# other direction is walled off, so has_escape_after_write can be exercised
+# deterministically with zero real-world mutation and zero tick simulation.
+class _SealTestWorld:
+	func get_cell(cell: Vector3i) -> int:
+		if cell.y == 0 or cell.y >= 4:
+			return 1  # solid floor (y=0) and ceiling (y>=4) -- caps corridor height
+		if cell.z == 0 and (cell.x == 0 or cell.x == 1):
+			return 0  # the corridor: builder's column + the one exit column
+		return 1  # walled off everywhere else
 
 var gw: Node3D
 var _room_recognized := false
@@ -392,6 +411,66 @@ func _run() -> void:
 	bs._render_tool_preview([site + Vector3i(1, 20, 1)], [], 10)
 	bs._render_tool_preview([], [site + Vector3i(1, 20, 1)], 10)
 	_check(true, "tool preview path accepts untyped arrays (errors would show above)")
+
+	# ==========================================================================
+	# ANTI-STUCK PACKAGE (2026-07-23): unstuck watchdog + seal-prevention.
+	# Placed last per task instructions -- nothing downstream depends on the
+	# world/villager state this leaves behind.
+	# ==========================================================================
+
+	# --- FEATURE 1: unstuck watchdog -- forcibly bury a villager via its
+	# internal position field (no world write needed: y=0 is guaranteed
+	# NOT standable, either out-of-bounds below or inside solid terrain) and
+	# confirm the watchdog teleport-rescues it within the tick budget. ---
+	var watchdog_vid: int = ids[0]
+	for id2 in ids:
+		if int(va.get_info(id2)["state"]) != 3:  # avoid burying a currently-SLEEPING villager
+			watchdog_vid = id2
+			break
+	var pre_unstuck_total: int = va.get_unstuck_count()
+	var pre_had_claimed_job: bool = bool(va._villagers[watchdog_vid].has_claimed_job)
+	var bury_xz := Vector3i(site.x - 90, 0, site.z - 90)
+	var bury_cell := Vector3i(bury_xz.x, 0, bury_xz.z)
+	_check(vw.is_in_region(bury_cell), "watchdog test: bury cell is in-region")
+	_check(not VillagerAIScript.is_standable(vw, bury_cell), "watchdog test: bury cell confirmed NOT standable before burial")
+	va._villagers[watchdog_vid].current_cell = bury_cell
+	va._villagers[watchdog_vid].path.clear()
+	va._villagers[watchdog_vid].visual_position = Vector3(bury_cell.x + 0.5, bury_cell.y, bury_cell.z + 0.5)
+	va._villagers[watchdog_vid].stuck_ticks = 0
+
+	var watchdog_ticks := await _run_ticks_until(60, func() -> bool: return va.get_info(watchdog_vid)["cell"] != bury_cell)
+	_check(watchdog_ticks >= 0, "watchdog: villager teleported away from the buried cell (ticks=%d)" % watchdog_ticks)
+	var rescued_cell: Vector3i = va.get_info(watchdog_vid)["cell"]
+	_check(VillagerAIScript.is_standable(vw, rescued_cell), "watchdog: rescued cell is standable (%s)" % rescued_cell)
+	_check(va.get_unstuck_count() == pre_unstuck_total + 1,
+		"watchdog: get_unstuck_count() incremented by exactly 1 (got %d want %d)" % [va.get_unstuck_count(), pre_unstuck_total + 1])
+	_check(int(va.get_info(watchdog_vid).get("unstuck_count", -1)) >= 1,
+		"watchdog: per-villager unstuck_count surfaced via get_info (got %s)" % va.get_info(watchdog_vid).get("unstuck_count"))
+	if pre_had_claimed_job:
+		_check(not bool(va._villagers[watchdog_vid].has_claimed_job), "watchdog: a claimed job (if any) was released, not lost, by the rescue")
+	# No world cleanup needed -- burial only mutated the villager's own
+	# in-memory position, never voxel_world.
+
+	# --- FEATURE 2: seal-prevention -- deterministic dead-end-corridor mock
+	# (crafted, zero world mutation) proves has_escape_after_write refuses the
+	# corridor's one exit and allows any unrelated write. A real-world sanity
+	# call proves the building_system-level wiring (script + position
+	# provider injection) doesn't false-positive in the open field. A FULL
+	# scenario staged through building_system's own claim/report_on_site
+	# pipeline (walling off all 24 neighbor directions of a live, moving
+	# villager) was judged too fragile for this E2E run per task guidance --
+	# the mock below exercises the exact same primitive with no such risk. ---
+	var seal_world := _SealTestWorld.new()
+	var seal_builder := Vector3i(0, 1, 0)
+	var seal_exit := Vector3i(1, 1, 0)
+	_check(not VillagerAIScript.has_escape_after_write(seal_world, seal_builder, seal_exit, 10),
+		"seal-prevention: sealing the corridor's ONLY exit is correctly refused (has_escape_after_write=false)")
+	_check(VillagerAIScript.has_escape_after_write(seal_world, seal_builder, Vector3i(9, 1, 9), 10),
+		"seal-prevention: writing an unrelated far cell leaves the escape open (has_escape_after_write=true)")
+
+	var seal_far_cell: Vector3i = va.get_info(watchdog_vid)["cell"] + Vector3i(50, 0, 50)
+	_check(not bs._would_seal_builder(seal_far_cell, 10, watchdog_vid),
+		"seal-prevention: building_system's own _would_seal_builder is wired (open-field sanity, no false positive)")
 
 	print("LOOP_TEST %s" % ("PASS" if not _fail else "FAIL"))
 	get_tree().quit(1 if _fail else 0)

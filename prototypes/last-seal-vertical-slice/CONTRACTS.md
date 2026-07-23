@@ -137,6 +137,15 @@ func get_projects() -> Array
     #   draft_cells:int (2026-07-23: pending change-order drafts, ANY state),
     #   demolishing:bool (2026-07-23: true once cancel_project/Abriss queued
     #     demolition orders for its built cells -- see addendum)}
+func is_job_claimed_by(cell: Vector3i, villager_id: int) -> bool  # ANTI-STUCK FEATURE 2
+    # (2026-07-23): true while cell's blueprint entry is claimed by exactly
+    # villager_id -- lets VillagerAI detect a claim silently released out from
+    # under it (seal-prevention refusing a completion) without changing
+    # report_on_site's signature.
+func set_villager_ai_script(script: GDScript) -> void  # ANTI-STUCK FEATURE 2: injects
+    # VillagerAI's script (static is_standable/is_step_legal/has_escape_after_write)
+func set_position_provider(cb: Callable) -> void    # ANTI-STUCK FEATURE 2:
+    # cb(villager_id:int) -> Variant (Vector3i cell or null)
 func release_project(id: int) -> void              # releases every still-DRAFT entry owned by
                                                      #   this project regardless of the project's OWN
                                                      #   state (2026-07-23: generalized beyond
@@ -235,12 +244,20 @@ level, max 50. Ghost hidden while hud.is_hover_suppressing() OR ray miss.
 ```gdscript
 signal state_changed(villager_id: int, state: int)   # 0 Deciding,1 Traveling,2 Working,3 Sleeping,4 Breather,5 Wandering
 signal distress_changed(villager_id: int, kind: String)  # "trapped"|"ground_sleeping"|"" (cleared)
+signal villager_unstuck(id: int, from_cell: Vector3i, to_cell: Vector3i)  # ANTI-STUCK
+    # WATCHDOG (2026-07-23): fires whenever a permanently-stuck villager is teleport-rescued.
 func setup(voxel_world, building_system, needs_mood) -> void   # spawns 1 villager near region center; builds AStar3D graph
 func get_villager_ids() -> Array[int]
-func get_info(villager_id: int) -> Dictionary   # {name, state:int, state_label:String, cell:Vector3i, visual_pos:Vector3, distress:String, has_bed:bool}
+func get_info(villager_id: int) -> Dictionary   # {name, state:int, state_label:String, cell:Vector3i, visual_pos:Vector3, distress:String, has_bed:bool, unstuck_count:int}
 func pick_villager(origin: Vector3, dir: Vector3, max_t: float) -> Variant   # id or null; slice: ray-vs-capsule math, no physics
 static func is_standable(world, cell: Vector3i) -> bool
 static func is_step_legal(world, from: Vector3i, to: Vector3i) -> bool
+# --- ANTI-STUCK PACKAGE (2026-07-23, this task) ---
+func get_unstuck_count() -> int                      # total teleport-rescues across every villager
+func get_villager_cell(villager_id: int) -> Variant  # Vector3i or null; feeds BuildingSystem's position_provider
+static func has_escape_after_write(world, builder_cell: Vector3i, write_cell: Vector3i, write_value: int) -> bool
+    # true if builder_cell still has >=1 legal step after write_cell becomes solid (write_value) --
+    # the seal-prevention primitive BuildingSystem.report_on_site calls before a non-dig completion.
 ```
 
 FSM per GDD: priority urgent-sleep > work > wander; tick-driven; movement =
@@ -545,3 +562,80 @@ call sites without it don't break; GameWorld passes `voxel_world`.
   (any `draft: true` entry, demolition or not) — just fixed to skip
   `_untrack_cell` for the demolition case (same reasoning as the undo
   restriction above: the built cell it targets must stay tracked).
+
+## Addendum: ANTI-STUCK PACKAGE (2026-07-23, this task)
+
+Slice-scope safety net against villagers getting PERMANENTLY stuck during
+complex builds — NOT full build-order planning.
+
+### 1. Unstuck watchdog (VillagerAI)
+
+Per-villager stuck detection, evaluated every tick in `_update_watchdog`. A
+villager is "stuck" when EITHER:
+- (a) its current cell is not `is_standable` (buried/floating) — checked
+  unconditionally, regardless of state; OR
+- (b) it `has_destination` (state TRAVELING or WORKING — deliberately NOT
+  WANDERING/BREATHER/SLEEPING/DECIDING, so an idle villager waiting between
+  wander repicks is never flagged) AND `_has_any_legal_step(current_cell)` is
+  false AND its cell hasn't changed since the previous tick.
+
+`Villager.stuck_ticks` counts consecutive stuck ticks (reset to 0 the moment
+the condition clears); at `STUCK_THRESHOLD_TICKS` (12, ~3s @ 4 tps) the
+villager is teleport-rescued (`_rescue_villager`): moved to the nearest
+standable, unoccupied cell found by `_find_rescue_cell` (ring search out to
+`UNSTUCK_SEARCH_RADIUS` = 12, same-y first then nearby y via
+`_RESCUE_DY_ORDER`, falling back to `_find_spawn_cell()` if nothing
+qualifies), its path/claim cleared (a claimed job is released via the normal
+`release_job` path — not lost, re-claimable by anyone), state reset to
+DECIDING, and `villager_unstuck(id, from_cell, to_cell)` emitted. Telemetry:
+`_unstuck_count` (total) + `Villager.unstuck_count` (per-villager, surfaced
+via `get_info()`'s `unstuck_count` key), read through `get_unstuck_count()`.
+
+### 2. Don't seal your last exit (BuildingSystem + VillagerAI)
+
+Before a non-dig job completion writes its solid cell
+(`report_on_site`, at the moment `progress_ticks` reaches `build_ticks`),
+`_should_prevent_seal` asks `_would_seal_builder` whether the write would
+leave the CLAIMING villager with zero legal steps out of its OWN current
+cell. The simulation (`VillagerAI.has_escape_after_write`, a static method)
+is deliberately cheap: a duck-typed proxy world (`_SealCheckWorld`) overrides
+`get_cell` for exactly the one cell about to be written and forwards
+everything else to the real world, then only the claiming villager's 24 (8
+horizontal x 3 vertical) immediate neighbor steps are re-evaluated against
+that proxy — no global connectivity analysis. If the write would seal the
+builder in, the completion is refused: `release_job(cell)` puts the claim
+back in the queue (progress_ticks stays banked; a different villager
+approaching from elsewhere can complete it) and `report_on_site` returns
+without setting `entry["ready"]`. `VillagerAI._tick_working` detects the
+silent release via the new `is_job_claimed_by(cell, villager_id)` query
+(rather than changing `report_on_site`'s CONTRACTS.md signature) and returns
+to DECIDING to find different work instead of hammering the same cell.
+
+**Livelock guard**: the SAME villager re-claiming and re-abandoning the SAME
+cell is allowed through after `SEAL_ABANDON_LIVELOCK_LIMIT` (3) refused
+attempts — tracked via `seal_abandon_villager`/`seal_abandon_count` fields on
+the blueprint entry itself (survives the `claimed_by` reset a release
+causes). The unstuck watchdog above is the fallback safety net if the 4th
+attempt truly does seal the villager in.
+
+Demolition/dig jobs are exempt (`is_dig` short-circuits the check) — they
+FREE a cell, so they can never seal anyone in; the existing dig-under-own-
+feet exclusion in `_find_onsite_path` is unaffected and unchanged.
+
+New wiring (extra API, not previously in CONTRACTS.md — see the BuildingSystem
+section above for signatures): `BuildingSystem.set_villager_ai_script`
+(injects `VillagerAIScript`, same pattern `BuildValidation` already uses for
+its static-method calls), `BuildingSystem.set_position_provider` (cb
+`villager_id -> Vector3i|null`, fed by `VillagerAI.get_villager_cell`),
+`BuildingSystem.is_job_claimed_by`. GameWorld wires the script right after
+`building_system.setup()` (no live VillagerAI needed yet, just its preloaded
+script) and the position provider in `_wire_optional_providers()` alongside
+the other defensive `has_method` wiring.
+
+### 3. F3 console (debug_console.gd)
+
+`== SIM ==` block gained an `unstuck: N total` line
+(`VillagerAI.get_unstuck_count()`); each villager's status row appends
+`  unstuck:N` only when that villager's own count is > 0. Every
+`villager_unstuck` emission is logged to the existing timestamped event feed
+(`"Hilda unstuck (12, 8, 40) -> (13, 8, 41)"`).

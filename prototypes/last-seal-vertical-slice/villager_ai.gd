@@ -19,6 +19,9 @@ extends Node3D
 
 signal state_changed(villager_id: int, state: int)       # 0 Deciding,1 Traveling,2 Working,3 Sleeping,4 Breather,5 Wandering
 signal distress_changed(villager_id: int, kind: String)   # "trapped"|"ground_sleeping"|""
+# ANTI-STUCK WATCHDOG (2026-07-23): fires whenever a permanently-stuck
+# villager is teleport-rescued (see _update_watchdog/_rescue_villager).
+signal villager_unstuck(id: int, from_cell: Vector3i, to_cell: Vector3i)
 
 # --- World/registry constants (duplicated per CONTRACTS.md; keep values identical) ---
 const WORLD_SIZE := 2000
@@ -42,6 +45,16 @@ const MAX_JOB_CLAIM_TRIES_PER_PASS := 3
 const JOBS_BEFORE_BREAK := 8    # user 2026-07-20: 'they should work more'
 const BREATHER_DURATION_TICKS := 40
 const TRAPPED_RETRY_TICKS := 8
+
+# --- Anti-stuck watchdog (2026-07-23) ---
+# ~3s at TICKS_PER_SECOND=4.0. See _update_watchdog for the two trigger
+# conditions (buried/floating vs. destination-with-zero-legal-steps).
+const STUCK_THRESHOLD_TICKS := 12
+const UNSTUCK_SEARCH_RADIUS := 12
+# dy scan order for the rescue-cell ring search: same-y first, then nearest
+# other levels outward (a rescued villager should land as close to its own
+# floor as possible before trying a different one).
+const _RESCUE_DY_ORDER: Array[int] = [0, 1, -1, 2, -2, 3, -3, 4, -4]
 
 const SPAWN_NAMES: Array[String] = ["Hilda", "Bruno", "Mira"]  # user: more workers
 const RNG_SEED := 1337   # shared project SEED constant (CONTRACTS.md)
@@ -118,6 +131,11 @@ class Villager:
 	var visual_position: Vector3
 	var visual_root: Node3D = null
 
+	# Anti-stuck watchdog (2026-07-23).
+	var stuck_ticks: int = 0
+	var watchdog_prev_cell: Vector3i = Vector3i(999999999, 999999999, 999999999)  # sentinel: forces "changed" on tick 1
+	var unstuck_count: int = 0
+
 
 var _voxel_world: Node = null
 var _building_system: Node = null
@@ -128,6 +146,10 @@ var _villagers: Dictionary = {}     # int -> Villager
 var _owned_beds: Dictionary = {}    # Vector3i -> int (owning villager id)
 var _next_id: int = 1
 var _rng := RandomNumberGenerator.new()
+
+# Anti-stuck watchdog telemetry (2026-07-23): total teleport-rescues across
+# every villager. Per-villager counts live on the Villager record (unstuck_count).
+var _unstuck_count: int = 0
 
 # CONTRACT ADDITION: optional shelter classification callback, wired by
 # GameWorld from build_validation.is_cell_sheltered. Falls back to
@@ -199,7 +221,25 @@ func get_info(villager_id: int) -> Dictionary:
 		"visual_pos": v.visual_position,
 		"distress": v.distress,
 		"has_bed": v.has_owned_bed,
+		"unstuck_count": v.unstuck_count,
 	}
+
+
+## Anti-stuck watchdog telemetry (2026-07-23): total teleport-rescues across
+## every villager (see get_info()'s "unstuck_count" for the per-villager tally).
+func get_unstuck_count() -> int:
+	return _unstuck_count
+
+
+## CONTRACT ADDITION (FEATURE 2, anti-stuck, 2026-07-23): wired by GameWorld
+## into BuildingSystem.set_position_provider so the seal-prevention check can
+## look up a claiming villager's current cell without BuildingSystem needing
+## to track villager positions itself. Returns null for an unknown id.
+func get_villager_cell(villager_id: int) -> Variant:
+	var v: Villager = _villagers.get(villager_id)
+	if v == null:
+		return null
+	return v.current_cell
 
 
 # CONTRACT ADDITION: feeds needs_mood.set_context_provider (why-string
@@ -283,6 +323,40 @@ static func is_step_legal(world, from: Vector3i, to: Vector3i) -> bool:
 		if not is_standable(world, flank_a) or not is_standable(world, flank_b):
 			return false
 	return true
+
+
+# --- FEATURE 2 (anti-stuck, 2026-07-23): seal-prevention primitive ----------
+# Lightweight duck-typed world proxy: forwards get_cell to the real world for
+# every cell except ONE override (the cell about to be written), so a single
+# pending write can be simulated without touching real voxel data.
+class _SealCheckWorld:
+	var _real
+	var _override_cell: Vector3i
+	var _override_value: int
+	func _init(real, override_cell: Vector3i, override_value: int) -> void:
+		_real = real
+		_override_cell = override_cell
+		_override_value = override_value
+	func get_cell(cell: Vector3i) -> int:
+		if cell == _override_cell:
+			return _override_value
+		return _real.get_cell(cell)
+
+
+## True if `builder_cell` would still have >= 1 legal step (is_step_legal) even
+## after `write_cell` becomes solid (value `write_value`). Called by
+## BuildingSystem.report_on_site right before a non-dig job completes
+## ("don't seal your last exit") -- cheap: only builder_cell's 24 (8
+## horizontal x 3 vertical) neighbor steps are re-evaluated against a
+## single-cell world override, no global connectivity analysis.
+static func has_escape_after_write(world, builder_cell: Vector3i, write_cell: Vector3i, write_value: int) -> bool:
+	var proxy := _SealCheckWorld.new(world, write_cell, write_value)
+	for offset in _NEIGHBOR_OFFSETS:
+		for dy in range(-1, 2):
+			var n := Vector3i(builder_cell.x + offset.x, builder_cell.y + dy, builder_cell.z + offset.y)
+			if is_step_legal(proxy, builder_cell, n):
+				return true
+	return false
 
 
 func _process(_delta: float) -> void:
@@ -693,6 +767,7 @@ func _on_tick() -> void:
 				_tick_wandering(v)
 		_maybe_preempt_for_sleep(v)
 		_update_distress(v)
+		_update_watchdog(v)
 
 
 func _set_state(v: Villager, new_state: int) -> void:
@@ -883,6 +958,15 @@ func _tick_working(v: Villager) -> void:
 		return
 	if _is_onsite(v.current_cell, v.claimed_job_cell):
 		_building_system.report_on_site(v.claimed_job_cell)
+		# FEATURE 2 (anti-stuck, "don't seal your last exit"): report_on_site
+		# may have silently released our claim this tick (seal-prevention
+		# refused to let this completion wall off our own last exit) --
+		# is_job_claimed_by lets us notice instead of hammering the same
+		# doomed cell every tick; go find different work.
+		if v.has_claimed_job and not _building_system.is_job_claimed_by(v.claimed_job_cell, v.id):
+			v.has_claimed_job = false
+			v.travel_purpose = TravelPurpose.NONE
+			_set_state(v, State.DECIDING)
 		return
 	# Knocked off site (world changed under it) — try to get back on site.
 	if _path_to_onsite(v, v.claimed_job_cell):
@@ -1032,6 +1116,67 @@ func _update_distress(v: Villager) -> void:
 	if kind != v.distress:
 		v.distress = kind
 		distress_changed.emit(v.id, kind)
+
+
+# --- Anti-stuck watchdog (2026-07-23) ---
+# Slice-scope safety net, NOT full build-order planning: catches a villager
+# left permanently unable to act (buried/floating, or holding a destination/
+# job with zero legal steps out of its own cell while its position hasn't
+# moved) and teleport-rescues it after STUCK_THRESHOLD_TICKS. Idle villagers
+# with no destination/job are deliberately excluded from the (b) branch below
+# (don't teleport a wanderer just for waiting between repicks).
+
+func _update_watchdog(v: Villager) -> void:
+	var buried_or_floating := not is_standable(_voxel_world, v.current_cell)
+	var has_destination := v.state == State.TRAVELING or v.state == State.WORKING
+	var position_unchanged := v.current_cell == v.watchdog_prev_cell
+	var stuck_now: bool = buried_or_floating \
+		or (has_destination and position_unchanged and not _has_any_legal_step(v.current_cell))
+	v.stuck_ticks = v.stuck_ticks + 1 if stuck_now else 0
+	v.watchdog_prev_cell = v.current_cell
+	if v.stuck_ticks >= STUCK_THRESHOLD_TICKS:
+		_rescue_villager(v)
+
+
+func _rescue_villager(v: Villager) -> void:
+	var from_cell: Vector3i = v.current_cell
+	var to_cell: Vector3i = _find_rescue_cell(from_cell)
+	v.current_cell = to_cell
+	v.visual_position = _cell_center(to_cell)
+	v.path.clear()
+	v.move_progress = 0.0
+	v.stuck_ticks = 0
+	v.watchdog_prev_cell = to_cell
+	if v.has_claimed_job:
+		_building_system.release_job(v.claimed_job_cell)
+		v.has_claimed_job = false
+	v.travel_purpose = TravelPurpose.NONE
+	_set_state(v, State.DECIDING)
+	v.unstuck_count += 1
+	_unstuck_count += 1
+	villager_unstuck.emit(v.id, from_cell, to_cell)
+
+
+## Ring search outward from `origin` (radius up to UNSTUCK_SEARCH_RADIUS) for
+## the nearest standable, unoccupied cell -- same-y first, then nearby y
+## (_RESCUE_DY_ORDER), before falling back to the spawn area if nothing in
+## range qualifies.
+func _find_rescue_cell(origin: Vector3i) -> Vector3i:
+	for radius in range(0, UNSTUCK_SEARCH_RADIUS + 1):
+		for dy in _RESCUE_DY_ORDER:
+			for dx in range(-radius, radius + 1):
+				for dz in range(-radius, radius + 1):
+					if maxi(absi(dx), absi(dz)) != radius:
+						continue   # ring only -- interior already scanned at a smaller radius
+					var candidate := Vector3i(origin.x + dx, origin.y + dy, origin.z + dz)
+					if not _voxel_world.is_in_region(candidate):
+						continue
+					if not is_standable(_voxel_world, candidate):
+						continue
+					if _is_cell_occupied(candidate):
+						continue
+					return candidate
+	return _find_spawn_cell()
 
 
 # --- BuildingSystem occupancy provider ---

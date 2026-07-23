@@ -60,6 +60,11 @@ func _ready() -> void:
 	building_system.name = "BuildingSystem"
 	add_child(building_system)
 	building_system.setup(voxel_world, camera_input, hud)
+	# ANTI-STUCK FEATURE 2 (2026-07-23): wire VillagerAI's script BEFORE
+	# villager_ai even exists -- the seal-prevention check only needs the
+	# preloaded script's static helpers, not a live instance.
+	if building_system.has_method("set_villager_ai_script"):
+		building_system.set_villager_ai_script(VillagerAIScript)
 
 	villager_ai = VillagerAIScript.new()
 	villager_ai.name = "VillagerAI"
@@ -96,6 +101,10 @@ func _wire_optional_providers() -> void:
 	if needs_mood.has_method("set_distress_provider"):
 		needs_mood.set_distress_provider(func(id: int) -> String:
 			return villager_ai.get_info(id).get("distress", ""))
+	# ANTI-STUCK FEATURE 2: lets BuildingSystem's seal-prevention check look up
+	# a claiming villager's current cell without tracking positions itself.
+	if building_system.has_method("set_position_provider") and villager_ai.has_method("get_villager_cell"):
+		building_system.set_position_provider(villager_ai.get_villager_cell)
 
 
 func _wire_hud_actions() -> void:

@@ -71,6 +71,11 @@ func setup(voxel_world: Node3D, camera_input: Node3D, building_system: Node3D,
 	_villager_ai.distress_changed.connect(func(id: int, kind: String) -> void:
 		var info: Dictionary = _villager_ai.get_info(id)
 		_log("%s distress: %s" % [info.get("name", id), kind if kind != "" else "cleared"]))
+	# ANTI-STUCK WATCHDOG (2026-07-23): log every teleport-rescue.
+	if _villager_ai.has_signal("villager_unstuck"):
+		_villager_ai.villager_unstuck.connect(func(id: int, from_cell: Vector3i, to_cell: Vector3i) -> void:
+			var info: Dictionary = _villager_ai.get_info(id)
+			_log("%s unstuck %s -> %s" % [info.get("name", id), from_cell, to_cell]))
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -118,6 +123,9 @@ func _compose() -> String:
 	var chunks: int = _voxel_world._chunk_nodes.size()
 	lines.append("== SIM ==   %s   warp %dx   chunks %d   cam (%.0f, %.0f, %.0f)" % [
 		"PAUSED" if paused else "running", warp, chunks, eye.x, eye.y, eye.z])
+	# ANTI-STUCK WATCHDOG (2026-07-23): total teleport-rescue count.
+	if _villager_ai.has_method("get_unstuck_count"):
+		lines.append("unstuck: %d total" % _villager_ai.get_unstuck_count())
 	# --- building ---
 	var bp: Dictionary = _building_system.get_blueprint_cells()
 	var claimed := 0
@@ -132,11 +140,13 @@ func _compose() -> String:
 		var info: Dictionary = _villager_ai.get_info(id)
 		var disp: Dictionary = _needs_mood.get_display(id)
 		var distress: String = info.get("distress", "")
-		lines.append("%-6s %-14s %s  sleep %3.0f  %s%s" % [
+		var unstuck_n: int = int(info.get("unstuck_count", 0))
+		lines.append("%-6s %-14s %s  sleep %3.0f  %s%s%s" % [
 			str(info.get("name", id)) + ":", info.get("state_label", "?"),
 			info.get("cell", Vector3i.ZERO), disp.get("sleep", 0.0),
 			disp.get("band_label", "?"),
-			("  [!" + distress + "]") if distress != "" else ""])
+			("  [!" + distress + "]") if distress != "" else "",
+			("  unstuck:%d" % unstuck_n) if unstuck_n > 0 else ""])
 	# --- events ---
 	lines.append("== LOG ==")
 	if _event_log.is_empty():
