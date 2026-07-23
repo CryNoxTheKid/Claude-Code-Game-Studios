@@ -1,23 +1,53 @@
 ## Root scene script for the injected-tier dependency-injection substrate
-## (ADR-0001), owned by Scene/World Management.
+## (ADR-0001) and the boot-sequencing gate (ADR-0005), owned by Scene/World
+## Management.
 ##
 ## Owns the injected-tier child modules listed in [member injected_tier_modules]
 ## and invokes each one's [code]setup()[/code] explicitly, once scene-file
 ## (Inspector) wiring has resolved -- never relying on [method _ready]
-## ordering. This is the wiring rule ADR-0001 establishes: scene-file
-## [code]@export[/code] references between injected-tier modules are already
-## populated by the time any child's [method _ready] fires, but code-assigned
-## wiring is not, so validation must live in each module's own explicitly
-## callable [code]setup()[/code], invoked from here.
+## ordering (ADR-0001). Additionally (ADR-0005), [method _ready] is the
+## SINGLE unified boot gate: every injected-tier [code]setup()[/code] call is
+## withheld until the Resource & Item Database dependency reports its
+## Ready/Failed outcome via check-then-connect (a synchronous
+## [code]is_ready()[/code] check first, a [code]validation_complete[/code]
+## signal connect fallback otherwise). On Failed, [signal boot_halted] fires
+## and NO injected-tier [code]setup()[/code] is ever called -- terminal, no
+## recovery.
 ##
-## Foundation Spine Story 001 scope note: this class stands up the DI
-## wiring/[code]setup()[/code] substrate ONLY. Story 002 (ADR-0005) replaces
-## the unconditional call in [method _ready] below with the BootState
-## machine that gates every [code]setup()[/code] call behind
-## [code]ResourceItemDatabase[/code]'s Ready/Failed outcome -- that gate is
-## explicitly out of scope here.
+## Foundation Spine Story 002 scope note (ADR-0005): [member
+## resource_item_database] is deliberately NOT [code]@export[/code]ed --
+## Resource & Item Database is Autoload-tier (ADR-0001 forbids
+## [code]@export[/code]ing an Autoload into any module). The real
+## [code]ResourceItemDatabase[/code] Autoload does not exist yet in this
+## project (rid-002, a separate epic, has not landed and this story does not
+## touch [code]project.godot[/code]), so the dependency is resolved lazily
+## against [code]/root/ResourceItemDatabase[/code] the first time this node
+## enters the tree, or assigned directly to a mock RID-shaped double in
+## headless tests before that -- mirroring the existing
+## [ReferenceInjectedModule] mock-assignment convention. Once rid-002 adds
+## the real Autoload, this resolves automatically with no further change
+## here. Similarly, [signal validation_complete]'s payload is a plain
+## [Dictionary] ([code]{"success": bool, "issues": Array}[/code]) rather than
+## a typed [code]ValidationResult[/code] -- that class does not exist yet
+## (rid-004/005); this shape is forward-compatible with the eventual typed
+## contract.
 class_name GameWorld
 extends Node3D
+
+## Boot-sequencing states (ADR-0005). Progresses
+## WAITING_FOR_DATABASE -> WIRING -> ACTIVE on the database dependency's
+## Ready outcome. HALTED (from WAITING_FOR_DATABASE, on Failed) is terminal
+## -- there is no path out of it.
+enum BootState { WAITING_FOR_DATABASE, WIRING, ACTIVE, HALTED }
+
+## Emitted exactly once, only on the HALTED transition (database dependency
+## reported Failed). Carries the reported validation issues through
+## untouched. This story's contract ends at "the halt path fires and no
+## setup() is ever called" (ADR-0005 Implementation Notes) -- the concrete
+## full-screen presentation (reusing the transition-overlay UI
+## infrastructure, TR-scene-world-management-032) is a later scene-world-
+## management story's job; this signal is the hook it connects to.
+signal boot_halted(issues: Array)
 
 ## Ordered list of injected-tier child modules whose [code]setup()[/code]
 ## this root invokes. Wired via the Inspector on [code]GameWorld.tscn[/code]
@@ -29,15 +59,69 @@ extends Node3D
 ## callers control that order via this array, not via scene-tree child order.
 @export var injected_tier_modules: Array[Node] = []
 
+## The Resource & Item Database boot-gate dependency (ADR-0005). See the
+## class doc comment's Story 002 scope note for why this is a plain var, not
+## [code]@export[/code]. Duck-typed against exactly two members: [code]
+## is_ready() -> bool[/code] and [code]signal validation_complete(result:
+## Dictionary)[/code]. Assign a mock double directly before this node enters
+## the tree in headless tests; production leaves this null and [method
+## _ready] resolves it against the real Autoload.
+var resource_item_database: Object = null
+
+## Current boot state (ADR-0005). Read-only from outside this class -- see
+## [method get_boot_state].
+var _boot_state: BootState = BootState.WAITING_FOR_DATABASE
+
 
 func _ready() -> void:
+	if resource_item_database == null:
+		resource_item_database = get_node_or_null(^"/root/ResourceItemDatabase")
+	assert(
+		resource_item_database != null,
+		"GameWorld requires a ResourceItemDatabase-shaped dependency (assign"
+		+ " a mock in tests; the real Autoload lands with rid-002) before"
+		+ " the boot gate can run"
+	)
+	_boot_state = BootState.WAITING_FOR_DATABASE
+	@warning_ignore("unsafe_method_access")
+	var database_already_ready: bool = resource_item_database.is_ready()
+	if database_already_ready:
+		_on_database_settled(true, [])
+	else:
+		@warning_ignore("unsafe_property_access")
+		resource_item_database.validation_complete.connect(
+			func(result: Dictionary) -> void:
+				_on_database_settled(bool(result["success"]), result["issues"] as Array),
+			CONNECT_ONE_SHOT
+		)
+
+
+## Returns the current boot state (ADR-0005) -- the test/observability seam
+## for the gate's progress.
+func get_boot_state() -> BootState:
+	return _boot_state
+
+
+## Settles the boot gate on the database dependency's Ready/Failed outcome
+## (ADR-0005 Decision §3). On failure: HALTED, [signal boot_halted] fires,
+## and NO injected-tier [code]setup()[/code] is ever called -- terminal. On
+## success: WIRING, every injected-tier module's [code]setup()[/code] runs
+## exactly once, then ACTIVE.
+func _on_database_settled(success: bool, issues: Array) -> void:
+	if not success:
+		_boot_state = BootState.HALTED
+		_show_boot_halt_screen(issues)
+		return
+	_boot_state = BootState.WIRING
 	_setup_injected_tier()
+	_boot_state = BootState.ACTIVE
 
 
 ## Calls [code]setup()[/code] on every wired injected-tier module, in array
 ## order. This is the ONLY sanctioned call site for injected-tier
 ## [code]setup()[/code] invocation (ADR-0005) -- no module may call its own
-## [code]setup()[/code] from its own [method _ready].
+## [code]setup()[/code] from its own [method _ready]. Only ever reached from
+## [method _on_database_settled]'s success path.
 func _setup_injected_tier() -> void:
 	for module: Node in injected_tier_modules:
 		assert(
@@ -45,3 +129,11 @@ func _setup_injected_tier() -> void:
 			"GameWorld.injected_tier_modules contains a module without setup(): %s" % module.name
 		)
 		module.setup()
+
+
+## Fires [signal boot_halted] with the reported validation issues. The
+## concrete full-screen presentation is scene-world-management's own story
+## to build (see class doc comment) -- this story's responsibility ends at
+## firing the hook and guaranteeing no [code]setup()[/code] call happened.
+func _show_boot_halt_screen(issues: Array) -> void:
+	boot_halted.emit(issues)

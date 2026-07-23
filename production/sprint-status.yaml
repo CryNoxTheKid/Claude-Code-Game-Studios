@@ -48,7 +48,7 @@ stories:
     name: "Boot-sequencing gate — BootState machine + RID Ready/Failed gate"
     file: "production/epics/foundation-spine/story-002-boot-sequencing-gate.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete-for-dev
     owner: "godot-gdscript-specialist"
     estimate_days: 1
     blocker: "depends on spine-001 (in-sprint); tests vs mock RID double"

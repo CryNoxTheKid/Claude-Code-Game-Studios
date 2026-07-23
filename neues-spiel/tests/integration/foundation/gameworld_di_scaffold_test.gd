@@ -25,8 +25,14 @@ func test_gameworld_ready_invokes_setup_on_each_wired_injected_tier_module() -> 
 	# injected_tier_modules array and each module's own @export
 	# dependencies are populated BEFORE the subtree enters the live tree,
 	# exactly as Godot resolves a real .tscn's Inspector-assigned @export
-	# fields before any _ready() fires.
+	# fields before any _ready() fires. A ready-immediately mock RID
+	# double is also assigned before entering the tree -- since Story 002
+	# (ADR-0005), GameWorld._ready() gates setup() behind that dependency;
+	# see boot_sequencing_gate_test.gd for the dedicated gate coverage.
 	var world: GameWorld = auto_free(GameWorld.new())
+	var database: MockResourceItemDatabase = auto_free(MockResourceItemDatabase.new())
+	database.configure_ready_immediately()
+	world.resource_item_database = database
 	var module: ReferenceInjectedModule = auto_free(ReferenceInjectedModule.new())
 	module.dependency_one = auto_free(Node.new())
 	module.dependency_two = auto_free(Node.new())

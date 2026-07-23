@@ -1,7 +1,7 @@
 # Story 002: Boot-sequencing gate — BootState machine + RID Ready/Failed gate
 
 > **Epic**: Foundation Spine (Boot, DI, Config & Test Harness)
-> **Status**: Ready
+> **Status: Complete (2026-07-23 — 19/19 suite green, parent-verified)
 > **Layer**: Foundation
 > **Type**: Logic
 > **Estimate**: 1 day
