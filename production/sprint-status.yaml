@@ -86,7 +86,7 @@ stories:
     name: "Pause & time-warp state — toggle, store, independence"
     file: "production/epics/time-tick-system/story-003-pause-warp-state.md"
     priority: should-have
-    status: backlog
+    status: complete
     owner: "godot-gdscript-specialist"
     estimate_days: 1
     blocker: "depends on tick-002 (in-sprint)"

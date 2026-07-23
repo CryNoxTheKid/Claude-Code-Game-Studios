@@ -1,7 +1,7 @@
 # Story 003: Pause & time-warp state (toggle, store, independence)
 
 > **Epic**: Time & Tick System
-> **Status**: Ready
+> **Status: Complete (2026-07-23 — 193/193 suite green, parent-verified; AC-6 correctly deferred to tick-004)
 > **Layer**: Foundation
 > **Type**: Logic
 > **Estimate**: 1 day
