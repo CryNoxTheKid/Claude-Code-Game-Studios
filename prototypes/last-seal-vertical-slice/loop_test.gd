@@ -305,6 +305,12 @@ func _run() -> void:
 	_check(not vw.is_slice_active() and vw.get_slice_level() == slice_before,
 		"slice view: reset returns to off/MAX_Y (level=%d active=%s)" % [vw.get_slice_level(), vw.is_slice_active()])
 
+	# Regression (2026-07-23 crash): the preview path receives PLAIN Arrays —
+	# every helper on it must accept untyped arrays (typed params raise at runtime).
+	bs._render_tool_preview([site + Vector3i(1, 20, 1)], [], 10)
+	bs._render_tool_preview([], [site + Vector3i(1, 20, 1)], 10)
+	_check(true, "tool preview path accepts untyped arrays (errors would show above)")
+
 	print("LOOP_TEST %s" % ("PASS" if not _fail else "FAIL"))
 	get_tree().quit(1 if _fail else 0)
 

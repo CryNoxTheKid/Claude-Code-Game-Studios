@@ -2097,7 +2097,8 @@ func _build_ghost_mesh(cell_values: Dictionary, tint: Color) -> ArrayMesh:
 
 ## Builds a Vector3i -> cell_value Dictionary for a cell list that shares ONE
 ## material (drag/single-cell previews are always one tool + one selection).
-func _uniform_cell_values(cells: Array[Vector3i], value: int) -> Dictionary:
+## Param deliberately UNTYPED: _render_tool_preview feeds it plain Arrays.
+func _uniform_cell_values(cells: Array, value: int) -> Dictionary:
 	var out: Dictionary = {}
 	for c in cells:
 		out[c] = value
