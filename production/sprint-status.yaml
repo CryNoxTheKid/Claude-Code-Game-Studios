@@ -50,7 +50,7 @@ stories:
     name: "game_delta computation — formula, clamp, raw-delta preservation"
     file: "production/epics/time-tick-system/story-002-game-delta-computation.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete-for-dev
     owner: "godot-gdscript-specialist"
     estimate_days: 1
     blocker: ""

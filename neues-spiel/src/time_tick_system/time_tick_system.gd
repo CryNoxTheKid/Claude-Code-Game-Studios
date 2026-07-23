@@ -1,8 +1,13 @@
-## Time & Tick System Autoload skeleton (ADR-0001 Autoload tier + ADR-0002
-## config loading) -- story tick-001 scope only: config-driven tunables and
-## boot defaults. The game_delta formula (tick-002), pause/warp toggle
-## behaviour (tick-003), and the tick accumulator/signal (tick-004) are
-## implemented in their own stories and are deliberately NOT present here.
+## Time & Tick System Autoload (ADR-0001 Autoload tier + ADR-0002 config
+## loading). Story tick-001 landed the config-driven tunables and boot
+## defaults; story tick-002 (this story) adds the `game_delta` formula --
+## computed once per physics frame in [method _physics_process] and exposed
+## read-only via [method get_game_delta]. Pause/warp TOGGLE behaviour
+## (tick-003 -- the API to CHANGE [member paused]/[member time_warp]) and the
+## tick accumulator/signal (tick-004) are implemented in their own stories
+## and are deliberately NOT present here; this story only READS the two
+## fields, it does not add any way to mutate them beyond what tick-001 (boot
+## defaults) already set.
 ##
 ## Registered as one of the project's only two genuinely-global Foundation
 ## Autoloads alongside ResourceItemDatabase (ADR-0001) -- called by its
@@ -47,9 +52,32 @@ var paused: bool = false
 ## TR-time-tick-system-038; re-affirmed explicitly in [method setup].
 var time_warp: int = 1
 
+## Owned runtime state (ADR-0002: never a config field -- this is Time &
+## Tick System's own derived value, recomputed every physics frame, not a
+## tuning knob). Most recently computed game delta-time (GDD Formulas:
+## `game_delta = clamp(raw_delta, 0, max_raw_delta) * time_warp * (paused ?
+## 0 : 1)`), exposed read-only to every other system via [method
+## get_game_delta] (TR-time-tick-system-022 -- simulation-tier consumers
+## query this, never raw engine delta). Starts at `0.0` before the first
+## physics frame runs.
+var _game_delta: float = 0.0
+
 
 func _ready() -> void:
 	setup()
+
+
+## Computes this frame's `game_delta` (GDD Formulas) from the engine's own
+## raw physics-frame [param delta] via [method compute_game_delta], and
+## stores the result in [member _game_delta] for [method get_game_delta] to
+## return. Runs in `_physics_process` (fixed step, per the GDD Formulas
+## section and this story's Engine Notes), never `_process` -- so simulation
+## timing stays frame-rate-independent. [param delta] is only READ here,
+## never written back to -- every other system's own raw `_process`/
+## `_physics_process` delta remains completely unmodified and available as
+## normal (TR-time-tick-system-026).
+func _physics_process(delta: float) -> void:
+	_game_delta = compute_game_delta(delta)
 
 
 ## Explicitly callable wiring/validation entry point -- the Autoload-tier
@@ -69,3 +97,27 @@ func setup() -> void:
 		push_warning(issue)
 	paused = false
 	time_warp = 1
+
+
+## Pure formula (GDD Formulas, canonical form -- REVISED 2026-07-10 review:
+## the clamp is the authoritative statement, not just an Edge Case note).
+## Clamps [param raw_delta] to `[0, config.max_raw_delta]` BEFORE any other
+## use (TR-time-tick-system-031), then applies the [member time_warp]
+## multiplier and the [member paused] factor (TR-time-tick-system-021).
+## Deterministic and side-effect-free -- reads only [member config],
+## [member time_warp], and [member paused]; writes nothing -- callable
+## directly with fixed inputs in a test, no physics frame or scene tree
+## required.
+func compute_game_delta(raw_delta: float) -> float:
+	var clamped_delta: float = clampf(raw_delta, 0.0, config.max_raw_delta)
+	var pause_factor: float = 0.0 if paused else 1.0
+	return clamped_delta * float(time_warp) * pause_factor
+
+
+## Public query surface for [member _game_delta] (TR-time-tick-system-022 --
+## every simulation-tier consumer queries THIS, never raw engine delta).
+## Read-only: there is no setter, matching ADR-0002's "config/derived state
+## is read-only from every consumer's perspective" discipline, extended here
+## to this system's own owned runtime state as well.
+func get_game_delta() -> float:
+	return _game_delta

@@ -1,7 +1,7 @@
 # Story 002: game_delta computation (formula, clamp, raw-delta preservation)
 
 > **Epic**: Time & Tick System
-> **Status**: Ready
+> **Status: Complete (2026-07-23 — 146/146 suite green, parent-verified)
 > **Layer**: Foundation
 > **Type**: Logic
 > **Estimate**: 1 day
