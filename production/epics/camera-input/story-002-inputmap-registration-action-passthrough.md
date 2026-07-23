@@ -1,7 +1,7 @@
 # Story 002: InputMap action registration + action_fired passthrough
 
 > **Epic**: Camera & Input
-> **Status**: Ready
+> **Status: Complete (2026-07-23 — 157/157 suite green, parent-verified)
 > **Layer**: Foundation
 > **Type**: Integration
 > **Estimate**: 1 day

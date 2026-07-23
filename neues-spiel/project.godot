@@ -28,6 +28,149 @@ window/stretch/aspect="expand"
 
 enabled=PackedStringArray("res://addons/gdUnit4/plugin.cfg")
 
+[input]
+
+build_place={
+"deadzone": 0.5,
+"events": [Object(InputEventMouseButton,"button_index":1)
+]
+}
+build_remove={
+"deadzone": 0.5,
+"events": [Object(InputEventMouseButton,"button_index":2)
+]
+}
+camera_rotate_left={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"keycode":81)
+]
+}
+camera_rotate_right={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"keycode":69)
+]
+}
+tool_select_1={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"keycode":49)
+]
+}
+tool_select_2={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"keycode":50)
+]
+}
+tool_select_3={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"keycode":51)
+]
+}
+tool_select_4={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"keycode":52)
+]
+}
+tool_select_5={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"keycode":53)
+]
+}
+tool_select_room={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"keycode":54)
+]
+}
+tool_select_roof={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"keycode":55)
+]
+}
+tool_select_house={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"keycode":56)
+]
+}
+time_pause={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"keycode":32)
+]
+}
+time_speed_up={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"keycode":61)
+]
+}
+time_speed_down={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"keycode":45)
+]
+}
+toast_focus_cycle={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"keycode":4194306)
+]
+}
+toast_dismiss={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"keycode":4194312)
+]
+}
+toggle_issues={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"keycode":73)
+]
+}
+palette_next={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"keycode":93)
+]
+}
+palette_prev={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"keycode":91)
+]
+}
+formation_next={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"keycode":46)
+]
+}
+formation_prev={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"keycode":44)
+]
+}
+height_step_up={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"keycode":85)
+]
+}
+height_step_down={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"keycode":74)
+]
+}
+build_mode_toggle={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"keycode":66)
+]
+}
+slice_up={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"keycode":4194323)
+]
+}
+slice_down={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"keycode":4194324)
+]
+}
+slice_reset={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"keycode":4194317)
+]
+}
+
 [physics]
 
 3d/physics_engine="Jolt Physics"

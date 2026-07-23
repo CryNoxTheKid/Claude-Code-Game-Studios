@@ -59,7 +59,7 @@ stories:
     name: "InputMap action registration + action_fired passthrough"
     file: "production/epics/camera-input/story-002-inputmap-registration-action-passthrough.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete-for-dev
     owner: "godot-specialist"
     estimate_days: 1
     blocker: ""
