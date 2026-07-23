@@ -14,6 +14,17 @@
 ## and NO injected-tier [code]setup()[/code] is ever called -- terminal, no
 ## recovery.
 ##
+## Foundation Spine Story 003 scope note (ADR-0002): the WIRING loop
+## additionally duck-types each injected-tier module for an optional
+## [code]get_boot_blocking_issues() -> Array[String][/code] method, called
+## immediately after that module's [code]setup()[/code]. A non-empty result
+## means the module's config Resource failed a GDD-declared BLOCKING
+## cross-value invariant (ADR-0002's two-tier `validate()` policy) -- the
+## SAME terminal halt path as a RID Failed outcome fires (HALTED,
+## [signal boot_halted], no further injected-tier `setup()` calls). This is
+## an additive check, not a new call site: [method _setup_injected_tier]
+## remains the sole place any injected-tier `setup()` is invoked.
+##
 ## Foundation Spine Story 002 scope note (ADR-0005): [member
 ## resource_item_database] is deliberately NOT [code]@export[/code]ed --
 ## Resource & Item Database is Autoload-tier (ADR-0001 forbids
@@ -106,7 +117,9 @@ func get_boot_state() -> BootState:
 ## (ADR-0005 Decision §3). On failure: HALTED, [signal boot_halted] fires,
 ## and NO injected-tier [code]setup()[/code] is ever called -- terminal. On
 ## success: WIRING, every injected-tier module's [code]setup()[/code] runs
-## exactly once, then ACTIVE.
+## (until/unless one halts on a BLOCKING config invariant -- ADR-0002, see
+## [method _setup_injected_tier]), then ACTIVE -- unless that WIRING pass
+## already settled HALTED, in which case ACTIVE is never reached either.
 func _on_database_settled(success: bool, issues: Array) -> void:
 	if not success:
 		_boot_state = BootState.HALTED
@@ -114,7 +127,8 @@ func _on_database_settled(success: bool, issues: Array) -> void:
 		return
 	_boot_state = BootState.WIRING
 	_setup_injected_tier()
-	_boot_state = BootState.ACTIVE
+	if _boot_state != BootState.HALTED:
+		_boot_state = BootState.ACTIVE
 
 
 ## Calls [code]setup()[/code] on every wired injected-tier module, in array
@@ -122,6 +136,14 @@ func _on_database_settled(success: bool, issues: Array) -> void:
 ## [code]setup()[/code] invocation (ADR-0005) -- no module may call its own
 ## [code]setup()[/code] from its own [method _ready]. Only ever reached from
 ## [method _on_database_settled]'s success path.
+##
+## Story 003 addition (ADR-0002): immediately after each module's
+## [code]setup()[/code], duck-types an optional
+## [code]get_boot_blocking_issues() -> Array[String][/code] getter. A
+## non-empty result -- a GDD-declared BLOCKING config invariant failure --
+## reuses the exact same terminal halt path as a RID Failed outcome and
+## stops calling further modules' [code]setup()[/code] (terminal, no
+## recovery, matching ADR-0005's existing halt semantics).
 func _setup_injected_tier() -> void:
 	for module: Node in injected_tier_modules:
 		assert(
@@ -129,6 +151,13 @@ func _setup_injected_tier() -> void:
 			"GameWorld.injected_tier_modules contains a module without setup(): %s" % module.name
 		)
 		module.setup()
+		if module.has_method(&"get_boot_blocking_issues"):
+			@warning_ignore("unsafe_method_access")
+			var blocking_issues: Array[String] = module.get_boot_blocking_issues()
+			if not blocking_issues.is_empty():
+				_boot_state = BootState.HALTED
+				_show_boot_halt_screen(blocking_issues)
+				return
 
 
 ## Fires [signal boot_halted] with the reported validation issues. The

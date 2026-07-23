@@ -1,7 +1,7 @@
 # Story 003: Config Resource pattern — typed `.tres` + `validate()` two-tier clamp/halt
 
 > **Epic**: Foundation Spine (Boot, DI, Config & Test Harness)
-> **Status**: Ready
+> **Status: Complete (2026-07-23 — 36/36 suite green, parent-verified)
 > **Layer**: Foundation
 > **Type**: Logic
 > **Estimate**: 1 day

@@ -57,7 +57,7 @@ stories:
     name: "Config Resource pattern — typed .tres + validate() two-tier clamp/halt"
     file: "production/epics/foundation-spine/story-003-config-resource-pattern.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete-for-dev
     owner: "godot-gdscript-specialist"
     estimate_days: 1
     blocker: "depends on spine-001, spine-002 (in-sprint)"
