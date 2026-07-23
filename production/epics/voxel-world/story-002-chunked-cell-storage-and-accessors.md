@@ -1,7 +1,7 @@
 # Story 002: Chunked packed-array storage + O(1) accessors + single-cell change signal
 
 > **Epic**: Voxel World / Grid Data
-> **Status**: Ready
+> **Status: Complete (2026-07-23 — 180/180 suite green, parent-verified)
 > **Layer**: Foundation
 > **Type**: Logic
 > **Estimate**: 1 day

@@ -7,12 +7,52 @@
 ## file's Inspector in production, or assigned directly in a headless test;
 ## all wiring/validation lives in [method setup], never `_ready()`.
 ##
-## Out of scope for this class as authored here (Story 002/006 extend this
-## same module, not new ones): the actual chunked cell storage and get/set
-## accessors, and procedural terrain generation using [member
-## VoxelWorldConfig.base_height]/`amplitude`/`frequency`.
+## Story 002 (this revision) adds the chunked packed-array cell storage and
+## its O(1) [method get_cell]/[method set_cell]/[method clear_cell] accessors
+## per ADR-0014 Decision §1/Implementation Notes -- storage/streaming
+## RESIDENCY (paging chunks to on-disk region files, ADR-0015) remains Story
+## 010's concern; every chunk this class ever touches stays resident for the
+## session's lifetime. Bulk/batched writes and their single batched signal
+## are Story 003's scope; neighbor lookup and the DDA raycast are Story 004's.
+## Procedural terrain generation using [member VoxelWorldConfig.base_height]/
+## `amplitude`/`frequency` remains Story 006's scope.
 class_name VoxelWorldGrid
 extends Node
+
+## Chunk width/depth in cells (ADR-0014 Decision §1: "16×16-column chunks")
+## -- a locked engine/storage-shape constant, not a designer tuning knob
+## (same rationale as [VoxelWorldConfig.CELL_SIZE]). Chunks span the FULL
+## configured vertical extent (no vertical chunking), matching the reference
+## `prototypes/last-seal-vertical-slice/voxel_world.gd`'s `CHUNK`.
+const CHUNK_SIZE: int = 16
+
+## Private per-chunk storage (ADR-0014 Decision §1: "each chunk holds a flat
+## `PackedByteArray`-class buffer indexed by local offset"). Two parallel
+## same-length buffers, one per [CellContents] field -- keeps every cell's
+## record at a fixed 2 bytes (within the ADR's ~1-4 B/cell budget,
+## TR-voxel-world-041) while keeping block-type and material lookups both
+## O(1) array-index reads with no bit-packing. Never exposed outside this
+## file -- every caller only ever sees [CellContents].
+class _ChunkBuffer:
+	var block_type_ids: PackedByteArray
+	var material_ids: PackedByteArray
+
+	func _init(cell_count: int) -> void:
+		block_type_ids.resize(cell_count)
+		material_ids.resize(cell_count)
+		# PackedByteArray.resize() zero-fills every new element -- this IS
+		# the lazy-allocation contract (CellContents.EMPTY_BLOCK_TYPE_ID ==
+		# 0), no explicit fill pass needed (matches the reference's own
+		# "zero-filled = air" comment).
+
+
+## Fires exactly once per single [method set_cell]/[method clear_cell] call
+## that targets an in-bounds cell (Core Rule 6, TR-voxel-world-032) --
+## identifies the changed cell and its full before/after [CellContents].
+## Never fires for an out-of-bounds write (nothing changed) and is never
+## batched here -- Story 003 owns the separate bulk/batched write path and
+## its own single-batched-signal contract.
+signal cell_changed(cell: Vector3i, before: CellContents, after: CellContents)
 
 ## Tuning config dependency (ADR-0002). Wired via a scene file's Inspector in
 ## production, or assigned directly in a headless test. Never read inside
@@ -26,6 +66,15 @@ var _is_set_up: bool = false
 ## if any -- mirrors `ReferenceConfigConsumer`'s boot-gate contract (ADR-0002
 ## Decision, ADR-0005 terminal-halt reuse).
 var _boot_blocking_issues: Array[String] = []
+
+## Lazily-allocated per-chunk storage, keyed by chunk coordinate
+## (`Vector2i(cell.x / CHUNK_SIZE, cell.z / CHUNK_SIZE)`) -- only chunks
+## touched by at least one [method set_cell]/[method clear_cell] call exist
+## here; an absent key means "still all-empty," matching [method get_cell]'s
+## empty-without-allocating fast path (TR-voxel-world-047 read purity). This
+## story keeps every touched chunk resident for the session's lifetime --
+## paging/eviction is Story 010 (ADR-0015), not this class's concern yet.
+var _chunks: Dictionary[Vector2i, _ChunkBuffer] = {}
 
 
 ## Explicitly callable wiring/validation entry point (ADR-0001). Asserts
@@ -104,3 +153,96 @@ func is_in_bounds(cell: Vector3i) -> bool:
 func query_world_to_cell(world_pos: Vector3) -> CellQueryResult:
 	var cell: Vector3i = VoxelWorldGrid.world_to_cell(world_pos)
 	return CellQueryResult.new(is_in_bounds(cell), cell)
+
+
+## Chunked read API (Core Rule 5, TR-voxel-world-031): returns the occupant
+## matching the last write to [param cell] -- O(1) regardless of grid size
+## (TR-voxel-world-019), a chunk-coordinate Dictionary lookup plus fixed
+## local-offset arithmetic, never a full-grid scan. Never mutates
+## [member _chunks] -- an untouched chunk returns [method CellContents.empty]
+## without being allocated, and no chunk lookup ever writes
+## (TR-voxel-world-047 read-purity guarantee, safe to call every frame for
+## hover picking). Returns `null` for a cell outside the configured world
+## bounds -- an explicit "outside grid" result, never a silent clamp
+## (TR-voxel-world-037).
+func get_cell(cell: Vector3i) -> CellContents:
+	assert(config != null, "VoxelWorldGrid.config not wired")
+	if not is_in_bounds(cell):
+		return null
+	var key: Vector2i = _chunk_key(cell)
+	if not _chunks.has(key):
+		return CellContents.empty()
+	var buffer: _ChunkBuffer = _chunks[key]
+	var offset: int = _local_offset(cell, key)
+	return CellContents.new(buffer.block_type_ids[offset], buffer.material_ids[offset])
+
+
+## Chunked low-level write API (Core Rule 5, TR-voxel-world-007): overwrites
+## [param cell]'s contents unconditionally and returns the PREVIOUS contents
+## (TR-voxel-world-045) -- whether overwriting SHOULD be allowed is the
+## caller's (Building System's) decision, not this layer's. Lazily allocates
+## the target chunk on first touch (this story's storage strategy; Story 010
+## / ADR-0015 owns paging/eviction, not this class). Emits
+## [signal cell_changed] exactly once identifying [param cell] and its
+## before/after [CellContents] (TR-voxel-world-032). Returns `null` (no
+## write, no signal -- nothing changed) for a cell outside the configured
+## world bounds (TR-voxel-world-037).
+func set_cell(cell: Vector3i, contents: CellContents) -> CellContents:
+	assert(config != null, "VoxelWorldGrid.config not wired")
+	assert(contents != null, "VoxelWorldGrid.set_cell contents must not be null")
+	assert(
+		contents.block_type_id >= 0 and contents.block_type_id <= 255,
+		"VoxelWorldGrid.set_cell block_type_id out of packed-byte range 0-255: %s" % contents.block_type_id
+	)
+	assert(
+		contents.material_id >= 0 and contents.material_id <= 255,
+		"VoxelWorldGrid.set_cell material_id out of packed-byte range 0-255: %s" % contents.material_id
+	)
+	if not is_in_bounds(cell):
+		return null
+	var key: Vector2i = _chunk_key(cell)
+	if not _chunks.has(key):
+		_chunks[key] = _ChunkBuffer.new(CHUNK_SIZE * CHUNK_SIZE * _chunk_height())
+	var buffer: _ChunkBuffer = _chunks[key]
+	var offset: int = _local_offset(cell, key)
+	var before := CellContents.new(buffer.block_type_ids[offset], buffer.material_ids[offset])
+	buffer.block_type_ids[offset] = contents.block_type_id
+	buffer.material_ids[offset] = contents.material_id
+	var after := CellContents.new(contents.block_type_id, contents.material_id)
+	cell_changed.emit(cell, before, after)
+	return before
+
+
+## Convenience wrapper for [method set_cell] with [method CellContents.empty]
+## (Core Rule 5's "clear a cell") -- identical before/after-signal contract,
+## including the `null`/no-op result for an out-of-bounds cell.
+func clear_cell(cell: Vector3i) -> CellContents:
+	return set_cell(cell, CellContents.empty())
+
+
+## Chunk coordinate for [param cell]
+## (`Vector2i(cell.x / CHUNK_SIZE, cell.z / CHUNK_SIZE)`). Integer division
+## floors correctly here because [method is_in_bounds] already guarantees
+## `cell.x`/`cell.z` are non-negative (Core Rule 1) before this is ever
+## reached from [method get_cell]/[method set_cell].
+func _chunk_key(cell: Vector3i) -> Vector2i:
+	return Vector2i(cell.x / CHUNK_SIZE, cell.z / CHUNK_SIZE)
+
+
+## Flat local index within a chunk's buffers, matching the
+## `(local_y * CHUNK_SIZE + local_z) * CHUNK_SIZE + local_x` layout used by
+## the reference `prototypes/last-seal-vertical-slice/voxel_world.gd`
+## mesher -- keeping the same layout here means Story 007's production
+## mesher can walk these buffers with the same indexing scheme.
+func _local_offset(cell: Vector3i, key: Vector2i) -> int:
+	var local_x: int = cell.x - key.x * CHUNK_SIZE
+	var local_z: int = cell.z - key.y * CHUNK_SIZE
+	var local_y: int = cell.y - config.min_y
+	return (local_y * CHUNK_SIZE + local_z) * CHUNK_SIZE + local_x
+
+
+## Full vertical extent of one chunk's buffers, in cells -- chunks are never
+## split vertically (ADR-0014 Decision §1), so this is simply the whole
+## configured Y range.
+func _chunk_height() -> int:
+	return config.max_y - config.min_y + 1
