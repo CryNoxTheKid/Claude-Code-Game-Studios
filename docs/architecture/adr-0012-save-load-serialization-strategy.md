@@ -3,6 +3,8 @@
 ## Status
 Accepted (2026-07-11 — per architecture-review-2026-07-11 recommendation; user-delegated decision. Not spike-gated and no dependency on a spike-gated ADR.)
 
+**(Slice propagation 2026-07-23 — impact recorded, no decision change; gated on pending ADR-0015)** Two impacts from the vertical-slice batch, both deferred to ADR-0015 (Large-World Storage & Residency): (1) **16k save-size scaling** — the persisted payload scales with the same ~64× areal factor as chunk storage, pushing the no-chunking/no-threading decision toward its own already-named chunking + `WorkerThreadPool` escape hatches (Alternative C); the chunking decision cannot be finalized until ADR-0015 lands. (2) **New serialized state**, absorbed structurally by the "each system serializes itself" contract with no orchestrator change: Voxel World's `restore_value` (floor terrain-replace original terrain, TR-voxel-world-050); Building System's persistent **project entities** (draft/released/paused/built/demolition-queued status, `worker_ids`, change orders — formalized by pending ADR-0016); and Villager AI's stuck-telemetry counters. VS-tier, not MVP-blocking. See `change-impact-2026-07-23-slice-batch.md`.
+
 ## Date
 2026-07-11
 

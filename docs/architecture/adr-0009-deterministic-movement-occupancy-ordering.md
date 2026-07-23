@@ -3,6 +3,8 @@
 ## Status
 Accepted (2026-07-11 — dependency ADR-0007 accepted after spike QQ3 PASS; see prototypes/perf-spike-qq3/REPORT.md. User-delegated decision.)
 
+**(Slice propagation 2026-07-23)** Remains Accepted. Extended in place for the vertical-slice batch: occupancy now covers the villager's **body-column** derived from the discrete `current_cell` (2-block character scale); the **unstuck watchdog teleport** is added as a second sanctioned discrete `current_cell` mutation path (the "never teleport / only place it changes" wording is revised accordingly); **seal prevention** is recorded as a new consumer of discrete occupancy. Determinism guarantees are unchanged. See `change-impact-2026-07-23-slice-batch.md`.
+
 ## Date
 2026-07-11
 
@@ -47,6 +49,10 @@ Accepted (2026-07-11 — dependency ADR-0007 accepted after spike QQ3 PASS; see 
 
 **A villager's occupied cell is always discrete and tick-boundary-quantized — it occupies `from_cell` for the entire duration of a travel step, becoming `to_cell` atomically only at tick-boundary arrival. Continuous visual interpolation is a pure rendering concern with zero bearing on any logic query. The residual visual-clipping race is closed by Godot's synchronous signal emission, which lets the existing re-path-on-blocking-write contract redirect a villager before its next frame's interpolation step — no new mechanism, an explicit statement of an implicit ordering.**
 
+**(Slice propagation 2026-07-23) Body-column occupancy.** With the 2-block character scale, a villager's occupancy is a **body-column** — the discrete `current_cell` (feet) plus the cell(s) directly above spanning the villager's height — NOT a single cell. Every occupancy query below reads/derives this column from the single authoritative discrete `current_cell`; the tick-boundary-quantized principle is unchanged, only the cardinality (one cell → a column derived from it). No consumer reasons about interpolation progress; the column is a pure function of `current_cell`.
+
+**(Slice propagation 2026-07-23) Watchdog teleport — a second sanctioned discrete mutation.** The original "must never snap or teleport" (F1) is now qualified: the **unstuck watchdog** (villager-ai Rule 15/F5) performs a *sanctioned, deterministic* teleport of a Traveling/Working villager to a rescue cell. This is a discrete jump, not interpolated travel — it sets `current_cell` atomically at a tick boundary and snaps `_visual_position` to match. Determinism is preserved: the rescue fires at a deterministic stuck-tick threshold and the target is chosen by an expanding-ring BFS with the F2 lexicographic (`y,x,z`) tie-break. `current_cell` therefore changes at exactly two sanctioned points: (a) tick-boundary travel arrival, and (b) a watchdog rescue at a tick boundary — both discrete, both tick-quantized. The "never teleport" prohibition remains true for *ordinary travel* (interpolation must never snap); the watchdog is the one deliberate exception.
+
 **1. Two-layer position model.** Every villager exposes:
 ```gdscript
 var current_cell: Vector3i        # DISCRETE — the sole authoritative value for
@@ -56,7 +62,9 @@ var _visual_position: Vector3      # CONTINUOUS — interpolated every frame for
 ```
 While `TRAVELING`, `current_cell` remains the villager's `from_cell` for the entire step; it updates to `to_cell` in a single atomic assignment exactly at the tick boundary where F1's arrival is credited (the same tick-boundary-only crediting rule TR-villager-ai-behavior-029 already established for construction progress — this ADR applies the identical principle to occupancy). `_visual_position` is a separate, purely cosmetic value, lerped every `_process` frame from `from_cell`'s world position toward `to_cell`'s world position, scaled by intra-tick progress — it is never read by Building System's occupancy check, Villager AI's own F4 targeting, or walled-in detection.
 
-**2. Occupancy check semantics.** Building System's deferred-construction check (TR-building-system-037: "is a character occupying this cell") queries `current_cell` — the discrete value — never `_visual_position` and never an interpolation-progress float. A villager mid-transit from A to B occupies A, full stop, until tick-boundary arrival; B is not considered occupied by them before that. This gives Building System (and every other consumer — F4 targeting, walled-in detection) a single, unambiguous cell per villager at all times, matching F4's own already-stated precedent ("target cell stays deferred until the step completes").
+**2. Occupancy check semantics.** Building System's deferred-construction check (TR-building-system-037: "is a character occupying this cell") queries `current_cell` — the discrete value — never `_visual_position` and never an interpolation-progress float. A villager mid-transit from A to B occupies A, full stop, until tick-boundary arrival; B is not considered occupied by them before that. This gives Building System (and every other consumer — F4 targeting, walled-in detection) a single, unambiguous cell per villager at all times, matching F4's own already-stated precedent ("target cell stays deferred until the step completes"). **(Slice propagation 2026-07-23)** Where a consumer needs the villager's full footprint (seal prevention, walled-in detection at 2-block scale), it derives the body-column from this same discrete `current_cell` — the derivation is deterministic and interpolation-free, so the "single unambiguous answer" property holds for the column exactly as it did for the single cell.
+
+**(Slice propagation 2026-07-23) 2b. Seal prevention is a new consumer of these semantics.** Villager AI's seal-prevention rule (villager-ai Rule 16/F6) gates a Planned→Built write that would entrap a villager: the check reads the discrete `current_cell`/body-column (never `_visual_position`) to decide whether the write would seal a villager in — a negative-write gate the Building System write path must accept. This reinforces rather than changes this ADR: it is precisely why occupancy must be a single unambiguous discrete answer. (The one deliberate exception — a builder sealing itself with its own same-job completion write — proceeds unconditionally and is self-healed by the watchdog, per villager-ai Rule 16.)
 
 **3. The residual race — visual clipping — is closed by signal ordering, not a new mechanism.** Consider: a villager is interpolating from A toward B; Building System completes construction at B in the same tick (legitimately, since the villager's discrete `current_cell` is still A, not B). The villager's continuous interpolation is still headed toward B and could, without intervention, visually pass through B's newly-solid geometry for the remainder of that step. This is closed by an already-existing contract, not a new one: Voxel World's write signal (`cell_changed`) fires synchronously (Godot's standard signal-emission behavior, confirmed below), so Villager AI's already-GDD-mandated re-path filter (TR-villager-ai-behavior-012/036: "mid-travel re-path required when a Voxel World write blocks the current path") receives the notification in the same call stack as Building's write — before the next frame's `_process` advances `_visual_position` any further. The villager's travel target is redirected (or the step aborted) at that point, bounding the worst-case visual-clipping window to at most the interpolation progress already computed before the write happened in that same frame — not a full tick, and not an indefinite pass-through.
 
@@ -114,10 +122,23 @@ func _process(_delta: float) -> void:
     _visual_position = _from_cell.lerp(_to_cell, _intra_tick_progress)
 
 func _on_tick() -> void:
-    # tick-boundary arrival crediting — the ONLY place current_cell changes
+    # tick-boundary arrival crediting — one of the two sanctioned places
+    # current_cell changes (the other is a watchdog rescue, below). Both are
+    # tick-boundary discrete mutations; neither is derived from interpolation.
+    # (Slice propagation 2026-07-23)
     if _travel_complete():
         current_cell = _to_cell
         ...
+
+func _on_watchdog_rescue(rescue_cell: Vector3i) -> void:
+    # (Slice propagation 2026-07-23) The SECOND sanctioned discrete mutation of
+    # current_cell — a deterministic teleport (villager-ai F5). Sets current_cell
+    # atomically and snaps _visual_position to match; villager re-enters Deciding.
+    # NOT interpolated travel — the "never snap" rule applies to ordinary travel,
+    # not this deliberate rescue exception.
+    current_cell = rescue_cell
+    _visual_position = current_cell  # snap; no lerp for a rescue
+    ...
 ```
 
 ## Alternatives Considered

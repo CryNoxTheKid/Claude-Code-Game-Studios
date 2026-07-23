@@ -378,21 +378,38 @@ model the 2026-07-10 review had accepted; see Core Rules 16–17 below)*
     UnderConstruction (released but not yet Built) → instant cancel and the
     claiming villager's job is revoked, exactly as before; Built → a
     demolition order (new). [TR-building-system-063] [TR-building-system-123]
-    **Furniture is explicitly exempted from this rule and remains
-    instant** regardless of Built state (Rule 17b below is unchanged) —
-    an in-use bed must be removable immediately for the interruption
-    contract to hold; only structural block cells and terrain go through
-    demolition/dig jobs.
+    **Furniture now follows this same job-gated path** *(Slice revision
+    2026-07-23, tick-rate/furniture resolution — supersedes the
+    instant-removal carve-out this rule previously stated here; user
+    decision AGAINST the carve-out)*: targeting Built furniture with the
+    removal tool creates a **demolition order** on the furniture cell's
+    owning Build Project — or, if the furniture cell has no owning
+    project, a standalone removal order using the identical Rule 14j
+    mechanics — executed block-by-block by a claiming villager exactly as
+    for structural cells. The furniture entity/occupant record is cleared
+    from Voxel World, and the item is no longer ownable/claimable, only
+    once that order completes (see Rule 17b's revised timing below).
+    Removing a not-yet-Built furniture blueprint is unchanged: it branches
+    on micro-state exactly like any other cell above (Draft → instant
+    cancel; Queued/UnderConstruction → instant cancel, claim revoked).
+    **A multi-cell furniture footprint (F5) demolishes atomically as one
+    job**, not per-cell — mirroring placement's no-partial-commit rule
+    (Edge Case 19) — so a 1×2 bed can never be left half-torn-down with
+    one footprint cell gone and the other still standing. [TR-building-system-127]
     **17b — Furniture-revocation contract** *(added 2026-07-10, from the
     needs-mood review — Edge Case 11's interruption previously had no
     notification mechanism: Villager AI's Rule 10b covers only MOVING
-    villagers and cannot inform a stationary sleeper)*: removing a piece
-    of OWNED furniture (MVP: a bed with an owner) emits a
+    villagers and cannot inform a stationary sleeper; timing REVISED
+    2026-07-23, tick-rate/furniture resolution — see Rule 16 above)*:
+    removing a piece of OWNED furniture (MVP: a bed with an owner) emits a
     furniture-revocation event to the owning villager, symmetric to the
     job-revocation contract in the blueprint lifecycle. Villager AI
     consumes it in its Edge Cases 5–6; Needs learns via the villager's
-    `stop_recovery` call. Removal itself remains instant and never
-    blocked (Edge Case 11). [TR-building-system-064]
+    `stop_recovery` call. **The event now fires on demolition-order
+    completion, not at order creation**: furniture removal is no longer
+    instant, so an in-use bed keeps functioning normally until a villager
+    actually finishes tearing it down, at which point the occupant is
+    revoked exactly as before. [TR-building-system-064]
 
 14j. **Demolition orders** (Slice revision 2026-07-23, new): a demolition
     order is created **already released** — unlike build/dig Draft cells it
@@ -773,12 +790,18 @@ between them does not merge).
     is away. [TR-building-system-090] The undo stack, however, clears on transition-complete
     (Core Rule 17) — returning players cannot undo pre-transition
     commands. [TR-building-system-066]
-11. **Furniture removed while in use** (bed removed while the villager
-    sleeps in it). Allowed — removal is never blocked by usage; the
-    furniture-revocation event (Core Rule 17b, added 2026-07-10) notifies
-    the owner; the villager is interrupted and re-plans *(interruption semantics —
-    specified in Villager AI's Edge Case 5 and Needs' Edge Case 3,
-    confirmed 2026-07-10)*. [TR-building-system-064]
+11. **Furniture removed while in use** (bed targeted by the removal tool
+    while a villager sleeps in it). *(Timing REVISED 2026-07-23,
+    tick-rate/furniture resolution — supersedes "removal is never blocked
+    by usage" as an instant fact)*: ordering the removal is never blocked
+    by usage — the demolition order is created immediately regardless of
+    occupancy (Rule 16) — but the furniture-revocation event now fires
+    only once a villager completes that demolition job, not at order
+    creation. Until then the sleeping villager continues using the bed
+    normally. On completion, the furniture-revocation event (Core Rule
+    17b) notifies the owner; the villager is interrupted and re-plans
+    *(interruption semantics — specified in Villager AI's Edge Case 5 and
+    Needs' Edge Case 3, confirmed 2026-07-10)*. [TR-building-system-064]
 12. **Tool switched or Suspended entered mid-drag.** The drag aborts
     without commit (States table); no partial blueprint is ever created by
     an aborted drag. [TR-building-system-067]
@@ -872,6 +895,7 @@ between them does not merge).
 | `draft_ghost_alpha` (Slice revision 2026-07-23) | 0.50 | 0.30–0.70 | Translucency of a Draft/Planned (unreleased or paused) blueprint ghost — the more tentative visual tier. Distinguishes an unreleased plan from released/queued work at a glance, alongside the existing Planned-vs-UnderConstruction distinctness requirement (TR-building-system-069) |
 | `queued_ghost_alpha` (Slice revision 2026-07-23) | 0.70 | 0.50–0.90 | Translucency of a released/queued (BUILDING, not yet claimed) blueprint ghost — more opaque than Draft, reading as "committed to," short of UnderConstruction's progress-fill treatment. Must stay `> draft_ghost_alpha` or the two tiers become indistinguishable |
 | `base_demolition_ticks[block]` (Slice revision 2026-07-23) | 4 `[assumption]` | 1–20 | Demolition pacing per block (F3 addendum, Rule 14j) — mirrors `base_build_ticks[block]`'s default as a neutral placeholder; the slice validated the job-gated *mechanism*, not this specific pace. Needs a dedicated tuning pass before Production |
+| `base_demolition_ticks[furniture]` (added 2026-07-23, tick-rate/furniture resolution) | 8 `[assumption]` | 1–40 | Demolition pacing for furniture (F3 addendum, Rule 14j/16) — mirrors `base_build_ticks[furniture]`'s default as a neutral placeholder now that furniture removal is job-gated rather than instant (Rule 16); needs the same dedicated tuning pass as `base_demolition_ticks[block]` |
 | Unstuck watchdog cadence (Slice revision 2026-07-23) | ~3s interim (validated as a safety net, not final) | — | Owned by the Villager AI GDD's Tuning Knobs — pointer only, value not duplicated here. The slice's watchdog + seal-prevention livelock guard is the interim mitigation; stuck telemetry (frequency counters) is the named Production requirement that will drive its real tuning |
 
 All values are data-driven per the coding standard (no hardcoding); the
@@ -1020,7 +1044,7 @@ batch atomicity.)*
 15. **GIVEN** the roof tool with the Flat formation and a 3×4 footprint drag, **WHEN** committed, **THEN** exactly 20 blueprint cells are created one plane above the footprint's highest picked surface (F5 Flat — testable now). [TR-building-system-082]
 15b. **[PROVISIONAL — shape spec at VS]** **GIVEN** the roof tool with Gable/Hip/Shed and a footprint drag, **WHEN** committed, **THEN** a deterministic, non-zero cell set matching that formation is created, with the preview shown pre-commit (F5). [TR-building-system-007]
 16. **GIVEN** the furniture tool with `bed` selected, **WHEN** targeting a cell with empty support below, **THEN** the commit is invalid; **WHEN** targeting a supported cell, **THEN** it is valid (Core Rule 8). [TR-building-system-048]
-17. **GIVEN** furniture is in use, **WHEN** `build_remove` targets it, **THEN** removal succeeds immediately — never blocked by usage (Edge Case 11). [TR-building-system-064]
+17. **GIVEN** furniture is in use, **WHEN** `build_remove` targets it, **THEN** a demolition order is created immediately (never blocked by usage), but the furniture is not removed and the occupant is not revoked until a villager completes that order *(Slice revision 2026-07-23, tick-rate/furniture resolution — supersedes the prior "removal succeeds immediately" assertion)* (Edge Case 11). [TR-building-system-064]
 18. **GIVEN** the MVP data set, **WHEN** the palette is queried, **THEN** exactly the tier-0 materials and `bed` are offered (Core Rule 9). [TR-building-system-074]
 19. **GIVEN** any MVP commit or completed construction, **WHEN** it occurs, **THEN** no resource is consumed (Core Rule 14). [TR-building-system-059]
 

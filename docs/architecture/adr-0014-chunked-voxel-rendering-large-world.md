@@ -3,6 +3,8 @@
 ## Status
 Accepted (2026-07-11 — validated empirically by `prototypes/chunked-mesher/` at full 2000×2000×32 scale before authoring; user/creative-director decision: large world for exploration + distant dungeons. Supersedes ADR-0003.)
 
+**(Slice propagation 2026-07-23)** Remains Accepted at the 2000×2000×32 baseline. Amended in place: CW-winding + backface-culling-enabled mesher requirement (Decision §2), ghost-anchored `extra_solid` picking predicate recorded under §4. The full-world-at-boot storage clause (§1) is under supersession review by pending ADR-0015 (Large-World Storage & Residency) for the 16k target. See `change-impact-2026-07-23-slice-batch.md`.
+
 ## Date
 2026-07-11
 
@@ -46,7 +48,16 @@ streamed view window.**
 
 1. **Storage**: the world is divided into 16×16-column chunks; each chunk's
    cell data lives in a packed array (`PackedByteArray`-class storage,
-   ~1–4 B/cell), allocated for the FULL world at boot. Voxel World's public
+   ~1–4 B/cell), allocated for the FULL world at boot. **(Slice propagation
+   2026-07-23) The full-world-at-boot allocation clause is under supersession
+   review by pending ADR-0015 (Large-World Storage & Residency).** It is
+   validated and remains Accepted at the 2000×2000×32 baseline (~172 MB); the
+   16,000×16,000×32 production target projects to ~11 GB resident (~3× over the
+   4 GB ceiling) — a storage/residency problem, not a rendering one (draw calls
+   are already decoupled from world size via the streamed view window). ADR-0015
+   will decide paged/on-demand vs sparse vs reduced-footprint residency and
+   supersede ONLY this clause; the mesher, view-window, and streaming design
+   below are unaffected. Voxel World's public
    API is unchanged (O(1) `get`/`set` by `Vector3i`, `cell_changed` signal,
    `raycast_cells` DDA) — only the internal representation changes from
    `Dictionary[Vector3i, CellData]` to chunked packed arrays behind the same
@@ -57,6 +68,20 @@ streamed view window.**
    Faces are emitted only where a cell borders air (face culling); vertical
    runs merge into single quads. Full greedy meshing is the named
    optimization reserve, NOT built until measurement demands it.
+   **(Slice propagation 2026-07-23) Winding & backface culling — hard engine
+   requirement.** Generated triangles MUST be wound **clockwise (CW)** and the
+   material MUST ship with backface culling **ENABLED** — Godot 4.7's
+   front-face convention is CW, an engine fact, not a project convention
+   (TR-voxel-world-052). The vertical slice shipped CCW winding +
+   `CULL_DISABLED` as a **documented, now-expired mitigation** (adopted after a
+   multi-session "missing faces" investigation whose root cause was auditing
+   against a self-stored CCW assumption instead of the engine's CW convention);
+   it doubled overdraw, an accepted slice-only cost that held 60 FPS with ~10×
+   headroom on the 2000×2000×32 window. The rewind to CW + culling-enabled must
+   land before asset counts scale beyond slice levels — the 2× overdraw
+   headroom will not survive a large jump in scene complexity. **Audit rule:
+   face-winding checks validate against the engine's actual convention, never a
+   self-stored one.**
 3. **View window + streaming**: only chunks within a view radius
    (`view_radius_chunks`, prototype: 24 ≙ ~380 m) are meshed and instanced;
    `visibility_range_end` fades distant chunks. A per-frame build budget
@@ -66,6 +91,15 @@ streamed view window.**
    production spreads `queue_free` with the same budget discipline).
 4. **Ghosts & picking**: unchanged from ADR-0003 §3/§4 — DDA against the
    data layer (never render geometry), pooled tinted `MeshInstance3D` ghosts.
+   **(Slice propagation 2026-07-23) Ghost-anchored picking predicate lives
+   here.** The slice-validated "ghost cells pick as solid; dig-orders and water
+   do not" contract is implemented as an **`extra_solid` predicate** on this
+   §4 DDA path (`raycast_cells` consulting an overlay of uncommitted
+   ghost/draft cells), NOT as anything in ADR-0004 (whose scope is the villager
+   `Area3D` hit-test only). Building System's placement pick therefore still
+   issues zero physics queries — the villager-separation guarantee (ADR-0004)
+   is unaffected. The picking API and its predicate are owned by this ADR /
+   Voxel World's read API.
 5. **Escalation path**: if profiling ever demands it, the mesher moves to
    GDExtension (C++) behind the same chunk interface — an implementation
    swap, not an architecture change.

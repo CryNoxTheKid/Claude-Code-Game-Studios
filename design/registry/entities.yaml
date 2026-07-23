@@ -253,10 +253,17 @@ constants:
       - design/gdd/building-system.md        # F3 build-tick pacing
       - design/gdd/needs-mood-system.md      # decay/recovery per tick
       - design/gdd/villager-ai-behavior.md   # agent loop tick base
-    value: 2.0
+    value: 4.0
     unit: ticks/second (base rate at 1x time-warp)
+    # was: 2.0 before 2026-07-23 — raised by time-tick-system.md
+    # (Slice revision 2026-07-23, tick-rate/furniture resolution): the
+    # vertical slice ran at 4.0 throughout; user adopted that pace
+    # ("villagers should work more"). Required re-tuning pass flagged in
+    # that GDD's Open Questions for any downstream per-tick rate consumer
+    # (e.g. Needs & Mood System decay/recovery) documented as a real-time
+    # equivalent under the old 2.0 rate.
     added: 2026-07-09
-    revised: ""
+    revised: "2026-07-23"
 
   - name: max_ticks_per_frame
     status: active
@@ -359,13 +366,16 @@ constants:
     referenced_by:
       - design/gdd/villager-ai-behavior.md
     value: 12
-    unit: ticks (= 6.0 game-seconds at 1x, ticks_per_second=2.0)
+    unit: ticks (= 3.0 game-seconds at 1x, ticks_per_second=4.0)
     # slice-validated interim anti-stuck safety net (commit 64ff918, 2026-07-23)
-    # tick count is authoritative; the slice's own ad-hoc debug clock logged
-    # "~3s" against an internal 4-ticks/sec instrumentation timer, not this
-    # GDD's registered ticks_per_second
+    # tick count (12) is authoritative and unchanged. Wall-clock equivalent
+    # updated 2026-07-23 (Slice revision, tick-rate/furniture resolution):
+    # ticks_per_second was raised 2.0 -> 4.0, so 12 ticks now = 3.0s, which
+    # now MATCHES the slice's own ad-hoc debug-clock "~3s" reading (that
+    # instrumentation ran an internal 4-ticks/sec timer) -- the prior
+    # discrepancy noted here is resolved, not just relabeled.
     added: 2026-07-23
-    revised: ""
+    revised: "2026-07-23"
 
   - name: seal_prevention_abandon_limit
     status: active

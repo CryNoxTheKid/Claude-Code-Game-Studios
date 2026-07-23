@@ -1,9 +1,9 @@
 # Time & Tick System
 
-> **Status**: Approved (2026-07-10 — full review APPROVED-with-patches, applied; see design/gdd/reviews/time-tick-system-review-log.md)
+> **Status**: Approved (2026-07-10 — full review APPROVED-with-patches, applied; see design/gdd/reviews/time-tick-system-review-log.md) — **amended 2026-07-23** (Slice revision 2026-07-23, tick-rate/furniture resolution): `ticks_per_second` raised 2.0 → 4.0 — the vertical slice ran at 4.0 throughout and the user adopted that pace ("villagers should work more")
 > **Author**: user + Claude Code Game Studios agents
-> **Last Updated**: 2026-07-09
-> **Last Verified**: 2026-07-09
+> **Last Updated**: 2026-07-23
+> **Last Verified**: 2026-07-09 (full review); tick-rate amendment not yet re-reviewed
 > **Implements Pillar**: Pillar 3 (Cozy, but with stakes) — owns the "real-time with pause and time-warp" mechanism
 
 ## Summary
@@ -155,8 +155,8 @@ where `tick_interval = 1 / ticks_per_second`
 
 | Variable | Symbol | Type | Range | Description |
 |----------|--------|------|-------|-------------|
-| ticks_per_second | `ticks_per_second` | float (constant) | **2.0** | Base tick rate at 1x — time-warp is already baked into `game_delta`, so ticks naturally fire at `ticks_per_second × time_warp` |
-| tick_interval | `tick_interval` | float | derived, `1/ticks_per_second` = 0.5s | Game-time between ticks |
+| ticks_per_second | `ticks_per_second` | float (constant) | **4.0** *(Slice revision 2026-07-23, tick-rate/furniture resolution — raised from 2.0)* | Base tick rate at 1x — time-warp is already baked into `game_delta`, so ticks naturally fire at `ticks_per_second × time_warp` |
+| tick_interval | `tick_interval` | float | derived, `1/ticks_per_second` = 0.25s | Game-time between ticks |
 
 Runs in `_physics_process` (fixed step) for deterministic, frame-rate-
 independent simulation. [TR-time-tick-system-033] **Assumption (2026-07-10 review)**: this relies on
@@ -166,8 +166,10 @@ with it. The accumulator MUST be float64 (GDScript `float` — not a
 32-bit shader/packed float) so long sessions don't lose sub-tick
 precision. [TR-time-tick-system-034]
 
-**Example**: `time_warp=2`, accumulator already at 0.4700 → `+0.0334` →
-`0.5034` → **tick fires**, `-0.5` → `0.0034` carries forward (no drift).
+**Example** *(recomputed at `ticks_per_second=4.0`, Slice revision
+2026-07-23, tick-rate/furniture resolution)*: `time_warp=2`, accumulator
+already at 0.2200 → `+0.0334` → `0.2534` → **tick fires** (crosses
+`tick_interval=0.25`), `-0.25` → `0.0034` carries forward (no drift).
 
 ### Max-Ticks-Per-Frame Safety Cap
 
@@ -179,9 +181,11 @@ the cap is discarded, not deferred [TR-time-tick-system-035]
 |----------|--------|------|-------|-------------|
 | max_ticks_per_frame | `max_ticks_per_frame` | int (constant) | **10** | Upper bound on ticks fired in one frame |
 
-**Example**: an alt-tab stall → accumulator = 12.3s → `raw_ticks=24` →
-capped to 10, the remaining 6.8s silently discarded (instead of causing a
-cascade of catch-up ticks the following frame too).
+**Example** *(recomputed at `ticks_per_second=4.0`, Slice revision
+2026-07-23, tick-rate/furniture resolution)*: an alt-tab stall →
+accumulator = 12.3s → `raw_ticks=49` (`tick_interval=0.25`) → capped to
+10, the remaining 9.8s silently discarded (instead of causing a cascade of
+catch-up ticks the following frame too).
 
 **Consumer caveat (2026-07-10 review)**: any downstream invariant phrased
 as "exactly N ticks per game-time interval" (e.g. Villager AI's
@@ -227,7 +231,7 @@ project's dependency-injection-over-singleton preference.)*
 | Parameter | Current Value | Safe Range | Effect of Increase | Effect of Decrease |
 |-----------|---------------|------------|---------------------|---------------------|
 | `time_warp_options` | {1, 2, 3} | fixed (see Open Questions for more steps) | — | — |
-| `ticks_per_second` | 2.0 | 1.0–5.0 | Faster AI/needs checks, more compute cost | Cheaper but more "sluggish"-feeling simulation |
+| `ticks_per_second` | 4.0 *(Slice revision 2026-07-23, tick-rate/furniture resolution — raised from 2.0; slice-validated pace, user decision "villagers should work more")* | 1.0–5.0 | Faster AI/needs checks, more compute cost | Cheaper but more "sluggish"-feeling simulation |
 | `max_ticks_per_frame` | 10 | 5–30 | More catch-up capacity after stalls, but more peak load in one frame | More time discarded after stalls, but smoother per-frame load |
 | `max_raw_delta` | 0.1s | 0.05–0.2s | Larger possible simulation jumps after a stall | Simulation visibly "lags" instead of jumping |
 
@@ -356,5 +360,6 @@ missing criteria and 2 precision fixes.)*
 | Should more/different time-warp steps be added later than 1x/2x/3x (based on playtest feedback)? | game-designer | After initial playtests | — |
 | Exact UI trigger for cycling time-warp (keyboard shortcut vs. clickable buttons)? | ux-designer | At `/ux-design` | **RESOLVED 2026-07-10**: Building UI owns the MVP time controls — Space = pause, +/− or direct 1x/2x/3x buttons, top-right HUD (building-ui.md Rules 1/10) |
 | Is "dampened" ambient audio during pause correct, or should it fully mute? | audio-director | At the Audio System GDD | — |
-| Does `ticks_per_second = 2.0` actually fit the granularity Villager AI/Needs decay need? | systems-designer / ai-programmer | At those GDDs | — |
+| Does `ticks_per_second` fit the granularity Villager AI/Needs decay need? | systems-designer / ai-programmer | At those GDDs | **RESOLVED 2026-07-23 (Slice revision, tick-rate/furniture resolution)**: raised from 2.0 to 4.0 — the vertical slice ran at 4.0 throughout and the user adopted that pace ("villagers should work more") |
 | Reciprocal of villager-ai-behavior.md OQ9: does any Villager AI duration math implicitly assume zero discard events? (See the Consumer caveat under Max-Ticks-Per-Frame.) *(2026-07-10 review)* | ai-programmer | Pre-VS spike | — |
+| **Required re-tuning pass** *(flagged 2026-07-23, Slice revision, tick-rate/furniture resolution)*: doubling `ticks_per_second` (2.0→4.0) doubles the real-time speed of every downstream **per-tick rate** (decay/recovery/etc.) unless that rate is explicitly halved. Needs & Mood System's Tuning Knobs documents several rates as real-time-equivalents assuming `ticks_per_second=2.0` (e.g. `decay_per_tick[sleep]` ≈ 9 min to urgent, `base_recovery_per_tick[sleep]` ≈ 70s in bed) — these are now stale and read ~2× faster in real time than their stated/tuned targets. This is NOT auto-corrected by this GDD; per-tick rate values must be revisited and re-tuned (not silently halved) in a dedicated balance pass before those numbers are trusted again. | systems-designer / game-designer | Before next Needs & Mood balance pass | Open — tracked here, not yet actioned |

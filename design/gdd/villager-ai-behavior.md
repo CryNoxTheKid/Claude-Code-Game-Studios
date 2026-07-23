@@ -527,21 +527,27 @@ one teleport, one claim release (only if a claim is held), and one
 `villager_unstuck` event occur; the counter resets afterward, so a
 villager can only be rescued once per stuck episode.
 
-**Provenance note on the threshold's wall-clock equivalent**: `12`
+**Provenance note on the threshold's wall-clock equivalent** *(RESOLVED
+2026-07-23, Slice revision — tick-rate/furniture resolution)*: `12`
 ticks is the portable, tuning-safe value validated during the slice
-(commit 64ff918). At this GDD's registered `ticks_per_second = 2.0`,
-12 ticks = **6.0 game-seconds at 1x** — not the "~3 seconds" figure the
-slice's own ad-hoc debug-clock instrumentation logged (that
-instrumentation ran an internal 4-ticks/second timer, independent of
-the registered constant). The tick count (12) is the authoritative,
-slice-validated value; the wall-clock figure quoted here is derived
-from this GDD's own `ticks_per_second`, consistent with every other
-tick-based tuning knob in this document.
+(commit 64ff918) and remains unchanged. This GDD's registered
+`ticks_per_second` was raised from 2.0 to 4.0 by that same slice
+revision (see time-tick-system.md Formulas/Tuning Knobs) — the vertical
+slice ran at 4.0 throughout, and the user adopted that pace. At
+`ticks_per_second = 4.0`, 12 ticks = **3.0 game-seconds at 1x**, which
+now MATCHES the "~3 seconds" figure the slice's own ad-hoc debug-clock
+instrumentation logged (that instrumentation ran an internal
+4-ticks/second timer). The prior discrepancy this note used to flag is
+therefore resolved, not merely relabeled: the registered constant and
+the slice's own observed pace now agree. The tick count (12) remains
+the authoritative, slice-validated value; the wall-clock figure is
+derived from this GDD's own `ticks_per_second`, consistent with every
+other tick-based tuning knob in this document.
 
 **Worked example**: default tuning. A villager Working a claimed cell
 becomes boxed in when a second villager finishes the wall around it.
-`stuck_tick_count` increments each tick; at tick 12 (6.0 game-seconds
-at 1x) `rescue_fires` becomes true. The BFS finds a standable, empty
+`stuck_tick_count` increments each tick; at tick 12 (3.0 game-seconds
+at 1x, `ticks_per_second = 4.0`) `rescue_fires` becomes true. The BFS finds a standable, empty
 cell 2 rings away (well within `unstuck_rescue_search_radius = 6`); the
 villager teleports there, its job claim releases back to the queue,
 and its per-villager `villager_unstuck` counter increments to 1 (world
@@ -756,7 +762,7 @@ ticks later (F5) the watchdog teleports it out.
 | `breather_duration_ticks` | 90 (= 45s at 1x) | 30–240 | Length of the rest beat. Too short reads as a glitch; too long frustrates waiting players |
 | `starting_villager_count` | 1 (MVP) / 5 (VS config) | 1–8 | The world-generation starting roster (Rule 14b). Growth beyond it is Township Progression's (Alpha) |
 | Population ceiling | 20–30 (Full Vision) | design commitment, not a slider | MVP: 1, Vertical Slice: ~5. Raising it beyond 30 invalidates the per-agent AI assumption AND the Pillar-2 individual-legibility promise — treat as a design change, not a tune |
-| `unstuck_watchdog_threshold_ticks` *(added 2026-07-23)* | 12 ticks (= 6.0s at 1x, `ticks_per_second`=2.0; slice-validated tick count) | 6–30 `[assumption range]` | How long a Traveling/Working villager must be fully stuck before the safety-net rescue fires (F5/Rule 15). Lower = rescues faster but risks false-positives during momentary congestion; higher = longer visible "stuck" moments before self-healing |
+| `unstuck_watchdog_threshold_ticks` *(added 2026-07-23)* | 12 ticks (= 3.0s at 1x, `ticks_per_second`=4.0 *(updated 2026-07-23, Slice revision — tick-rate/furniture resolution: raised from 2.0; tick count 12 unchanged)*; slice-validated tick count) | 6–30 `[assumption range]` | How long a Traveling/Working villager must be fully stuck before the safety-net rescue fires (F5/Rule 15). Lower = rescues faster but risks false-positives during momentary congestion; higher = longer visible "stuck" moments before self-healing |
 | `unstuck_rescue_search_radius` *(added 2026-07-23)* | 6 cells `[assumption]` | 3–12 `[assumption]` | Initial BFS ring radius searched for a rescue cell (F5/Rule 15b); larger = more likely to find a cell in one pass at higher per-rescue cost |
 | `unstuck_rescue_max_radius` *(added 2026-07-23)* | 24 cells `[assumption]` | 12–48 `[assumption]` | Hard expansion ceiling before deferring a rescue to the next tick (Edge Case 14) |
 | `seal_prevention_abandon_limit` *(added 2026-07-23)* | 3 (slice-validated) | 1–6 `[assumption range]` | Livelock-escape threshold (F6/Rule 16b) — after this many refused completions by the same villager on the same job, the write proceeds and the watchdog takes over |

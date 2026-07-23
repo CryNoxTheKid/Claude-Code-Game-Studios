@@ -54,7 +54,7 @@
 # ─────────────────────────────────────────────────────────────────────────
 
 version: 2
-last_updated: "2026-07-11"
+last_updated: "2026-07-23"
 
 requirements:
 
@@ -535,6 +535,34 @@ requirements:
     gdd: design/gdd/voxel-world.md
     requirement: "A raycast correctly returns the first occupied cell along the ray (or none), independent of the eventual rendering/picking mechanism."
     created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-voxel-world-050
+    system: voxel-world
+    gdd: design/gdd/voxel-world.md
+    requirement: "Floor terrain-replace: a floor blueprint placed starting on a terrain top-surface cell replaces that terrain cell flush with the floor block (never stacked, never left empty/AIR); the write record stores the terrain cell's original value as restore_value, so a later undo, cancel, or demolition restores the original terrain exactly."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-voxel-world-051
+    system: voxel-world
+    gdd: design/gdd/voxel-world.md
+    requirement: "Terrain dig orders: only terrain-band/sand values (the 1..5 value family, explicitly EXCLUDING water and trunk/leaves) may be removed via a released dig order executed by a villager; removal goes through the SAME batched write API as every other removal (no special dig-order API surface) and emits the standard change signal so downstream consumers observe the cells_removed change and re-evaluate room/shelter analysis."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-voxel-world-052
+    system: voxel-world
+    gdd: design/gdd/voxel-world.md
+    requirement: "Mesher winding/culling hard engine requirement: generated triangles must wind clockwise (CW — Godot 4.7's front-face convention) with backface culling ENABLED; the slice's CCW + CULL_DISABLED mitigation is a documented, temporary, accepted deviation that doubles overdraw and must be rewound before asset counts scale beyond vertical-slice levels; face-winding audits must validate against the ENGINE's actual convention, never a self-stored assumption."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-voxel-world-053
+    system: voxel-world
+    gdd: design/gdd/voxel-world.md
+    requirement: "The 16,000x16,000x32 production world target is gated behind a dedicated storage/streaming spike (successor to ADR-0014) that must resolve one of: paged/on-demand chunk loading, sparse storage for far/unvisited regions, or a reduced persisted footprint — a storage/residency problem (~11 GB naive projection vs the 4 GB ceiling), not a rendering problem; save files scale with the same ~64x areal factor and need the same resolution."
+    created: 2026-07-23
     revised: ""
     status: active
 
@@ -1223,6 +1251,27 @@ requirements:
     created: 2026-07-11
     revised: ""
     status: active
+  - id: TR-resource-item-database-052
+    system: resource-item-database
+    gdd: design/gdd/resource-item-database.md
+    requirement: "Multi-cell furniture footprint: furniture_fixture entries carry a footprint (width_cells x depth_cells, both >= 1) declaring the horizontal cells the placed item's single model spans, anchored at its origin cell; bed is (1, 2) (slice-validated, user-locked); the field states only the fact of the span — Building System owns placement rules; building materials are implicitly (1, 1) and never carry the field."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-resource-item-database-053
+    system: resource-item-database
+    gdd: design/gdd/resource-item-database.md
+    requirement: "footprint authored on a non-furniture_fixture entry fails boot validation naming the entry — the field applies only to placed multi-cell furniture; building materials are implicitly (1,1) voxel blocks and never carry it."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-resource-item-database-054
+    system: resource-item-database
+    gdd: design/gdd/resource-item-database.md
+    requirement: "A furniture_fixture entry that omits footprint or authors a non-positive dimension fails boot validation naming the entry and the invalid dimension — footprint is consumed immediately at MVP by placement and ghost preview, so it cannot be silently defaulted."
+    created: 2026-07-23
+    revised: ""
+    status: active
 
   # ── Building System ─────────────────────────────────────────────────────
   - id: TR-building-system-002
@@ -1737,6 +1786,167 @@ requirements:
     created: 2026-07-11
     revised: ""
     status: active
+  - id: TR-building-system-102
+    system: building-system
+    gdd: design/gdd/building-system.md
+    requirement: "Building tools arm ONLY inside an explicit Build/Editor Mode: outside Build Mode none of the six tools can be armed and no ghost preview exists — the toolset is fully inert."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-building-system-103
+    system: building-system
+    gdd: design/gdd/building-system.md
+    requirement: "Build Mode is entered by the explicit UI toggle OR by arming any tool from the palette while outside it (arming always auto-enters Build Mode first, one player action); it is exited only by the explicit toggle or the Esc chain — never as a side effect of a single tool deactivation."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-building-system-104
+    system: building-system
+    gdd: design/gdd/building-system.md
+    requirement: "Esc chain is layered with Build Mode always the LAST link: Dragging -> abort drag; ToolArmed -> Idle (still inside Build Mode); Idle -> exit Build Mode, handing world clicks back to selection; a single Esc never skips a link — closing a drag never also closes Build Mode in the same press."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-building-system-105
+    system: building-system
+    gdd: design/gdd/building-system.md
+    requirement: "Outside Build Mode this system does not consume world clicks at all — they belong to villager/project selection per Camera & Input's click-ownership arbitration (ADR-0010); Off is the default state after boot and after the Esc chain's final link."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-building-system-106
+    system: building-system
+    gdd: design/gdd/building-system.md
+    requirement: "Job eligibility is gated on project release: a blueprint cell is job-eligible only once its project (or its change-order batch) is in BUILDING state; a Draft cell generates no job and is invisible to claim_job — villagers ignore it entirely; the BUILDING-eligible queue is ordered by commit time, defining availability for display and tie-breaking, not forced servicing order."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-building-system-107
+    system: building-system
+    gdd: design/gdd/building-system.md
+    requirement: "Build Project grouping/merge: commits whose cells 26-adjoin (full 26-neighbor adjacency, not face- or edge-only) an existing project attach to it; a single commit touching two or more previously separate same-kind projects merges them all into one, resolved by a union-find pass over the whole batch before any cell's membership is finalized (never iteration-order dependent); the lowest-numbered (earliest-created) project id survives and absorbs the others' cells and worker-attribution records."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-building-system-108
+    system: building-system
+    gdd: design/gdd/building-system.md
+    requirement: "Project states are a rollup over cells, not an independent flag: DRAFT (every cell Draft; no jobs exist; villagers ignore it; free to edit or fully undo) -> BUILDING (released) -> PAUSED (player-paused) -> DONE (every cell Built/Removed among all its projects and no Draft batch pending)."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-building-system-109
+    system: building-system
+    gdd: design/gdd/building-system.md
+    requirement: "Release ('Bau starten') is a per-project action: it transitions every Draft cell in the project (or, for a change order, just that pending batch) into BUILDING, making them job-eligible; claim_job serves BUILDING-state work only — never DRAFT, PAUSED, or an unreleased change-order batch — and records the claiming villager against the cell (rolled up onto the project) for worker attribution: a queryable, display-only fact, never a mechanical gate."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-building-system-110
+    system: building-system
+    gdd: design/gdd/building-system.md
+    requirement: "Pause/Resume: pausing a BUILDING project stops offering new jobs and revokes in-flight claims gracefully (villagers abandon exactly as an undo-triggered revocation); the project's cells remain queued; resuming re-offers the same remaining cells without re-creating them; pause/resume never touches Built cells or Draft cells outside the paused batch."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-building-system-111
+    system: building-system
+    gdd: design/gdd/building-system.md
+    requirement: "Project persistence: a project is a long-lived entity — reaching DONE does not delete it; the project entity is removed only when its cell set becomes empty (every cell canceled, or demolished/excavated away)."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-building-system-112
+    system: building-system
+    gdd: design/gdd/building-system.md
+    requirement: "Change orders: a new commit 26-adjacent to an existing BUILDING/PAUSED/DONE project does not start a new project — it attaches as a pending batch ('Aenderungen geplant') on that project until the player releases that batch specifically; releasing the batch makes only its cells job-eligible, leaving already-Built cells untouched; a DONE project with a pending batch is no longer fully DONE for rollup — the overall state reflects whichever cells/batches are least-finished."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-building-system-113
+    system: building-system
+    gdd: design/gdd/building-system.md
+    requirement: "Clicking any cell that belongs to a project selects that project (info surface owned by Building UI) in ANY mode and with NO tool armed — the one form of building-system interaction that works even outside Build Mode."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-building-system-114
+    system: building-system
+    gdd: design/gdd/building-system.md
+    requirement: "Demolition orders are created already released (no staging step — tearing down needs no blueprint to reconsider) and are executed by villagers block by block, mirroring the construction job contract in reverse (one cell = one job, same on-site rules), taking base_demolition_ticks per cell — never an instant removal."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-building-system-115
+    system: building-system
+    gdd: design/gdd/building-system.md
+    requirement: "On a cell's demolition completion this system issues the Voxel World clear; if the cell was a floor-excavation replacement of terrain, the original terrain's restore_value is written back instead of leaving an empty cell."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-building-system-117
+    system: building-system
+    gdd: design/gdd/building-system.md
+    requirement: "Project cancel ('Abriss') converts an entire project at once: every remaining Draft cell (including any not-yet-released change-order batch) cancels for free, and every Built cell is converted to an already-released demolition order in the same action — no additional 'Bau starten' is needed to tear a canceled project down."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-building-system-119
+    system: building-system
+    gdd: design/gdd/building-system.md
+    requirement: "Undo/redo operate on plan entries exclusively and never reach a Built cell: undoing a command cancels only cells still Draft/Queued/UnderConstruction and leaves Built cells standing exactly as they are — not even queuing a demolition order; tearing those down requires the removal tool or Abriss separately; redo replays the command as new blueprint cells."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-building-system-120
+    system: building-system
+    gdd: design/gdd/building-system.md
+    requirement: "Floor excavation: a floor-tool drag starting on a terrain top surface replaces the terrain cell flush (Stonehearth-style, never stacking a step); the original terrain value is captured as restore_value on the blueprint entry at commit (a snapshot, never a live query) and restored on cancel, undo, or demolition — no floor replacement can ever result in unbounded/permanent terrain loss."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-building-system-121
+    system: building-system
+    gdd: design/gdd/building-system.md
+    requirement: "Terrain dig orders / mining zones: removal targeting terrain marks Draft dig cells inside a project of kind dig (26-adjacency/merge applies, but dig-kind projects only ever merge with other dig-kind projects, never with build-kind even if spatially adjacent); dig projects follow the same DRAFT -> BUILDING -> PAUSED/DONE lifecycle with terminal per-cell state Removed; released dig cells respect max_cells_per_command — mining is bounded, never a free-form terraform."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-building-system-122
+    system: building-system
+    gdd: design/gdd/building-system.md
+    requirement: "Dig-job on-site amendment: for a dig job the target cell itself is EXCLUDED from the on-site set — a villager may stand only on an orthogonal neighbor of the cell it is excavating, never on the cell itself (slice-validated fix: the unamended rule let a villager dig the block directly under its own feet and become trapped)."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-building-system-123
+    system: building-system
+    gdd: design/gdd/building-system.md
+    requirement: "Removal-tool micro-state branch: Draft -> instant cancel, no job; Queued/UnderConstruction (released but not yet Built) -> instant cancel with the claiming villager's job revoked; Built -> a demolition order; furniture is explicitly exempt and remains instantly removable regardless of Built state (the furniture-revocation contract requires it)."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-building-system-124
+    system: building-system
+    gdd: design/gdd/building-system.md
+    requirement: "Furniture placement is footprint-based: a footprint is a fixed list of cell offsets from the picked anchor cell; a commit is valid iff every offset cell independently satisfies the support requirement and the availability check; all footprint cells are written/read as ONE furniture entity (every cell references the same occupant id, not N separate entities); furniture_cell_count is per-item, not always 1 (MVP bed is 1x2)."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-building-system-126
+    system: building-system
+    gdd: design/gdd/building-system.md
+    requirement: "A single higher-level tool commit (room-rect, auto-roof, house-template stamp) is always ONE batch for grouping purposes, regardless of how many primitive cell-sets it internally produces — guaranteeing one project even where sub-shapes would not otherwise be mutually 26-adjacent; these tools emit a normal batch of Draft blueprint cells into exactly one project and add no new system-level behavior beyond the grouping rules."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-building-system-127
+    system: building-system
+    gdd: design/gdd/building-system.md
+    requirement: "Furniture removal is job-gated like all built-cell removal (no instant carve-out): the removal tool on Built furniture creates a demolition order on its owning Build Project (or a standalone removal order if none); the furniture entity/occupant record clears only on job completion, and multi-cell footprints (e.g. the 1x2 bed) demolish atomically as ONE job, never per-cell."
+    created: 2026-07-23
+    revised: ""
+    status: active
 
   # ── Villager AI & Behavior ──────────────────────────────────────────────
   - id: TR-villager-ai-behavior-009
@@ -2186,6 +2396,97 @@ requirements:
     gdd: design/gdd/villager-ai-behavior.md
     requirement: "Evidence tiers: AC1-8, 10-36, 41-50 blocking headless unit tests; AC9, 37, 40, 40b blocking integration tests; AC38 provisional-integration; AC39 Advisory/Performance gated at VS/Full-Vision milestones."
     created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-villager-ai-behavior-097
+    system: villager-ai-behavior
+    gdd: design/gdd/villager-ai-behavior.md
+    requirement: "Claim attribution: a successful claim records the claiming villager's id on the claim record; the Building System's project entity aggregates these ids into its worker_ids field for per-project attribution — this GDD supplies the id only, ownership of the aggregate field stays with the Building System."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-villager-ai-behavior-098
+    system: villager-ai-behavior
+    gdd: design/gdd/villager-ai-behavior.md
+    requirement: "Character scale / body-column: the villager model is 2 cells tall (feet cell + one cell above); the body-column the anti-stuck rules must treat as the villager's own space is the same 3-cell span as standability clearance (2-cell body + 1 buffer cell of headroom) — checking only the feet cell would let a rescue or seal-prevention check pass while the model still clips a low ceiling."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-villager-ai-behavior-099
+    system: villager-ai-behavior
+    gdd: design/gdd/villager-ai-behavior.md
+    requirement: "Unstuck Watchdog: a Traveling/Working villager with zero legal steps (or on a non-standable cell) for unstuck_watchdog_threshold_ticks consecutive ticks is teleported to a standable, unoccupied cell; any held job claim releases back to the queue per the unreachable-job flow; the villager re-enters Deciding; a villager_unstuck event fires incrementing per-villager and world total counters (F3 debug now, future analytics); Idle, Wandering, Sleeping, and Breather villagers are never rescued — the watchdog is the sole exception to the never-teleport rule, scoped strictly to Traveling/Working."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-villager-ai-behavior-100
+    system: villager-ai-behavior
+    gdd: design/gdd/villager-ai-behavior.md
+    requirement: "Rescue target selection is a bounded search, never teleport-anywhere: the nearest standable, unoccupied cell within unstuck_rescue_search_radius via an expanding-ring search from the current cell (lexicographic cell-coordinate tie-break for determinism); if none is found the radius doubles up to unstuck_rescue_max_radius before the rescue defers to the next tick."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-villager-ai-behavior-101
+    system: villager-ai-behavior
+    gdd: design/gdd/villager-ai-behavior.md
+    requirement: "Seal prevention: a build-job completion (Planned->Built write) that would leave its builder with zero legal steps is refused — the write does not commit, the claim releases back to the queue, and a different villager may claim and complete the job from a non-self-trapping position; dig and demolition jobs are exempt — their completions are never refused for this reason."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-villager-ai-behavior-102
+    system: villager-ai-behavior
+    gdd: design/gdd/villager-ai-behavior.md
+    requirement: "Livelock escape: each refusal increments an abandon counter for that specific (job, villager) pair; after seal_prevention_abandon_limit (default 3) refusals of the SAME villager on the SAME job, the write proceeds unconditionally on the next attempt — the builder becomes sealed in and the Unstuck Watchdog rescues it on its normal schedule; a rare self-healing entrapment beats a job that can never complete."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-villager-ai-behavior-103
+    system: villager-ai-behavior
+    gdd: design/gdd/villager-ai-behavior.md
+    requirement: "Dig onsite exclusion (self-undermine guard): for dig and demolition jobs the onsite position directly above the target cell is excluded from eligibility — a villager may not stand on the block it is digging out and must approach from an orthogonal side; does not apply to build jobs, where standing on/adjacent to a not-yet-Built cell is safe (blueprints are non-solid)."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-villager-ai-behavior-104
+    system: villager-ai-behavior
+    gdd: design/gdd/villager-ai-behavior.md
+    requirement: "Edge case — watchdog rescue side effects: the teleport releases a held claim exactly as the unreachable-job flow (no double-release, no orphaned claim); with no held claim there is no claim-release side effect and bed ownership is unaffected; the villager re-enters Deciding at the new cell and the villager_unstuck event fires with incremented counters."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-villager-ai-behavior-105
+    system: villager-ai-behavior
+    gdd: design/gdd/villager-ai-behavior.md
+    requirement: "Edge case — rescue search exhaustion: if no standable, unoccupied cell is found even at max radius, the rescue defers to the next tick (stuck_tick_count keeps incrementing, the search retries every tick) and a villager_unstuck_search_failed event fires exactly once per stuck episode, not once per tick — visible without spamming logs."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-villager-ai-behavior-106
+    system: villager-ai-behavior
+    gdd: design/gdd/villager-ai-behavior.md
+    requirement: "Edge case — trap-refusal accounting: a build-job completion that would trap its builder is refused with the claim released back to the queue and abandon_count for that (job, villager) pair incremented by 1; a dig or demolition completion in the same situation proceeds unconditionally (the exemption)."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-villager-ai-behavior-107
+    system: villager-ai-behavior
+    gdd: design/gdd/villager-ai-behavior.md
+    requirement: "Edge case — livelock escape trigger: once the same (job, villager) pair has been refused seal_prevention_abandon_limit times, the next attempt's write proceeds unconditionally regardless of the trap check."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-villager-ai-behavior-108
+    system: villager-ai-behavior
+    gdd: design/gdd/villager-ai-behavior.md
+    requirement: "Edge case — dig job with only an above onsite position: when a dig/demolition job's only onsite position is directly above the target cell, that position is excluded from onsite eligibility — the villager must approach from an orthogonal side."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-villager-ai-behavior-109
+    system: villager-ai-behavior
+    gdd: design/gdd/villager-ai-behavior.md
+    requirement: "Historical evidence citation (Advisory, not a repeatable production-code AC): the vertical slice's automated E2E hut-build regression recorded at least one real Unstuck Watchdog rescue (prototypes/last-seal-vertical-slice/REPORT.md, Feel Assessment) — cited as existing evidence the mechanism activates under real play conditions, not only synthetic unit tests."
+    created: 2026-07-23
     revised: ""
     status: active
 
@@ -3167,6 +3468,104 @@ requirements:
     gdd: design/gdd/building-ui.md
     requirement: "Warning and Info toasts are differentiated by icon SHAPE + label, never by hue or intensity alone; the armed tool pairs its blue accent with a pressed/highlight state, not hue alone."
     created: 2026-07-11
+    revised: ""
+    status: active
+  - id: TR-building-ui-075
+    system: building-ui
+    gdd: design/gdd/building-ui.md
+    requirement: "Build Mode is the explicit entry point for every build tool: a master 'Bauen' toggle (toolbar button + build_mode_toggle key) switches the HUD between World Navigation (default — camera/selection only, no build chrome) and Build Mode; no base or higher-level tool can arm in World Navigation, and firing a tool-select action there auto-enters Build Mode AND arms the tool in the same frame — one player action, no observable intermediate Build-Mode/Idle frame."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-building-ui-076
+    system: building-ui
+    gdd: design/gdd/building-ui.md
+    requirement: "The Esc chain resolves exactly one step per press, highest priority first, never skipped or combined: (1) release toast/anchor HUD keyboard focus; else (2) cancel the armed tool back to Build-Mode/Idle; else (3) clear the active Selection (Build Mode stays ON); else (4) exit Build Mode to World Navigation; a press with no applicable step is a no-op."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-building-ui-077
+    system: building-ui
+    gdd: design/gdd/building-ui.md
+    requirement: "Outside Build Mode, world clicks route to Selection with exactly one outcome: a villager on the picked cell claims the selection (villager wins ties over the project underneath); else a project cell selects that project (world-space outline around its full footprint + Projects Panel card highlight in the same frame); else the click clears any Selection; Selection is mutually exclusive — villager XOR project XOR none."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-building-ui-078
+    system: building-ui
+    gdd: design/gdd/building-ui.md
+    requirement: "Picking treats Planned/Released blueprint ghost cells as solid geometry (a roof tool can target a drafted wall run), with two exemptions: dig-order cells are never a solid pick target (the ray passes through to what lies behind/beneath) and water is never pickable-solid regardless of any overlaid marker/ghost state; a ray resolving nothing after the exemptions behaves as the existing no-pick case (hidden ghost, no-op)."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-building-ui-079
+    system: building-ui
+    gdd: design/gdd/building-ui.md
+    requirement: "Always-on hover feedback: whenever the pick ray resolves a valid target cell — in either mode, tool armed or not — the cell renders a wireframe outline plus a hit-face quad the same frame, reusing the same pick-ray data as tool previews and Selection queries (one source of truth); in Build Mode only, a build grid renders on the picked working plane around the cursor at build_grid_opacity (Valley-Ochre family) — never in World Navigation."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-building-ui-080
+    system: building-ui
+    gdd: design/gdd/building-ui.md
+    requirement: "Ghosts render as a translucent tint of the ACTUAL material selected (no generic blueprint hue): Draft ghosts at ghost_alpha_draft, Released ghosts at the higher ghost_alpha_released — the alpha step communicates commitment level; invalid placement in any state overrides the material tint with the State-Orange tint — one invalid channel, not two."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-building-ui-081
+    system: building-ui
+    gdd: design/gdd/building-ui.md
+    requirement: "Terrain-replace and dig/demolition markers both render as an inflated overlay box around the affected cell (visibly larger than a flush ghost — the shared 'content changing to something not-yet-real' tell), both in the State-Orange family (the slice's red demolition tint does not survive); within that shared language the two marker kinds differ by SHAPE, never shade or pulse-timing alone."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-building-ui-082
+    system: building-ui
+    gdd: design/gdd/building-ui.md
+    requirement: "Room tool: drags a ground-plane rectangle (minimum 3x3 cells); commit generates a full-height perimeter wall run at the current wall_height with one 1-cell door gap omitted from the perimeter edge facing the camera AT COMMIT TIME (recomputed on commit, not drag start); the whole result is ONE draft project, not N wall commands; a sub-minimum drag shows the invalid-commit cue and creates no project."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-building-ui-083
+    system: building-ui
+    gdd: design/gdd/building-ui.md
+    requirement: "Auto-roof tool: one click on any cell belonging to an existing project computes the project's footprint bounding box and generates a Flat-formation roof at the bbox's top height, joining the SAME project id; a click on a cell belonging to no project shows the invalid-commit cue and creates nothing."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-building-ui-084
+    system: building-ui
+    gdd: design/gdd/building-ui.md
+    requirement: "House template stamp: one click centers a fixed 7x7 footprint — flush floor + perimeter walls with one camera-facing door gap + Flat roof at wall-height — and creates ALL of it as exactly ONE draft project in a single action; precondition: uniform terrain height and clear volume up to roof height; an ineligible footprint shows the standard invalid-commit cue and commits nothing — never a partial stamp."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-building-ui-085
+    system: building-ui
+    gdd: design/gdd/building-ui.md
+    requirement: "Slice View: a player-controlled horizontal render cutoff hiding cells above the current level (world geometry, ghosts, characters — presentation-only, simulation unaffected); PageUp/PageDown step one cell, Home resets, mirrored by a HUD 'Ebene' indicator with +/- buttons updating the same frame; available in BOTH modes; hidden cells cannot become NEW hover or Selection targets, but anything already selected or armed is unaffected by slicing."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-building-ui-086
+    system: building-ui
+    gdd: design/gdd/building-ui.md
+    requirement: "Projects Panel: a new chrome zone with one card per project — name, state-dependent status text, X/Y cells-built progress readout plus bar (raw value every frame, no easing), names of villagers working it, and state-dependent action buttons; clicking a card selects the project identically to clicking a world cell (one Selection, two renders — reciprocal highlight); layout is provisional until design/ux/projects-panel.md exists."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-building-ui-087
+    system: building-ui
+    gdd: design/gdd/building-ui.md
+    requirement: "Door-gap discoverability: a dedicated visual affordance class must mark 'this gap is a functional doorway,' distinct from an unfinished or accidental gap, obeying shape+label-never-hue (confirmed 2026-07-23 playtest failure); exact treatment pends the Art Bible handoff; the rule is superseded, not duplicated, the moment door/window items ship."
+    created: 2026-07-23
+    revised: ""
+    status: active
+  - id: TR-building-ui-088
+    system: building-ui
+    gdd: design/gdd/building-ui.md
+    requirement: "Undo/redo scope — plan entries only: undo/redo reach ONLY Draft commands not yet Released and Released-but-not-yet-Built blueprint cells; a Built cell is never reachable by undo (silent no-op) — reverting built work is exclusively a worker-executed demolition order; a queued or executed demolition is never an undo-tracked step and the undo button/stack never lists one."
+    created: 2026-07-23
     revised: ""
     status: active
 

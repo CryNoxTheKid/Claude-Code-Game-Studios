@@ -3,6 +3,8 @@
 ## Status
 Accepted (2026-07-11 — dependency ADR-0007 accepted after spike QQ3 PASS; see prototypes/perf-spike-qq3/REPORT.md. User-delegated decision.)
 
+**(Slice propagation 2026-07-23 — impact recorded, no decision change; gated on pending ADR-0015)** The `100_000`-unit dungeon offset's "50× margin" justification was computed against the 2000-cell world span; at the 16,000×16,000×32 production target that margin shrinks to ~6×, and the float32 ULP (~7.8 mm at 100k) trade-off grows correspondingly. No Dungeon scene exists yet — not blocking. Recomputing the offset/coordinate budget (larger offset, −X relocation, or accepted reduced margin) folds into ADR-0015's (Large-World Storage & Residency) coordinate-budget analysis. See `change-impact-2026-07-23-slice-batch.md`.
+
 ## Date
 2026-07-11
 
