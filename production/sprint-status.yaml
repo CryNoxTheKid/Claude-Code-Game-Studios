@@ -86,7 +86,7 @@ stories:
     name: "Boot validation — reserved ids, retired ledger, tier-0 coverage, aggregate report + terminal Failed"
     file: "production/epics/resource-item-database/story-005-boot-validation-invariants-terminal-halt.md"
     priority: should-have
-    status: backlog
+    status: complete
     owner: "godot-gdscript-specialist"
     estimate_days: 1
     blocker: "depends on rid-004 (in-sprint)"

@@ -19,12 +19,31 @@
 ## record (see [method _make_issue]) to the result -- entry id, source
 ## file, violated check, offending field -- never a log string, and the
 ## pipeline never short-circuits on the first failure (every entry is
-## checked). Reserved-id/-category rejection, the retired-ids ledger,
-## tier-0 family coverage, and the >=3-violation aggregate proof are
-## Story 005's scope; `visual_asset` resolution is Story 006's; the
+## checked). `visual_asset` resolution is Story 006's scope; the
 ## `missing_item` fallback is Story 007's; `footprint` category-pairing/
 ## presence validation is Story 008's -- none of those checks are
 ## implemented here.
+##
+## Story rid-005 scope note: this story adds the CROSS-CATALOG invariants on
+## top of rid-004's per-entry pass (GDD Core Rules 5/6, Edge Case 6,
+## TR-resource-item-database-030/031/035/042/006/007): reserved-id
+## (`missing_item`) and reserved-category (`missing`) rejection folded into
+## [method _validate_single_entry]'s existing id/category checks; a
+## retired-ids ledger ([RetiredIdsLedgerResource], [member ledger_path] --
+## defaults to zero retired ids when no ledger file is authored yet, mirror-
+## ing [member data_dir]'s own missing-directory tolerance) checked per-
+## entry via [method _validate_single_entry]; tier-0 `building_material`
+## family coverage (GDD Core Rule 6) as a new cross-entry check (see
+## [method _check_tier0_family_coverage], run alongside [method
+## _check_duplicate_ids] from [method _validate_entries]) naming every
+## uncovered family; and [method get_validation_result] exposing the most
+## recent structured result as PERSISTENT state -- not just [method setup]'s
+## return value or [signal validation_complete]'s one-shot payload -- so the
+## Failed state's result stays inspectable for the rest of the session (GDD
+## AC26). The aggregate ">=3 different violation classes" proof (GDD AC7)
+## needed no new production code: rid-004's pipeline already accumulates
+## every issue without short-circuiting; Story 005 only raises the
+## regression proof from rid-004's own 2-class fixture to 3.
 ##
 ## Engine note (verified via a headless load probe against this exact
 ## script during rid-004 implementation): [member ItemDefinitionResource.tier]
@@ -83,12 +102,22 @@ signal validation_complete(result: Dictionary)
 ## (ADR-0002 authoring idiom, ADR-0006 storage location).
 const DEFAULT_DATA_DIR: String = "res://data/items/"
 
+## Default path to the [RetiredIdsLedgerResource] `.tres` file (Story
+## rid-005, TR-resource-item-database-042). Deliberately OUTSIDE [constant
+## DEFAULT_DATA_DIR] -- [member data_dir] scanning treats every `.tres`
+## under it as an authored [ItemDefinitionResource], so a ledger file living
+## alongside entries would itself be reported as [constant
+## CHECK_RESOURCE_LOAD_FAILED]. A missing file at this path is NOT a boot
+## failure -- see [method _load_retired_ids_ledger].
+const DEFAULT_LEDGER_PATH: String = "res://data/items_retired_ids_ledger.tres"
+
 ## Fixed, five-entry authorable category set (GDD Core Rule 5) checked by
 ## [method _validate_single_entry]'s unknown-category check. The reserved,
 ## non-authorable sixth category (`missing`) is deliberately EXCLUDED here --
-## its rejection is Story 005's scope (TR-resource-item-database-030); an
-## authored `missing` category still fails THIS check too (it is simply not
-## in this whitelist), which is a harmless overlap, not a conflict.
+## it is rejected earlier via the dedicated [constant CHECK_RESERVED_CATEGORY]
+## check (Story 005, TR-resource-item-database-030), which the `elif` chain
+## in [method _validate_single_entry] short-circuits before this whitelist is
+## ever consulted for that value.
 const _KNOWN_CATEGORIES: Array[StringName] = [
 	&"building_material", &"furniture_fixture", &"raw_resource", &"consumable", &"equipment"
 ]
@@ -97,6 +126,15 @@ const _KNOWN_CATEGORIES: Array[StringName] = [
 ## non-material items (GDD Core Rule 4), checked by [method
 ## _validate_single_entry]'s unknown-material_family check.
 const _KNOWN_MATERIAL_FAMILIES: Array[StringName] = [&"wood", &"stone", &"thatch", &"none"]
+
+## Material families that must each have >= 1 tier-0 `building_material`
+## entry (GDD Core Rule 6 / Tuning Knobs "Tier-0 set composition", checked by
+## [method _check_tier0_family_coverage]). Deliberately a standalone list
+## rather than `_KNOWN_MATERIAL_FAMILIES` minus `none` -- the two lists
+## answer different questions (valid enum values vs. tier-0-bootstrap-
+## required families) and keeping them separately-authored means an enum
+## addition never silently changes the coverage requirement.
+const _TIER0_COVERAGE_FAMILIES: Array[StringName] = [&"wood", &"stone", &"thatch"]
 
 ## Violated-check identifiers -- the `"check"` value of a structured issue
 ## record (see [method _make_issue]). Exposed as constants (mirroring
@@ -111,6 +149,10 @@ const CHECK_UNKNOWN_MATERIAL_FAMILY: StringName = &"unknown_material_family"
 const CHECK_CATEGORY_FAMILY_PAIRING: StringName = &"category_family_pairing"
 const CHECK_INVALID_TIER: StringName = &"invalid_tier"
 const CHECK_INVALID_MAX_STACK_SIZE: StringName = &"invalid_max_stack_size"
+const CHECK_RESERVED_ID: StringName = &"reserved_id"
+const CHECK_RESERVED_CATEGORY: StringName = &"reserved_category"
+const CHECK_RETIRED_ID_CONFLICT: StringName = &"retired_id_conflict"
+const CHECK_TIER0_COVERAGE_GAP: StringName = &"tier0_coverage_gap"
 
 ## Directory this instance scans at [method setup]. Production leaves this
 ## at [constant DEFAULT_DATA_DIR]; a headless test assigns a fixture
@@ -118,6 +160,13 @@ const CHECK_INVALID_MAX_STACK_SIZE: StringName = &"invalid_max_stack_size"
 ## `Node.new()`, inject a mock data path, call `setup()` directly -- zero
 ## scene tree, zero Autoload registration).
 var data_dir: String = DEFAULT_DATA_DIR
+
+## Path to the [RetiredIdsLedgerResource] `.tres` file this instance checks
+## new entries against at [method setup] (Story rid-005). Production leaves
+## this at [constant DEFAULT_LEDGER_PATH]; a headless test assigns a fixture
+## ledger path before calling [method setup] directly, exactly like [member
+## data_dir].
+var ledger_path: String = DEFAULT_LEDGER_PATH
 
 ## Current lifecycle state. Read-only from outside this class -- see
 ## [method get_state] / [method is_ready].
@@ -127,6 +176,14 @@ var _state: BootState = BootState.UNLOADED
 ## ever populated on a successful [method setup] resolution; stays empty in
 ## every other state.
 var _definitions: Dictionary[StringName, ItemDefinitionResource] = {}
+
+## The most recent structured `{"success": bool, "issues": Array}` result --
+## see [method get_validation_result]. Neutral (`success = false`, empty
+## `issues`) until the first [method setup] call resolves; a rejected
+## repeat [method setup] call (already left [constant BootState.UNLOADED])
+## never overwrites this -- it keeps reflecting the session's one real
+## resolution, matching the load-once guarantee.
+var _last_validation_result: Dictionary = {"success": false, "issues": []}
 
 
 func _ready() -> void:
@@ -168,6 +225,7 @@ func setup() -> Dictionary:
 		_state = BootState.READY
 	else:
 		_state = BootState.FAILED
+	_last_validation_result = result
 	validation_complete.emit(result)
 	return result
 
@@ -183,6 +241,18 @@ func is_ready() -> bool:
 ## the pipeline's progress (mirrors `GameWorld.get_boot_state()`).
 func get_state() -> BootState:
 	return _state
+
+
+## Returns the most recent structured validation result -- GDD AC26 /
+## TR-resource-item-database-006/007: "the database exposes the structured
+## validation result" persists for the rest of the session, not only via
+## [signal validation_complete]'s one-shot payload or [method setup]'s own
+## return value, so a caller (an error screen, a test) can inspect it after
+## the fact. Before the first [method setup] call resolves, returns a
+## neutral `{"success": false, "issues": []}` -- nothing has been validated
+## yet.
+func get_validation_result() -> Dictionary:
+	return _last_validation_result
 
 
 ## Full lookup implementation (Story 003, ADR-0006 Decision + GDD Core
@@ -286,13 +356,14 @@ func _load_definitions() -> Dictionary:
 	if directory == null:
 		return {"success": true, "issues": [] as Array[Dictionary], "definitions": definitions}
 
+	var retired_ids: Array[StringName] = _load_retired_ids_ledger()
 	var file_names: Array[String] = _scan_entry_file_names(directory)
 	var load_result: Dictionary = _load_entries(file_names)
 	var entries: Array[Dictionary] = load_result["entries"]
 
 	var issues: Array[Dictionary] = []
 	issues.append_array(load_result["issues"] as Array[Dictionary])
-	issues.append_array(_validate_entries(entries))
+	issues.append_array(_validate_entries(entries, retired_ids))
 
 	if issues.is_empty():
 		for entry: Dictionary in entries:
@@ -300,6 +371,24 @@ func _load_definitions() -> Dictionary:
 			definitions[resource.id] = resource
 
 	return {"success": issues.is_empty(), "issues": issues, "definitions": definitions}
+
+
+## Loads [member ledger_path] as a [RetiredIdsLedgerResource] and returns its
+## [member RetiredIdsLedgerResource.retired_ids] (Story rid-005,
+## TR-resource-item-database-042). A missing/empty [member ledger_path], or
+## a path that fails to load as a [RetiredIdsLedgerResource], degrades to
+## ZERO retired ids -- not a boot failure -- mirroring [method
+## _load_definitions]'s own missing-[member data_dir] tolerance: no ledger
+## has been authored yet is a valid, harmless state, not an error (the
+## shipped MVP ledger is empty per the GDD).
+func _load_retired_ids_ledger() -> Array[StringName]:
+	var retired_ids: Array[StringName] = []
+	if ledger_path == "" or not ResourceLoader.exists(ledger_path):
+		return retired_ids
+	var loaded: Resource = load(ledger_path)
+	if loaded is RetiredIdsLedgerResource:
+		retired_ids = (loaded as RetiredIdsLedgerResource).retired_ids
+	return retired_ids
 
 
 ## Returns every `.tres` file name directly under [param directory], sorted
@@ -341,45 +430,71 @@ func _load_entries(file_names: Array[String]) -> Dictionary:
 	return {"issues": issues, "entries": entries}
 
 
-## Runs the full schema-check pipeline (Story 004) over every entry in
-## [param entries] -- per-entry checks first, then the cross-entry
-## duplicate-id check -- accumulating every violation without
-## short-circuiting on the first (GDD "Failed... naming EVERY invalid
-## entry", TR-resource-item-database-005/035).
-func _validate_entries(entries: Array[Dictionary]) -> Array[Dictionary]:
+## Runs the full schema-check pipeline (Stories 004/005) over every entry in
+## [param entries] -- per-entry checks first (now including [param
+## retired_ids] conflicts, Story 005), then the cross-entry checks
+## (duplicate-id, tier-0 family coverage) -- accumulating every violation
+## without short-circuiting on the first (GDD "Failed... naming EVERY
+## invalid entry", TR-resource-item-database-005/035).
+func _validate_entries(entries: Array[Dictionary], retired_ids: Array[StringName]) -> Array[Dictionary]:
 	var issues: Array[Dictionary] = []
 	for entry: Dictionary in entries:
 		issues.append_array(
-			_validate_single_entry(entry["resource"], entry["source_file"])
+			_validate_single_entry(entry["resource"], entry["source_file"], retired_ids)
 		)
 	issues.append_array(_check_duplicate_ids(entries))
+	issues.append_array(_check_tier0_family_coverage(entries))
 	return issues
 
 
-## Per-entry schema checks (Story 004 Implementation Notes): required-field
-## presence, id snake_case format, known category/material_family,
-## category<->material_family pairing, `tier >= 0`, and `max_stack_size >= 1`
-## where `stackable`. Every violated check appends its own structured
-## record -- an entry with multiple problems reports all of them, never
-## just the first.
-func _validate_single_entry(resource: ItemDefinitionResource, source_file: String) -> Array[Dictionary]:
+## Per-entry schema checks (Story 004 Implementation Notes, extended by
+## Story 005): required-field presence, id snake_case format, RESERVED id
+## (`missing_item`) rejection, retired-ids ledger conflict, known category/
+## material_family, RESERVED category (`missing`) rejection, category<->
+## material_family pairing, `tier >= 0`, and `max_stack_size >= 1` where
+## `stackable`. Every violated check appends its own structured record -- an
+## entry with multiple problems reports all of them, never just the first.
+func _validate_single_entry(
+	resource: ItemDefinitionResource, source_file: String, retired_ids: Array[StringName]
+) -> Array[Dictionary]:
 	var issues: Array[Dictionary] = []
 	var id: StringName = resource.id
 
 	# --- required-field presence (GDD AC5 / TR-028) -----------------------
-	# `id` missing skips the snake_case check below (nothing valid to
-	# format-check) rather than double-reporting the same root cause.
+	# `id` missing skips the reserved/format/ledger checks below (nothing
+	# valid to check) rather than double-reporting the same root cause.
 	var id_present: bool = String(id) != ""
 	if not id_present:
 		issues.append(_make_issue(id, source_file, CHECK_MISSING_REQUIRED_FIELD, &"id"))
-	elif not _is_valid_snake_case(String(id)):
-		issues.append(_make_issue(id, source_file, CHECK_INVALID_ID_FORMAT, &"id"))
+	else:
+		# --- reserved id (GDD AC10a / TR-030) -------------------------------
+		# `missing_item` can never be authored -- it is reserved for the
+		# built-in fallback (Story 007). Exclusive with the format check
+		# below since `missing_item` is itself valid snake_case; reporting
+		# both would double-report the same root cause.
+		if id == &"missing_item":
+			issues.append(_make_issue(id, source_file, CHECK_RESERVED_ID, &"id"))
+		elif not _is_valid_snake_case(String(id)):
+			issues.append(_make_issue(id, source_file, CHECK_INVALID_ID_FORMAT, &"id"))
+
+		# --- retired-ids ledger conflict (GDD Edge Case 6 / TR-042) ---------
+		# Independent of (can coexist with) the reserved/format checks above
+		# -- a different root cause, so no elif chaining with them.
+		if retired_ids.has(id):
+			issues.append(_make_issue(id, source_file, CHECK_RETIRED_ID_CONFLICT, &"id"))
 
 	if resource.display_name == "":
 		issues.append(_make_issue(id, source_file, CHECK_MISSING_REQUIRED_FIELD, &"display_name"))
 
 	if String(resource.category) == "":
 		issues.append(_make_issue(id, source_file, CHECK_MISSING_REQUIRED_FIELD, &"category"))
+	elif resource.category == &"missing":
+		# --- reserved category (GDD AC10b / TR-030) -------------------------
+		# `missing` is reserved for the built-in fallback (Story 007) --
+		# exclusive with the unknown-category check below since `missing`
+		# would also fail that check; reporting both would double-report
+		# the same root cause.
+		issues.append(_make_issue(id, source_file, CHECK_RESERVED_CATEGORY, &"category"))
 	elif not _KNOWN_CATEGORIES.has(resource.category):
 		issues.append(_make_issue(id, source_file, CHECK_UNKNOWN_CATEGORY, &"category"))
 
@@ -445,22 +560,65 @@ func _check_duplicate_ids(entries: Array[Dictionary]) -> Array[Dictionary]:
 	return issues
 
 
+## Cross-entry check: tier-0 `building_material` family coverage (GDD Core
+## Rule 6 / Tuning Knobs "Tier-0 set composition", TR-resource-item-
+## database-031, Story 005). Every family in [constant
+## _TIER0_COVERAGE_FAMILIES] must have >= 1 entry that is BOTH category
+## `building_material` AND `tier == 0` -- an entry that is invalid for some
+## OTHER reason (e.g. a duplicate id, a missing display_name) still counts
+## toward coverage, since its category/material_family/tier fields are
+## independently readable regardless of its other violations. This check is
+## data-set-wide, not tied to one entry or file, so the resulting record
+## uses an empty `entry_id` and [member data_dir] itself as `source_file`;
+## the specific uncovered family is carried in the `"missing_family"` extra
+## key (see [method _make_issue]) rather than overloading `field`, which
+## every other check uses to name a literal schema field.
+func _check_tier0_family_coverage(entries: Array[Dictionary]) -> Array[Dictionary]:
+	var covered_families: Dictionary[StringName, bool] = {}
+	for entry: Dictionary in entries:
+		var resource: ItemDefinitionResource = entry["resource"]
+		if resource.category == &"building_material" and resource.tier == 0:
+			covered_families[resource.material_family] = true
+
+	var issues: Array[Dictionary] = []
+	for family: StringName in _TIER0_COVERAGE_FAMILIES:
+		if not covered_families.get(family, false):
+			issues.append(
+				_make_issue(
+					&"", data_dir, CHECK_TIER0_COVERAGE_GAP, &"material_family",
+					{"missing_family": family}
+				)
+			)
+	return issues
+
+
 ## Builds one structured validation-result record (design/gdd/resource-
 ## item-database.md's Validation-result contract: "a list of records, each
 ## carrying at least the entry id, source file, violated check, and
 ## offending field where applicable" -- TR-resource-item-database-007).
 ## [param field] defaults to an empty [StringName] for checks with no single
-## offending field (currently unused by any Story 004 check, since every
-## check below names exactly one field).
+## offending field. [param extra] (Story 005 addition) merges additional
+## keys onto the record for checks that need to carry more context than the
+## base four fields -- currently only [method _check_tier0_family_coverage]'s
+## `"missing_family"` key -- without overloading `field`'s meaning (a
+## literal schema field name) for every other check. Defaults to an empty
+## [Dictionary] so every pre-Story-005 call site is unaffected.
 static func _make_issue(
-	entry_id: StringName, source_file: String, check: StringName, field: StringName = &""
+	entry_id: StringName,
+	source_file: String,
+	check: StringName,
+	field: StringName = &"",
+	extra: Dictionary = {}
 ) -> Dictionary:
-	return {
+	var issue: Dictionary = {
 		"entry_id": entry_id,
 		"source_file": source_file,
 		"check": check,
 		"field": field,
 	}
+	for key: Variant in extra:
+		issue[key] = extra[key]
+	return issue
 
 
 ## Returns whether [param value] is valid `snake_case`: non-empty, entirely

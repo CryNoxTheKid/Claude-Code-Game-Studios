@@ -1,7 +1,7 @@
 # Story 005: Boot validation — reserved ids, retired ledger, tier-0 coverage, aggregate report + terminal Failed
 
 > **Epic**: Resource & Item Database
-> **Status**: Ready
+> **Status: Complete (2026-07-24 — 305/305 suite green, parent-verified)
 > **Layer**: Foundation
 > **Type**: Logic
 > **Estimate**: 1 day
