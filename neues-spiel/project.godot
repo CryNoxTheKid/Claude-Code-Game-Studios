@@ -17,6 +17,7 @@ config/icon="res://icon.svg"
 [autoload]
 
 TimeTickSystem="*res://src/time_tick_system/time_tick_system.gd"
+ResourceItemDatabase="*res://src/resource_item_database/resource_item_database.gd"
 
 [display]
 

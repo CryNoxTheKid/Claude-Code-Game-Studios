@@ -30,12 +30,12 @@
 ## Resource & Item Database is Autoload-tier (ADR-0001 forbids
 ## [code]@export[/code]ing an Autoload into any module). The real
 ## [code]ResourceItemDatabase[/code] Autoload does not exist yet in this
-## project (rid-002, a separate epic, has not landed and this story does not
+## The ResourceItemDatabase autoload (rid-002) resolves at /root/ResourceItemDatabase.
 ## touch [code]project.godot[/code]), so the dependency is resolved lazily
 ## against [code]/root/ResourceItemDatabase[/code] the first time this node
 ## enters the tree, or assigned directly to a mock RID-shaped double in
 ## headless tests before that -- mirroring the existing
-## [ReferenceInjectedModule] mock-assignment convention. Once rid-002 adds
+## [ReferenceInjectedModule] mock-assignment convention. rid-002's autoload
 ## the real Autoload, this resolves automatically with no further change
 ## here. Similarly, [signal validation_complete]'s payload is a plain
 ## [Dictionary] ([code]{"success": bool, "issues": Array}[/code]) rather than
@@ -90,7 +90,7 @@ func _ready() -> void:
 	assert(
 		resource_item_database != null,
 		"GameWorld requires a ResourceItemDatabase-shaped dependency (assign"
-		+ " a mock in tests; the real Autoload lands with rid-002) before"
+		+ " a mock in tests; the real Autoload is registered since rid-002) before"
 		+ " the boot gate can run"
 	)
 	_boot_state = BootState.WAITING_FOR_DATABASE
