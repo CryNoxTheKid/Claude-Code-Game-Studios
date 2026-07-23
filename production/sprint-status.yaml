@@ -9,102 +9,48 @@
 #   done           ↔  Complete
 #   blocked        ↔  Blocked
 #
-# Active sprint: 3. Sprint 1 & Sprint 2 history retained below the Sprint 3 block.
+# Active sprint: 4. Sprint 1, 2 & 3 history retained below the Sprint 4 block.
 
-sprint: 3
-goal: "Push all five Foundation tracks toward epic-close and open the Core layer: land the global tick signal (tick-004), Voxel bulk-write + DDA picking (vox-003/004), first camera motion (cam-003 orbit), the RID boot-validation pipeline (rid-004), close Scene/World Management with its transition contract (scene-003), and open Villager AI with its config/DI/FSM scaffold (villager-ai-001)."
-start: "2026-07-23"
+sprint: 4
+goal: "Retire the critical path: land the chunked mesher CW-winding + culling rewrite (vox-007, THE critical story) on terrain (vox-006) so the voxel world renders for the first time; complete the camera motion set (cam-004 zoom, cam-005 pan) for the windowed feel check; deliver the Save/Load iteration primitive (vox-005); open the first real Core logic story, the shared walkability predicates (villager-ai-002); and capacity-permitting close camera Active/Suspended (cam-006, cam-007) to unblock Building System for Sprint 5."
+start: "2026-07-24"
 end: ""
-generated: "2026-07-23"
-updated: "2026-07-23"
+generated: "2026-07-24"
+updated: "2026-07-24"
 
 stories:
-  - id: "tick-004"
-    name: "Tick accumulator + global tick signal (drift-free); AC-6 joint assertion with tick-003"
-    file: "production/epics/time-tick-system/story-004-tick-accumulator-signal.md"
-    priority: must-have
-    status: complete-for-dev
-    owner: "godot-gdscript-specialist"
-    estimate_days: 1
-    blocker: ""
-    completed: ""
-  - id: "vox-003"
-    name: "Bulk write + batched signal (per-cell before/after, exactly-one-signal)"
-    file: "production/epics/voxel-world/story-003-bulk-write-batched-signal.md"
+  - id: "vox-006"
+    name: "Procedural terrain generation + single batched gen signal"
+    file: "production/epics/voxel-world/story-006-procedural-terrain-generation.md"
     priority: must-have
     status: ready-for-dev
     owner: "godot-gdscript-specialist"
     estimate_days: 1
     blocker: ""
     completed: ""
-  - id: "vox-004"
-    name: "Neighbor lookup + DDA cell-picking (raycast on the data layer)"
-    file: "production/epics/voxel-world/story-004-neighbors-and-dda-raycast.md"
+  - id: "vox-007"
+    name: "Chunked mesher — CW winding + backface culling ENABLED (TECH DEBT 1) — THE critical story"
+    file: "production/epics/voxel-world/story-007-chunked-mesher-cw-winding-culling.md"
     priority: must-have
-    status: complete-for-dev
+    status: ready-for-dev
     owner: "godot-gdscript-specialist"
-    estimate_days: 1
+    estimate_days: 1.5
     blocker: ""
     completed: ""
-  - id: "rid-004"
-    name: "Boot validation — per-entry schema checks + structured result"
-    file: "production/epics/resource-item-database/story-004-boot-validation-schema-checks.md"
+  - id: "vox-005"
+    name: "iterate_occupied API — occupied-cells iteration, torn-read-free"
+    file: "production/epics/voxel-world/story-005-iterate-occupied.md"
     priority: must-have
     status: ready-for-dev
     owner: "godot-gdscript-specialist"
     estimate_days: 1
     blocker: ""
-    completed: ""
-  - id: "cam-003"
-    name: "Orbit rotation — mmb drag + Q/E, pitch clamp"
-    file: "production/epics/camera-input/story-003-orbit-rotation.md"
-    priority: must-have
-    status: ready-for-dev
-    owner: "godot-specialist"
-    estimate_days: 1
-    blocker: ""
-    completed: ""
-  - id: "scene-003"
-    name: "Transition-signal contract surface + transition state machine (closes Scene/World Mgmt epic 3/3)"
-    file: "production/epics/scene-world-management/story-003-transition-signal-contract-surface.md"
-    priority: must-have
-    status: ready-for-dev
-    owner: "godot-specialist"
-    estimate_days: 1
-    blocker: ""
-    completed: ""
-  - id: "villager-ai-001"
-    name: "Villager AI config resource + DI scaffold + FSM state enum (opens Core layer)"
-    file: "production/epics/villager-ai-behavior/story-001-config-and-scaffold.md"
-    priority: must-have
-    status: ready-for-dev
-    owner: "ai-programmer"
-    estimate_days: 1
-    blocker: ""
-    completed: ""
-  - id: "rid-005"
-    name: "Boot validation — reserved ids, retired ledger, tier-0 coverage, aggregate report + terminal Failed"
-    file: "production/epics/resource-item-database/story-005-boot-validation-invariants-terminal-halt.md"
-    priority: should-have
-    status: complete
-    owner: "godot-gdscript-specialist"
-    estimate_days: 1
-    blocker: "depends on rid-004 (in-sprint)"
-    completed: ""
-  - id: "tick-005"
-    name: "Max-ticks-per-frame safety cap"
-    file: "production/epics/time-tick-system/story-005-max-ticks-per-frame-cap.md"
-    priority: should-have
-    status: complete
-    owner: "godot-gdscript-specialist"
-    estimate_days: 0.5
-    blocker: "depends on tick-004 (in-sprint)"
     completed: ""
   - id: "cam-004"
-    name: "Zoom — multiplicative, clamped, rapid-safe"
+    name: "Zoom — multiplicative, clamped, rapid-event safe"
     file: "production/epics/camera-input/story-004-multiplicative-zoom.md"
-    priority: nice-to-have
-    status: backlog
+    priority: must-have
+    status: ready-for-dev
     owner: "godot-specialist"
     estimate_days: 1
     blocker: ""
@@ -112,12 +58,143 @@ stories:
   - id: "cam-005"
     name: "WASD pan — yaw-relative, distance-scaled, bound + delta clamp"
     file: "production/epics/camera-input/story-005-wasd-pan.md"
-    priority: nice-to-have
+    priority: must-have
+    status: ready-for-dev
+    owner: "godot-specialist"
+    estimate_days: 1
+    blocker: ""
+    completed: ""
+  - id: "villager-ai-002"
+    name: "Walkability predicates (is_standable / is_step_legal) — shared pure functions — first real Core logic"
+    file: "production/epics/villager-ai-behavior/story-002-walkability-predicates.md"
+    priority: must-have
+    status: ready-for-dev
+    owner: "ai-programmer"
+    estimate_days: 1
+    blocker: ""
+    completed: ""
+  - id: "cam-006"
+    name: "Mouse world-ray API + ground-plane intersection (always computable)"
+    file: "production/epics/camera-input/story-006-mouse-world-ray-api.md"
+    priority: should-have
     status: backlog
     owner: "godot-specialist"
     estimate_days: 1
     blocker: ""
     completed: ""
+  - id: "cam-007"
+    name: "Active/Suspended state machine — scene-transition suspend, exact-state restore"
+    file: "production/epics/camera-input/story-007-active-suspended-state.md"
+    priority: should-have
+    status: backlog
+    owner: "godot-specialist"
+    estimate_days: 1
+    blocker: "depends on cam-004, cam-005, cam-006 (in-sprint)"
+    completed: ""
+  - id: "vox-008"
+    name: "Floor/terrain replace write path (parallel-lane fill)"
+    file: "production/epics/voxel-world/story-008-floor-terrain-replace-write-path.md"
+    priority: nice-to-have
+    status: backlog
+    owner: "godot-gdscript-specialist"
+    estimate_days: 1
+    blocker: "pull only if the gdscript voxel lane clears early; depends on vox-006 (in-sprint)"
+    completed: ""
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SPRINT 3 HISTORY (retained; all 9/9 Complete, suite 198→311 green; Scene/World Mgmt epic
+# CLOSED 3/3; Villager AI epic OPENED via villager-ai-001; zero unplanned rework, zero carryover)
+# ─────────────────────────────────────────────────────────────────────────────
+sprint_3_history:
+  sprint: 3
+  goal: "Push all five Foundation tracks toward epic-close and open the Core layer: land the global tick signal (tick-004), Voxel bulk-write + DDA picking (vox-003/004), first camera motion (cam-003 orbit), the RID boot-validation pipeline (rid-004), close Scene/World Management with its transition contract (scene-003), and open Villager AI with its config/DI/FSM scaffold (villager-ai-001)."
+  start: "2026-07-23"
+  end: "2026-07-24"
+  generated: "2026-07-23"
+  updated: "2026-07-24"
+  result: "9/9 Complete; suite 198→311 green (+113 tests); Scene/World Management epic CLOSED (3/3); Villager AI epic OPENED (villager-ai-001); zero unplanned rework, zero carryover. cam-004/cam-005 (Nice-to-have) not pulled — rolled into Sprint 4 Must set."
+  stories:
+    - id: "tick-004"
+      name: "Tick accumulator + global tick signal (drift-free); AC-6 joint assertion with tick-003"
+      file: "production/epics/time-tick-system/story-004-tick-accumulator-signal.md"
+      priority: must-have
+      status: complete
+      owner: "godot-gdscript-specialist"
+      estimate_days: 1
+      blocker: ""
+      completed: "2026-07-24"
+    - id: "vox-003"
+      name: "Bulk write + batched signal (per-cell before/after, exactly-one-signal)"
+      file: "production/epics/voxel-world/story-003-bulk-write-batched-signal.md"
+      priority: must-have
+      status: complete
+      owner: "godot-gdscript-specialist"
+      estimate_days: 1
+      blocker: ""
+      completed: "2026-07-24"
+    - id: "vox-004"
+      name: "Neighbor lookup + DDA cell-picking (raycast on the data layer)"
+      file: "production/epics/voxel-world/story-004-neighbors-and-dda-raycast.md"
+      priority: must-have
+      status: complete
+      owner: "godot-gdscript-specialist"
+      estimate_days: 1
+      blocker: ""
+      completed: "2026-07-24"
+    - id: "rid-004"
+      name: "Boot validation — per-entry schema checks + structured result"
+      file: "production/epics/resource-item-database/story-004-boot-validation-schema-checks.md"
+      priority: must-have
+      status: complete
+      owner: "godot-gdscript-specialist"
+      estimate_days: 1
+      blocker: ""
+      completed: "2026-07-24"
+    - id: "cam-003"
+      name: "Orbit rotation — mmb drag + Q/E, pitch clamp"
+      file: "production/epics/camera-input/story-003-orbit-rotation.md"
+      priority: must-have
+      status: complete
+      owner: "godot-specialist"
+      estimate_days: 1
+      blocker: ""
+      completed: "2026-07-24"
+    - id: "scene-003"
+      name: "Transition-signal contract surface + transition state machine (closes Scene/World Mgmt epic 3/3)"
+      file: "production/epics/scene-world-management/story-003-transition-signal-contract-surface.md"
+      priority: must-have
+      status: complete
+      owner: "godot-specialist"
+      estimate_days: 1
+      blocker: ""
+      completed: "2026-07-24"
+    - id: "villager-ai-001"
+      name: "Villager AI config resource + DI scaffold + FSM state enum (opens Core layer)"
+      file: "production/epics/villager-ai-behavior/story-001-config-and-scaffold.md"
+      priority: must-have
+      status: complete
+      owner: "ai-programmer"
+      estimate_days: 1
+      blocker: ""
+      completed: "2026-07-24"
+    - id: "rid-005"
+      name: "Boot validation — reserved ids, retired ledger, tier-0 coverage, aggregate report + terminal Failed"
+      file: "production/epics/resource-item-database/story-005-boot-validation-invariants-terminal-halt.md"
+      priority: should-have
+      status: complete
+      owner: "godot-gdscript-specialist"
+      estimate_days: 1
+      blocker: ""
+      completed: "2026-07-24"
+    - id: "tick-005"
+      name: "Max-ticks-per-frame safety cap"
+      file: "production/epics/time-tick-system/story-005-max-ticks-per-frame-cap.md"
+      priority: should-have
+      status: complete
+      owner: "godot-gdscript-specialist"
+      estimate_days: 0.5
+      blocker: ""
+      completed: "2026-07-24"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SPRINT 2 HISTORY (retained; all 9/9 Complete, suite 121→198 green, Foundation Spine epic CLOSED)
