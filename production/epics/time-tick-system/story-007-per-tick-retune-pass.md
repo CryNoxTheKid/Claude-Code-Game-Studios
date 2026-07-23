@@ -90,3 +90,4 @@
 
 - Depends on: Stories 001–006 (full mechanism) DONE + the integrated build existing (Milestone 01 S3) + the `villager-ai-behavior` `max_deciding_per_tick` re-tune story (coordination) + a systems-designer / game-designer decision on the values.
 - Unlocks: None (closes the Time & Tick tech-debt item).
+> **Note (2026-07-23, from tick-001):** time_warp_options shipped GDD-authoritative [1,2,3]; the slice's 10x/20x testing gears (user direction 2026-07-21) are NOT in production config yet — decide during this re-tune story whether they return as debug-only warps (data-driven, one-line .tres change).

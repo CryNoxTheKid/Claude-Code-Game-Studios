@@ -66,7 +66,7 @@ stories:
     name: "Time & Tick Autoload skeleton + config resource + boot defaults"
     file: "production/epics/time-tick-system/story-001-autoload-config-boot-defaults.md"
     priority: should-have
-    status: backlog
+    status: complete
     owner: "godot-gdscript-specialist"
     estimate_days: 1
     blocker: ""
