@@ -1,7 +1,7 @@
 # Story 001: Villager AI config resource, DI scaffold & FSM state enum
 
 > **Epic**: Villager AI & Behavior
-> **Status**: Ready
+> **Status: Complete (2026-07-24 — 295/295 suite green, parent-verified; Core layer opened)
 > **Layer**: Core
 > **Type**: Integration
 > **Estimate**: ~1 agent-day
