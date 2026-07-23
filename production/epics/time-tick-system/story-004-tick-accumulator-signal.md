@@ -1,7 +1,7 @@
 # Story 004: Tick accumulator + global tick signal (drift-free)
 
 > **Epic**: Time & Tick System
-> **Status**: Ready
+> **Status: Complete (2026-07-23 — 206/206 suite green, parent-verified; TR-046 joint assertion landed)
 > **Layer**: Foundation
 > **Type**: Logic
 > **Estimate**: 1 day

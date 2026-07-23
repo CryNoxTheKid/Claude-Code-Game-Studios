@@ -23,7 +23,7 @@ stories:
     name: "Tick accumulator + global tick signal (drift-free); AC-6 joint assertion with tick-003"
     file: "production/epics/time-tick-system/story-004-tick-accumulator-signal.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete-for-dev
     owner: "godot-gdscript-specialist"
     estimate_days: 1
     blocker: ""
