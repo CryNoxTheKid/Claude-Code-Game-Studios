@@ -1,7 +1,7 @@
 # Story 001: World Root + single-Valley attach topology
 
 > **Epic**: Scene/World Management
-> **Status**: Ready
+> **Status: Complete (2026-07-23 — 165/165 suite green, parent-verified; NEEDS-DECISION flag carried, unresolved)
 > **Layer**: Foundation
 > **Type**: Integration
 > **Estimate**: 1 day

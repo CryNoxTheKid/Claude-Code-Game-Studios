@@ -42,6 +42,19 @@
 ## a typed [code]ValidationResult[/code] -- that class does not exist yet
 ## (rid-004/005); this shape is forward-compatible with the eventual typed
 ## contract.
+##
+## Scene/World Management Story 001 scope note (ADR-0001 ownership note +
+## ADR-0013): this [code]GameWorld[/code] root IS the World Root
+## [TR-scene-world-management-035]. [member valley_scene] / [method
+## _attach_valley] add this story's scene-TOPOLOGY behavior on the SAME node
+## the Foundation Spine's boot gate already lives on -- a separate concern
+## from the gate, called unconditionally in [method _ready] (gating the
+## attach behind RID Ready is story 002's job, not this one). Scene handoff
+## uses ONLY [method Node.add_child] -- never [code]change_scene_to_file[/code]/
+## [code]change_scene_to_packed[/code]/[code]reload_current_scene[/code], and
+## [member SceneTree.current_scene] is never assigned directly
+## [TR-scene-world-management-037] -- this World Root node itself is never
+## freed [TR-scene-world-management-038].
 class_name GameWorld
 extends Node3D
 
@@ -83,8 +96,24 @@ var resource_item_database: Object = null
 ## [method get_boot_state].
 var _boot_state: BootState = BootState.WAITING_FOR_DATABASE
 
+## Scene/World Management Story 001 (ADR-0001 + ADR-0013): the Valley scene
+## this World Root attaches as its child at boot
+## [TR-scene-world-management-034] [TR-scene-world-management-035]. Wired via
+## [code]GameWorld.tscn[/code]'s Inspector in production to [code]Valley.tscn[/code].
+## Deliberately optional -- left null, [method _attach_valley] is a no-op, so
+## the existing DI/boot-gate-only test suites (which predate this story and
+## never set this field) continue to construct a bare [code]GameWorld[/code]
+## and boot to [constant BootState.ACTIVE] unaffected.
+@export var valley_scene: PackedScene = null
+
+## Runtime instance of [member valley_scene], once [method _attach_valley]
+## has run. Null until then, and null forever if [member valley_scene] was
+## never wired. See [method get_valley].
+var _valley: Node = null
+
 
 func _ready() -> void:
+	_attach_valley()
 	if resource_item_database == null:
 		resource_item_database = get_node_or_null(^"/root/ResourceItemDatabase")
 	assert(
@@ -111,6 +140,33 @@ func _ready() -> void:
 ## for the gate's progress.
 func get_boot_state() -> BootState:
 	return _boot_state
+
+
+## Attaches [member valley_scene] as a child of this World Root
+## (TR-scene-world-management-034/035/038). Uses ONLY plain [method
+## Node.add_child] -- never [code]change_scene_to_file[/code]/
+## [code]change_scene_to_packed[/code]/[code]reload_current_scene[/code],
+## nor ever a direct [member SceneTree.current_scene] assignment (all
+## forbidden, TR-scene-world-management-037) -- this World Root node itself
+## is never replaced or freed by this call (TR-scene-world-management-038).
+##
+## Unconditional at this story: called once, always, from [method _ready],
+## regardless of the boot gate's outcome -- gating this behind RID Ready (so
+## a database failure never attaches an empty-palette Valley) is Scene/World
+## Management story 002's job (ADR-0005 host relationship), not this one. A
+## null [member valley_scene] (the existing DI/boot-gate-substrate tests that
+## predate this story) is a no-op, never an error.
+func _attach_valley() -> void:
+	if valley_scene == null:
+		return
+	_valley = valley_scene.instantiate()
+	add_child(_valley)
+
+
+## Returns the runtime Valley instance attached by [method _attach_valley],
+## or null if none was ever attached (see that method's doc comment).
+func get_valley() -> Node:
+	return _valley
 
 
 ## Settles the boot gate on the database dependency's Ready/Failed outcome

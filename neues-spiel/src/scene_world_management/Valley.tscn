@@ -1,0 +1,18 @@
+[gd_scene load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://src/scene_world_management/valley.gd" id="1_valley"]
+[ext_resource type="Script" path="res://src/voxel_world/voxel_world_grid.gd" id="2_voxelgrid"]
+[ext_resource type="Resource" path="res://data/config/voxel_world_config.tres" id="3_voxelcfg"]
+[ext_resource type="Script" path="res://src/camera_input/camera_input.gd" id="4_camerainput"]
+[ext_resource type="Resource" path="res://data/config/camera_input_config.tres" id="5_cameracfg"]
+
+[node name="Valley" type="Node3D"]
+script = ExtResource("1_valley")
+
+[node name="VoxelWorldGrid" type="Node" parent="."]
+script = ExtResource("2_voxelgrid")
+config = ExtResource("3_voxelcfg")
+
+[node name="CameraInput" type="Node" parent="."]
+script = ExtResource("4_camerainput")
+config = ExtResource("5_cameracfg")

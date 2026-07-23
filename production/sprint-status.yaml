@@ -77,7 +77,7 @@ stories:
     name: "World Root + single-Valley attach topology (NEEDS-DECISION flag carried)"
     file: "production/epics/scene-world-management/story-001-world-root-valley-attach.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete-for-dev
     owner: "godot-specialist"
     estimate_days: 1
     blocker: ""
