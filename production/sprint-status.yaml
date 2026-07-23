@@ -9,97 +9,209 @@
 #   done           ↔  Complete
 #   blocked        ↔  Blocked
 #
-# Active sprint: 2. Sprint 1 history retained below the Sprint 2 block.
+# Active sprint: 3. Sprint 1 & Sprint 2 history retained below the Sprint 3 block.
 
-sprint: 2
-goal: "Close out the Foundation Spine (headless boot test + CONTRACTS.md) and advance all five Foundation tracks one story past their Sprint-1 starter: RID query API, game_delta + pause/warp, InputMap passthrough, chunked voxel storage, World-Root/Valley topology + boot gate."
+sprint: 3
+goal: "Push all five Foundation tracks toward epic-close and open the Core layer: land the global tick signal (tick-004), Voxel bulk-write + DDA picking (vox-003/004), first camera motion (cam-003 orbit), the RID boot-validation pipeline (rid-004), close Scene/World Management with its transition contract (scene-003), and open Villager AI with its config/DI/FSM scaffold (villager-ai-001)."
 start: "2026-07-23"
 end: ""
 generated: "2026-07-23"
 updated: "2026-07-23"
 
 stories:
-  - id: "spine-004"
-    name: "Headless boot integration test — DI wiring + gate + config reads green"
-    file: "production/epics/foundation-spine/story-004-headless-boot-integration-test.md"
+  - id: "tick-004"
+    name: "Tick accumulator + global tick signal (drift-free); AC-6 joint assertion with tick-003"
+    file: "production/epics/time-tick-system/story-004-tick-accumulator-signal.md"
     priority: must-have
-    status: complete-for-dev
+    status: ready-for-dev
     owner: "godot-gdscript-specialist"
     estimate_days: 1
     blocker: ""
     completed: ""
-  - id: "spine-005"
-    name: "CONTRACTS.md — spine contract sheet + data-definition immutability contract"
-    file: "production/epics/foundation-spine/story-005-contracts-md-and-data-definition-contract.md"
+  - id: "vox-003"
+    name: "Bulk write + batched signal (per-cell before/after, exactly-one-signal)"
+    file: "production/epics/voxel-world/story-003-bulk-write-batched-signal.md"
     priority: must-have
-    status: complete-for-dev
+    status: ready-for-dev
+    owner: "godot-gdscript-specialist"
+    estimate_days: 1
+    blocker: ""
+    completed: ""
+  - id: "vox-004"
+    name: "Neighbor lookup + DDA cell-picking (raycast on the data layer)"
+    file: "production/epics/voxel-world/story-004-neighbors-and-dda-raycast.md"
+    priority: must-have
+    status: ready-for-dev
+    owner: "godot-gdscript-specialist"
+    estimate_days: 1
+    blocker: ""
+    completed: ""
+  - id: "rid-004"
+    name: "Boot validation — per-entry schema checks + structured result"
+    file: "production/epics/resource-item-database/story-004-boot-validation-schema-checks.md"
+    priority: must-have
+    status: ready-for-dev
+    owner: "godot-gdscript-specialist"
+    estimate_days: 1
+    blocker: ""
+    completed: ""
+  - id: "cam-003"
+    name: "Orbit rotation — mmb drag + Q/E, pitch clamp"
+    file: "production/epics/camera-input/story-003-orbit-rotation.md"
+    priority: must-have
+    status: ready-for-dev
+    owner: "godot-specialist"
+    estimate_days: 1
+    blocker: ""
+    completed: ""
+  - id: "scene-003"
+    name: "Transition-signal contract surface + transition state machine (closes Scene/World Mgmt epic 3/3)"
+    file: "production/epics/scene-world-management/story-003-transition-signal-contract-surface.md"
+    priority: must-have
+    status: ready-for-dev
+    owner: "godot-specialist"
+    estimate_days: 1
+    blocker: ""
+    completed: ""
+  - id: "villager-ai-001"
+    name: "Villager AI config resource + DI scaffold + FSM state enum (opens Core layer)"
+    file: "production/epics/villager-ai-behavior/story-001-config-and-scaffold.md"
+    priority: must-have
+    status: ready-for-dev
+    owner: "ai-programmer"
+    estimate_days: 1
+    blocker: ""
+    completed: ""
+  - id: "rid-005"
+    name: "Boot validation — reserved ids, retired ledger, tier-0 coverage, aggregate report + terminal Failed"
+    file: "production/epics/resource-item-database/story-005-boot-validation-invariants-terminal-halt.md"
+    priority: should-have
+    status: backlog
+    owner: "godot-gdscript-specialist"
+    estimate_days: 1
+    blocker: "depends on rid-004 (in-sprint)"
+    completed: ""
+  - id: "tick-005"
+    name: "Max-ticks-per-frame safety cap"
+    file: "production/epics/time-tick-system/story-005-max-ticks-per-frame-cap.md"
+    priority: should-have
+    status: backlog
     owner: "godot-gdscript-specialist"
     estimate_days: 0.5
-    blocker: "finalize after spine-004 (in-sprint)"
+    blocker: "depends on tick-004 (in-sprint)"
     completed: ""
-  - id: "rid-003"
-    name: "Read-only lookup API — get_by_id + listing queries"
-    file: "production/epics/resource-item-database/story-003-lookup-api.md"
-    priority: must-have
-    status: complete-for-dev
-    owner: "godot-gdscript-specialist"
-    estimate_days: 1
-    blocker: ""
-    completed: ""
-  - id: "tick-002"
-    name: "game_delta computation — formula, clamp, raw-delta preservation"
-    file: "production/epics/time-tick-system/story-002-game-delta-computation.md"
-    priority: must-have
-    status: complete-for-dev
-    owner: "godot-gdscript-specialist"
-    estimate_days: 1
-    blocker: ""
-    completed: ""
-  - id: "cam-002"
-    name: "InputMap action registration + action_fired passthrough"
-    file: "production/epics/camera-input/story-002-inputmap-registration-action-passthrough.md"
-    priority: must-have
-    status: complete-for-dev
+  - id: "cam-004"
+    name: "Zoom — multiplicative, clamped, rapid-safe"
+    file: "production/epics/camera-input/story-004-multiplicative-zoom.md"
+    priority: nice-to-have
+    status: backlog
     owner: "godot-specialist"
     estimate_days: 1
     blocker: ""
     completed: ""
-  - id: "vox-002"
-    name: "Chunked packed-array storage + O(1) accessors + single-cell change signal"
-    file: "production/epics/voxel-world/story-002-chunked-cell-storage-and-accessors.md"
-    priority: must-have
-    status: complete-for-dev
-    owner: "godot-gdscript-specialist"
-    estimate_days: 1
-    blocker: ""
-    completed: ""
-  - id: "scene-001"
-    name: "World Root + single-Valley attach topology (NEEDS-DECISION flag carried)"
-    file: "production/epics/scene-world-management/story-001-world-root-valley-attach.md"
-    priority: must-have
-    status: complete-for-dev
+  - id: "cam-005"
+    name: "WASD pan — yaw-relative, distance-scaled, bound + delta clamp"
+    file: "production/epics/camera-input/story-005-wasd-pan.md"
+    priority: nice-to-have
+    status: backlog
     owner: "godot-specialist"
     estimate_days: 1
     blocker: ""
     completed: ""
-  - id: "tick-003"
-    name: "Pause & time-warp state — toggle, store, independence"
-    file: "production/epics/time-tick-system/story-003-pause-warp-state.md"
-    priority: should-have
-    status: complete
-    owner: "godot-gdscript-specialist"
-    estimate_days: 1
-    blocker: "depends on tick-002 (in-sprint)"
-    completed: ""
-  - id: "scene-002"
-    name: "Boot-gate integration — Valley attaches only after RID Ready; DB-fail → HALT"
-    file: "production/epics/scene-world-management/story-002-boot-gate-integration.md"
-    priority: should-have
-    status: complete
-    owner: "godot-specialist"
-    estimate_days: 1
-    blocker: "depends on scene-001 (in-sprint); spine-002 DONE (S1)"
-    completed: ""
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SPRINT 2 HISTORY (retained; all 9/9 Complete, suite 121→198 green, Foundation Spine epic CLOSED)
+# ─────────────────────────────────────────────────────────────────────────────
+sprint_2_history:
+  sprint: 2
+  goal: "Close out the Foundation Spine (headless boot test + CONTRACTS.md) and advance all five Foundation tracks one story past their Sprint-1 starter: RID query API, game_delta + pause/warp, InputMap passthrough, chunked voxel storage, World-Root/Valley topology + boot gate."
+  start: "2026-07-23"
+  end: "2026-07-23"
+  generated: "2026-07-23"
+  updated: "2026-07-23"
+  result: "9/9 Complete; suite 121→198 green (+77 tests); Foundation Spine epic CLOSED (5/5); zero unplanned rework, zero carryover"
+  stories:
+    - id: "spine-004"
+      name: "Headless boot integration test — DI wiring + gate + config reads green"
+      file: "production/epics/foundation-spine/story-004-headless-boot-integration-test.md"
+      priority: must-have
+      status: complete
+      owner: "godot-gdscript-specialist"
+      estimate_days: 1
+      blocker: ""
+      completed: "2026-07-23"
+    - id: "spine-005"
+      name: "CONTRACTS.md — spine contract sheet + data-definition immutability contract"
+      file: "production/epics/foundation-spine/story-005-contracts-md-and-data-definition-contract.md"
+      priority: must-have
+      status: complete
+      owner: "godot-gdscript-specialist"
+      estimate_days: 0.5
+      blocker: ""
+      completed: "2026-07-23"
+    - id: "rid-003"
+      name: "Read-only lookup API — get_by_id + listing queries"
+      file: "production/epics/resource-item-database/story-003-lookup-api.md"
+      priority: must-have
+      status: complete
+      owner: "godot-gdscript-specialist"
+      estimate_days: 1
+      blocker: ""
+      completed: "2026-07-23"
+    - id: "tick-002"
+      name: "game_delta computation — formula, clamp, raw-delta preservation"
+      file: "production/epics/time-tick-system/story-002-game-delta-computation.md"
+      priority: must-have
+      status: complete
+      owner: "godot-gdscript-specialist"
+      estimate_days: 1
+      blocker: ""
+      completed: "2026-07-23"
+    - id: "cam-002"
+      name: "InputMap action registration + action_fired passthrough"
+      file: "production/epics/camera-input/story-002-inputmap-registration-action-passthrough.md"
+      priority: must-have
+      status: complete
+      owner: "godot-specialist"
+      estimate_days: 1
+      blocker: ""
+      completed: "2026-07-23"
+    - id: "vox-002"
+      name: "Chunked packed-array storage + O(1) accessors + single-cell change signal"
+      file: "production/epics/voxel-world/story-002-chunked-cell-storage-and-accessors.md"
+      priority: must-have
+      status: complete
+      owner: "godot-gdscript-specialist"
+      estimate_days: 1
+      blocker: ""
+      completed: "2026-07-23"
+    - id: "scene-001"
+      name: "World Root + single-Valley attach topology (NEEDS-DECISION flag carried)"
+      file: "production/epics/scene-world-management/story-001-world-root-valley-attach.md"
+      priority: must-have
+      status: complete
+      owner: "godot-specialist"
+      estimate_days: 1
+      blocker: ""
+      completed: "2026-07-23"
+    - id: "tick-003"
+      name: "Pause & time-warp state — toggle, store, independence"
+      file: "production/epics/time-tick-system/story-003-pause-warp-state.md"
+      priority: should-have
+      status: complete
+      owner: "godot-gdscript-specialist"
+      estimate_days: 1
+      blocker: ""
+      completed: "2026-07-23"
+    - id: "scene-002"
+      name: "Boot-gate integration — Valley attaches only after RID Ready; DB-fail → HALT"
+      file: "production/epics/scene-world-management/story-002-boot-gate-integration.md"
+      priority: should-have
+      status: complete
+      owner: "godot-specialist"
+      estimate_days: 1
+      blocker: ""
+      completed: "2026-07-23"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SPRINT 1 HISTORY (retained; all 8/8 Complete, suite 121/121)
@@ -108,7 +220,7 @@ sprint_1_history:
   sprint: 1
   goal: "Stand up the Foundation spine (boot gate, DI scaffold, config pattern) and open the Time & Tick, Camera, and Voxel-data tracks with their first stories, proving DI-mockable modules boot behind the RID gate."
   start: "2026-07-23"
-  end: ""
+  end: "2026-07-23"
   generated: "2026-07-23"
   updated: "2026-07-23"
   result: "8/8 Complete; suite 121/121 green; three upstream doc defects found-and-fixed pre-ship"
