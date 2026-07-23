@@ -9,19 +9,35 @@
 ## already check-then-connects against via [method is_ready] first, this
 ## signal as a fallback.
 ##
-## Story rid-002 scope note: full field-level/cross-value schema validation
-## (id uniqueness, category/family pairing, tier-0 coverage, reserved-id
-## rejection, retired-ids ledger, `visual_asset` resolution, etc.) is
-## deliberately NOT implemented here -- Stories 004/005/006/008 own that
-## pipeline (design/gdd/resource-item-database.md States and Transitions,
-## Validating row). This story implements only the minimal placeholder
-## Validating->Ready|Failed decision ADR-0006's own Risks section already
-## anticipates: a `.tres` file that fails to load entirely, or loads as the
-## wrong Resource type, fails the whole batch (Failed, TERMINAL, ADR-0006
-## Risk 2 / TR-resource-item-database-006) -- never a partially valid
-## database. A missing or empty [member data_dir] is NOT a failure at this
-## story's scope (no schema invariant exists yet to violate) -- it resolves
-## Ready with zero definitions until Story 009 authors real MVP data content.
+## Story rid-004 scope note: this story extends the rid-002 placeholder
+## pipeline with the PER-ENTRY schema-check pass (design/gdd/resource-item-
+## database.md States and Transitions, Validating row; TR-resource-item-
+## database-005/024/028/040/041/043/049/050/051): id snake_case format,
+## duplicate ids across files, unknown category/material_family, required-
+## field presence, category<->material_family pairing, tier >= 0, and
+## max_stack_size >= 1 where stackable. Every check appends a STRUCTURED
+## record (see [method _make_issue]) to the result -- entry id, source
+## file, violated check, offending field -- never a log string, and the
+## pipeline never short-circuits on the first failure (every entry is
+## checked). Reserved-id/-category rejection, the retired-ids ledger,
+## tier-0 family coverage, and the >=3-violation aggregate proof are
+## Story 005's scope; `visual_asset` resolution is Story 006's; the
+## `missing_item` fallback is Story 007's; `footprint` category-pairing/
+## presence validation is Story 008's -- none of those checks are
+## implemented here.
+##
+## Engine note (verified via a headless load probe against this exact
+## script during rid-004 implementation): [member ItemDefinitionResource.tier]
+## is a statically `int`-typed [code]@export[/code] field, so Godot's
+## resource deserializer silently truncates any authored non-integer value
+## (e.g. `tier = 1.5`) to an `int` (`1`) BEFORE this pipeline ever inspects
+## it -- there is no runtime code path by which a non-integer value can
+## reach [method _validate_single_entry]. The GDD's "non-integer tier"
+## boot-halt sub-case (AC23) is therefore structurally satisfied by the
+## schema's type declaration itself, not by a runtime check; only the
+## negative-tier sub-case is independently validated below (see
+## `validation_schema_checks_test.gd` for the regression test proving the
+## coercion, cited as a Deviation in this story's implementation report).
 ##
 ## The lookup entry point [method get_by_id] carries Story 002's minimal
 ## non-Ready guard contract (TR-resource-item-database-034 -- outside Ready,
@@ -57,14 +73,44 @@ enum BootState { UNLOADED, VALIDATING, READY, FAILED }
 ## Emitted exactly once, when [method setup] resolves to Ready or Failed.
 ## Payload shape: `{"success": bool, "issues": Array}` -- a plain
 ## [Dictionary] rather than a typed `ValidationResult` (that class does not
-## exist yet; Stories 004/005 introduce the structured validation-result
-## contract). [GameWorld]'s existing boot gate (ADR-0005) already consumes
-## exactly this shape via its `MockResourceItemDatabase` test double.
+## exist yet; Story 005 introduces the full aggregate/terminal-halt
+## contract on top of this story's structured per-entry records). Each
+## element of `issues` is itself a structured [Dictionary] -- see
+## [method _make_issue] -- never a log string.
 signal validation_complete(result: Dictionary)
 
 ## Default directory scanned for `.tres` [ItemDefinitionResource] entries
 ## (ADR-0002 authoring idiom, ADR-0006 storage location).
 const DEFAULT_DATA_DIR: String = "res://data/items/"
+
+## Fixed, five-entry authorable category set (GDD Core Rule 5) checked by
+## [method _validate_single_entry]'s unknown-category check. The reserved,
+## non-authorable sixth category (`missing`) is deliberately EXCLUDED here --
+## its rejection is Story 005's scope (TR-resource-item-database-030); an
+## authored `missing` category still fails THIS check too (it is simply not
+## in this whitelist), which is a harmless overlap, not a conflict.
+const _KNOWN_CATEGORIES: Array[StringName] = [
+	&"building_material", &"furniture_fixture", &"raw_resource", &"consumable", &"equipment"
+]
+
+## Fixed material-family set (Visual Direction Note) plus `none` for
+## non-material items (GDD Core Rule 4), checked by [method
+## _validate_single_entry]'s unknown-material_family check.
+const _KNOWN_MATERIAL_FAMILIES: Array[StringName] = [&"wood", &"stone", &"thatch", &"none"]
+
+## Violated-check identifiers -- the `"check"` value of a structured issue
+## record (see [method _make_issue]). Exposed as constants (mirroring
+## [enum BootState]'s exposure pattern) so tests reference the exact
+## identifier rather than a duplicated string literal.
+const CHECK_RESOURCE_LOAD_FAILED: StringName = &"resource_load_failed"
+const CHECK_MISSING_REQUIRED_FIELD: StringName = &"missing_required_field"
+const CHECK_INVALID_ID_FORMAT: StringName = &"invalid_id_format"
+const CHECK_DUPLICATE_ID: StringName = &"duplicate_id"
+const CHECK_UNKNOWN_CATEGORY: StringName = &"unknown_category"
+const CHECK_UNKNOWN_MATERIAL_FAMILY: StringName = &"unknown_material_family"
+const CHECK_CATEGORY_FAMILY_PAIRING: StringName = &"category_family_pairing"
+const CHECK_INVALID_TIER: StringName = &"invalid_tier"
+const CHECK_INVALID_MAX_STACK_SIZE: StringName = &"invalid_max_stack_size"
 
 ## Directory this instance scans at [method setup]. Production leaves this
 ## at [constant DEFAULT_DATA_DIR]; a headless test assigns a fixture
@@ -221,28 +267,46 @@ func list_all_ids() -> Array[StringName]:
 	return ids
 
 
-## Scans [member data_dir] for `.tres` files and attempts to load each as an
-## [ItemDefinitionResource]. Returns
-## `{"success": bool, "issues": Array[String], "definitions":
+## Scans [member data_dir] for `.tres` files, loads each as an
+## [ItemDefinitionResource], and runs the full per-entry + cross-entry
+## schema-check pipeline (Story 004) over every entry that loaded
+## successfully. Returns
+## `{"success": bool, "issues": Array[Dictionary], "definitions":
 ## Dictionary[StringName, ItemDefinitionResource]}` -- `definitions` is
 ## populated ONLY when `success` is true (GDD Failed-state philosophy: never
 ## launch with a partially valid database, TR-resource-item-database-006 --
-## applied here at this story's minimal placeholder scope: a load failure
-## fails the WHOLE batch, not just the offending entry).
+## a load failure OR any schema-check violation fails the WHOLE batch, not
+## just the offending entry).
 ##
-## A missing or empty [member data_dir] is NOT a failure at this scope (see
-## class doc comment) -- it resolves as zero entries, `success = true`. A
-## file that fails to load entirely, or loads as something other than an
-## [ItemDefinitionResource], is the one failure condition this placeholder
-## pipeline checks (ADR-0006 Risk 2's "resource failed to load entirely"
-## case) -- full field-level schema validation is Stories 004/005/006/008's
-## job.
+## A missing or empty [member data_dir] is NOT a failure (no entries to
+## validate) -- it resolves as zero entries, `success = true`.
 func _load_definitions() -> Dictionary:
-	var issues: Array[String] = []
 	var definitions: Dictionary[StringName, ItemDefinitionResource] = {}
 	var directory: DirAccess = DirAccess.open(data_dir)
 	if directory == null:
-		return {"success": true, "issues": issues, "definitions": definitions}
+		return {"success": true, "issues": [] as Array[Dictionary], "definitions": definitions}
+
+	var file_names: Array[String] = _scan_entry_file_names(directory)
+	var load_result: Dictionary = _load_entries(file_names)
+	var entries: Array[Dictionary] = load_result["entries"]
+
+	var issues: Array[Dictionary] = []
+	issues.append_array(load_result["issues"] as Array[Dictionary])
+	issues.append_array(_validate_entries(entries))
+
+	if issues.is_empty():
+		for entry: Dictionary in entries:
+			var resource: ItemDefinitionResource = entry["resource"]
+			definitions[resource.id] = resource
+
+	return {"success": issues.is_empty(), "issues": issues, "definitions": definitions}
+
+
+## Returns every `.tres` file name directly under [param directory], sorted
+## for deterministic boot-load order. Extracted from the original rid-002
+## scan loop so the schema-check pipeline can run over the full entry list
+## (not a by-id-deduped [Dictionary]) before deciding uniqueness.
+func _scan_entry_file_names(directory: DirAccess) -> Array[String]:
 	var file_names: Array[String] = []
 	directory.list_dir_begin()
 	var file_name: String = directory.get_next()
@@ -252,12 +316,161 @@ func _load_definitions() -> Dictionary:
 		file_name = directory.get_next()
 	directory.list_dir_end()
 	file_names.sort()
+	return file_names
+
+
+## Loads each file in [param file_names] (relative to [member data_dir]) as
+## an [ItemDefinitionResource]. Returns `{"issues": Array[Dictionary],
+## "entries": Array[Dictionary]}` where each `entries` element is
+## `{"source_file": String, "resource": ItemDefinitionResource}`. A file
+## that fails to load entirely, or loads as something other than an
+## [ItemDefinitionResource], produces one structured [constant
+## CHECK_RESOURCE_LOAD_FAILED] issue (ADR-0006 Risk 2's "resource failed to
+## load entirely" case) and is excluded from `entries` -- it cannot be
+## schema-checked since its fields are unreadable.
+func _load_entries(file_names: Array[String]) -> Dictionary:
+	var issues: Array[Dictionary] = []
+	var entries: Array[Dictionary] = []
 	for name: String in file_names:
 		var path: String = data_dir.path_join(name)
 		var loaded: Resource = load(path)
 		if loaded == null or not (loaded is ItemDefinitionResource):
-			issues.append("failed to load ItemDefinitionResource from %s" % path)
+			issues.append(_make_issue(&"", path, CHECK_RESOURCE_LOAD_FAILED))
 			continue
-		var definition: ItemDefinitionResource = loaded as ItemDefinitionResource
-		definitions[definition.id] = definition
-	return {"success": issues.is_empty(), "issues": issues, "definitions": definitions}
+		entries.append({"source_file": path, "resource": loaded as ItemDefinitionResource})
+	return {"issues": issues, "entries": entries}
+
+
+## Runs the full schema-check pipeline (Story 004) over every entry in
+## [param entries] -- per-entry checks first, then the cross-entry
+## duplicate-id check -- accumulating every violation without
+## short-circuiting on the first (GDD "Failed... naming EVERY invalid
+## entry", TR-resource-item-database-005/035).
+func _validate_entries(entries: Array[Dictionary]) -> Array[Dictionary]:
+	var issues: Array[Dictionary] = []
+	for entry: Dictionary in entries:
+		issues.append_array(
+			_validate_single_entry(entry["resource"], entry["source_file"])
+		)
+	issues.append_array(_check_duplicate_ids(entries))
+	return issues
+
+
+## Per-entry schema checks (Story 004 Implementation Notes): required-field
+## presence, id snake_case format, known category/material_family,
+## category<->material_family pairing, `tier >= 0`, and `max_stack_size >= 1`
+## where `stackable`. Every violated check appends its own structured
+## record -- an entry with multiple problems reports all of them, never
+## just the first.
+func _validate_single_entry(resource: ItemDefinitionResource, source_file: String) -> Array[Dictionary]:
+	var issues: Array[Dictionary] = []
+	var id: StringName = resource.id
+
+	# --- required-field presence (GDD AC5 / TR-028) -----------------------
+	# `id` missing skips the snake_case check below (nothing valid to
+	# format-check) rather than double-reporting the same root cause.
+	var id_present: bool = String(id) != ""
+	if not id_present:
+		issues.append(_make_issue(id, source_file, CHECK_MISSING_REQUIRED_FIELD, &"id"))
+	elif not _is_valid_snake_case(String(id)):
+		issues.append(_make_issue(id, source_file, CHECK_INVALID_ID_FORMAT, &"id"))
+
+	if resource.display_name == "":
+		issues.append(_make_issue(id, source_file, CHECK_MISSING_REQUIRED_FIELD, &"display_name"))
+
+	if String(resource.category) == "":
+		issues.append(_make_issue(id, source_file, CHECK_MISSING_REQUIRED_FIELD, &"category"))
+	elif not _KNOWN_CATEGORIES.has(resource.category):
+		issues.append(_make_issue(id, source_file, CHECK_UNKNOWN_CATEGORY, &"category"))
+
+	if String(resource.storage_category) == "":
+		issues.append(_make_issue(id, source_file, CHECK_MISSING_REQUIRED_FIELD, &"storage_category"))
+
+	# --- known material_family enum (GDD AC4b / TR-041) ---------------------
+	if not _KNOWN_MATERIAL_FAMILIES.has(resource.material_family):
+		issues.append(_make_issue(id, source_file, CHECK_UNKNOWN_MATERIAL_FAMILY, &"material_family"))
+
+	# --- category<->material_family pairing (GDD AC24 / TR-051) -------------
+	# building_material requires a real family (not `none`, not empty);
+	# every other category requires exactly `none`.
+	if resource.category == &"building_material":
+		if resource.material_family == &"none" or String(resource.material_family) == "":
+			issues.append(_make_issue(id, source_file, CHECK_CATEGORY_FAMILY_PAIRING, &"material_family"))
+	elif resource.material_family != &"none":
+		issues.append(_make_issue(id, source_file, CHECK_CATEGORY_FAMILY_PAIRING, &"material_family"))
+
+	# --- tier >= 0 (GDD AC23 / TR-050) --------------------------------------
+	# See this script's class doc comment: a non-integer authored value is
+	# structurally impossible to observe here -- Godot's resource loader
+	# coerces it to `int` before this pipeline ever runs -- so only the
+	# negative-value sub-case is a reachable runtime check.
+	if resource.tier < 0:
+		issues.append(_make_issue(id, source_file, CHECK_INVALID_TIER, &"tier"))
+
+	# --- max_stack_size >= 1 where stackable (GDD AC20/AC21 / TR-049/043) --
+	# A non-stackable entry with max_stack_size authored is intentionally
+	# NOT checked at all here -- ignored silently, per Edge Case 7.
+	if resource.stackable and resource.max_stack_size < 1:
+		issues.append(_make_issue(id, source_file, CHECK_INVALID_MAX_STACK_SIZE, &"max_stack_size"))
+
+	return issues
+
+
+## Cross-entry check: two (or more) entries sharing the same [member
+## ItemDefinitionResource.id] across different source files (GDD Edge
+## Case 4 / AC3, TR-resource-item-database-040). Emits one structured
+## record PER duplicated file -- every record shares the same `entry_id`
+## but names a different `source_file`, so the aggregated result names
+## both entries AND both source files without a combined-list field shape.
+## Entries with a missing (empty) id are excluded -- already reported by
+## [method _validate_single_entry]'s required-field check, and grouping
+## them here would misreport unrelated missing-id entries as "duplicates"
+## of each other.
+func _check_duplicate_ids(entries: Array[Dictionary]) -> Array[Dictionary]:
+	var files_by_id: Dictionary[StringName, Array] = {}
+	for entry: Dictionary in entries:
+		var resource: ItemDefinitionResource = entry["resource"]
+		if String(resource.id) == "":
+			continue
+		if not files_by_id.has(resource.id):
+			files_by_id[resource.id] = []
+		(files_by_id[resource.id] as Array).append(entry["source_file"])
+
+	var issues: Array[Dictionary] = []
+	for id: StringName in files_by_id:
+		var files: Array = files_by_id[id]
+		if files.size() > 1:
+			for source_file: String in files:
+				issues.append(_make_issue(id, source_file, CHECK_DUPLICATE_ID, &"id"))
+	return issues
+
+
+## Builds one structured validation-result record (design/gdd/resource-
+## item-database.md's Validation-result contract: "a list of records, each
+## carrying at least the entry id, source file, violated check, and
+## offending field where applicable" -- TR-resource-item-database-007).
+## [param field] defaults to an empty [StringName] for checks with no single
+## offending field (currently unused by any Story 004 check, since every
+## check below names exactly one field).
+static func _make_issue(
+	entry_id: StringName, source_file: String, check: StringName, field: StringName = &""
+) -> Dictionary:
+	return {
+		"entry_id": entry_id,
+		"source_file": source_file,
+		"check": check,
+		"field": field,
+	}
+
+
+## Returns whether [param value] is valid `snake_case`: non-empty, entirely
+## lowercase, and containing neither spaces nor hyphens (GDD AC6 / TR-024,
+## sub-cases 6a uppercase / 6b spaces / 6c hyphens).
+static func _is_valid_snake_case(value: String) -> bool:
+	if value.is_empty():
+		return false
+	if value != value.to_lower():
+		return false
+	if value.contains(" ") or value.contains("-"):
+		return false
+	return true

@@ -1,7 +1,7 @@
 # Story 004: Boot validation — per-entry schema checks
 
 > **Epic**: Resource & Item Database
-> **Status**: Ready
+> **Status: Complete (2026-07-23 — 250/250 suite green, parent-verified)
 > **Layer**: Foundation
 > **Type**: Logic
 > **Estimate**: 1 day
