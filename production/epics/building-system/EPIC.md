@@ -5,7 +5,7 @@
 > **Architecture Module**: Building System (blueprint/project lifecycle; construction job queue/claim contract; placement validity; undo/redo stack; tool state machine)
 > **Manifest Version**: 2026-07-23
 > **Status**: Ready
-> **Stories**: Not yet created — run `/create-stories building-system`
+> **Stories**: 33 stories created — Block A pre-slice foundation (019–033, TR ~002..101) + Block B slice-revision (001–018, TR-102..127); see Stories table below for build order
 
 ## Overview
 
@@ -79,6 +79,59 @@ This epic is complete when:
 - The full draft→built→demolish lifecycle has passing logic unit tests
 - Integration stories have passing tests in `tests/`
 
+## Stories
+
+33 stories in two blocks. **File ids do not equal build order** — the pre-slice
+FOUNDATION block (019–033) was storyed second but is the PREREQUISITE for the
+SLICE-REVISION block (001–018, TR-102..127). Build order is expressed by each
+story's `Depends on:` field and by this table's ordering (foundation first).
+Do NOT start a slice-block story until its foundation dependencies are Done.
+
+### Block A — Pre-slice Foundation (TR ~002..101) — build these FIRST
+
+| # | Story | Type | Status | ADR (primary) | Depends on |
+|---|-------|------|--------|---------------|------------|
+| 019 | Tool state machine (Idle/ToolArmed/Dragging/Suspended) | Logic | Ready | ADR-0010 | Camera & Input (Foundation) |
+| 020 | DDA placement pick + surface-aware targeting + highlight | Logic | Ready | ADR-0004 | 019, Voxel World |
+| 021 | Commit pipeline — click-vs-drag + bounds clamp | Logic | Ready | ADR-0016 | 020, 019 |
+| 022 | Placement validity checks | Logic | Ready | ADR-0016 | 021 |
+| 023 | Ghost preview rendering + degradation + state tint | Visual/Feel | Ready | ADR-0014 | 020, 022, 019 |
+| 024 | Wall tool — F1 extrude | Logic | Ready | ADR-0016 | 021, 020, 022 |
+| 025 | Floor tool — F2 rectangle | Logic | Ready | ADR-0016 | 021, 020, 022 |
+| 026 | Roof tool — Flat MVP + formation seam | Logic | Ready | ADR-0016 | 021, 020, 022 |
+| 027 | Block tool — single-cell place/replace | Logic | Ready | ADR-0016 | 021, 020, 022, 031 |
+| 028 | Furniture placement base — single-cell support + palette | Logic | Ready | ADR-0016 | 021, 022, RID |
+| 029 | Construction tick loop (Planned→UnderConstruction→Built, F3) | Logic | Ready | ADR-0016 | 021, Time & Tick |
+| 030 | Construction job queue — claim/report/on-site/unreachable | Integration | Ready | ADR-0016 | 029, 004 |
+| 031 | Removal tool base — Planned→Canceled + job revoke | Logic | Ready | ADR-0016 | 021, 029 |
+| 032 | Undo/redo stack core (command model, bounded, transition-clear) | Logic | Ready | ADR-0016 | 021, 022, Scene/World Mgmt |
+| 033 | Voxel World write seam — batched + self-write exemption + completion signal | Integration | Ready | ADR-0016 | 029, 032, Voxel World |
+
+### Block B — Slice-revision (TR-102..127) — build AFTER their foundation deps
+
+| # | Story | Type | Status | ADR (primary) | Depends on |
+|---|-------|------|--------|---------------|------------|
+| 001 | Build/Editor Mode state machine | Logic | Ready | ADR-0010 | 019 |
+| 002 | Project entity + blueprint-cell lifecycle rollup + persistence | Logic | Ready | ADR-0016 | 021, 029 |
+| 003 | 26-neighborhood grouping/merge + cell→project reverse index | Logic | Ready | ADR-0016 | 002 |
+| 004 | Release ("Bau starten") + job-eligibility transition | Logic | Ready | ADR-0016 | 002 |
+| 005 | Worker attribution on job claim | Integration | Ready | ADR-0016 | 004, 030 |
+| 006 | Project pause / resume | Logic | Ready | ADR-0016 | 004, 030 |
+| 007 | Change orders (attach to BUILDING/PAUSED/DONE) | Logic | Ready | ADR-0016 | 003, 004 |
+| 008 | Click-selection via cell→project reverse index | Integration | Ready | ADR-0010 | 003, 001 |
+| 009 | Demolition orders — block teardown job contract | Logic | Ready | ADR-0016 | 002, 030, 033 |
+| 010 | Project cancel / Abriss | Logic | Ready | ADR-0016 | 009, 015 |
+| 011 | Plan-only undo/redo | Logic | Ready | ADR-0016 | 002, 009, 032 |
+| 012 | Floor excavation flush-replace + restore_value | Logic | Ready | ADR-0016 | 025, 002, 009, 011 |
+| 013 | Dig / mining-zone projects (dig-kind lifecycle) | Logic | Ready | ADR-0016 | 002, 003, 031 |
+| 014 | Dig-job on-site exclusion | Integration | Ready | ADR-0016 | 013, 030 |
+| 015 | Draft eraser (removal-tool micro-state branch) | Logic | Ready | ADR-0016 | 031, 009, 012 |
+| 016 | Multi-cell furniture placement (footprint) | Logic | Ready | ADR-0016 | 028, 002 |
+| 017 | Furniture demolition — job-gated, atomic multi-cell | Integration | Ready | ADR-0016 | 016, 009, 015 |
+| 018 | Higher-level tool batch contract (system-side) | Logic | Ready | ADR-0016 | 003, 024, 025, 026 |
+
 ## Next Step
 
-Run `/create-stories building-system` to break this epic into implementable stories.
+Run `/story-readiness production/epics/building-system/story-019-tool-state-machine.md`,
+then `/dev-story` through Block A in id order, then Block B — each story's `Depends on:`
+field (and the tables above) define the unambiguous order regardless of file id.

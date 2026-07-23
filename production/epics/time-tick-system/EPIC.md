@@ -5,7 +5,19 @@
 > **Architecture Module**: Time & Tick System (`game_delta`/pause/warp computation; the global `tick` signal; tick accumulator)
 > **Manifest Version**: 2026-07-23
 > **Status**: Ready
-> **Stories**: Not yet created — run `/create-stories time-tick-system`
+> **Stories**: 7 stories created
+
+## Stories
+
+| # | Story | Type | Status | ADR |
+|---|-------|------|--------|-----|
+| 001 | Time & Tick Autoload skeleton + config resource + boot defaults | Integration | Ready | ADR-0002/0001 |
+| 002 | game_delta computation (formula, clamp, raw-delta preservation) | Logic | Ready | ADR-0002 |
+| 003 | Pause & time-warp state (toggle, store, independence) | Logic | Ready | ADR-0002/0001 |
+| 004 | Tick accumulator + global tick signal (drift-free) | Logic | Ready | ADR-0008/0002 |
+| 005 | Max-ticks-per-frame safety cap | Logic | Ready | ADR-0002 |
+| 006 | Cross-system integration guarantees (time_scale, transition non-suspension) | Integration | Ready | ADR-0001 |
+| 007 | Per-tick re-tuning pass (tick-budget half) + per-frame cost measurement | Config/Data | Ready (needs-decision + cross-epic coordination) | ADR-0008/0002 |
 
 ## Overview
 

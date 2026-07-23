@@ -12,14 +12,14 @@ their epics are created when those layers are approached (`/create-epics layer: 
 
 | Epic | Layer | System / Scope | GDD | Stories | Status |
 |------|-------|----------------|-----|---------|--------|
-| foundation-spine | Foundation | Boot/DI/config spine + test harness + CONTRACTS.md (cross-cutting; ADR-0001/0002/0005/0006) | N/A — ADR-driven | Not yet created | Ready |
-| scene-world-management | Foundation | World Root + transition contract + boot-gate host | design/gdd/scene-world-management.md | Not yet created | Ready |
-| voxel-world | Foundation | Grid data + chunked mesher + paged residency | design/gdd/voxel-world.md | Not yet created | Ready |
-| camera-input | Foundation | Orbit camera + InputMap + world-ray API | design/gdd/camera-input.md | Not yet created | Ready |
-| time-tick-system | Foundation | `game_delta`/pause/warp + `tick` signal | design/gdd/time-tick-system.md | Not yet created | Ready |
-| resource-item-database | Foundation | Item/material definitions + boot gate + immutable queries | design/gdd/resource-item-database.md | Not yet created | Ready |
-| building-system | Core | Project lifecycle, tools, change orders, undo, demolition | design/gdd/building-system.md | Not yet created | Ready |
-| villager-ai-behavior | Core | FSM, AStar3D, occupancy, threading, anti-stuck | design/gdd/villager-ai-behavior.md | Not yet created | Ready |
+| foundation-spine | Foundation | Boot/DI/config spine + test harness + CONTRACTS.md (cross-cutting; ADR-0001/0002/0005/0006) | N/A — ADR-driven | 5 stories | Ready |
+| scene-world-management | Foundation | World Root + transition contract + boot-gate host | design/gdd/scene-world-management.md | 3 stories | Ready |
+| voxel-world | Foundation | Grid data + chunked mesher + paged residency | design/gdd/voxel-world.md | 17 stories | Ready |
+| camera-input | Foundation | Orbit camera + InputMap + world-ray API | design/gdd/camera-input.md | 9 stories | Ready |
+| time-tick-system | Foundation | `game_delta`/pause/warp + `tick` signal | design/gdd/time-tick-system.md | 7 stories | Ready |
+| resource-item-database | Foundation | Item/material definitions + boot gate + immutable queries | design/gdd/resource-item-database.md | 9 stories | Ready |
+| building-system | Core | Project lifecycle, tools, change orders, undo, demolition | design/gdd/building-system.md | 33 stories (Block A foundation 019–033 + Block B slice 001–018) | Ready |
+| villager-ai-behavior | Core | FSM, AStar3D, occupancy, threading, anti-stuck | design/gdd/villager-ai-behavior.md | 25 stories | Ready |
 
 ## Milestone 01 Tech-Debt & CD-Item Placement
 

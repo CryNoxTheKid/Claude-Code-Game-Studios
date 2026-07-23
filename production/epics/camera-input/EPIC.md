@@ -5,7 +5,21 @@
 > **Architecture Module**: Camera & Input (camera position derivation; all InputMap action registration/ownership; world-ray query API; Active/Suspended state)
 > **Manifest Version**: 2026-07-23
 > **Status**: Ready
-> **Stories**: Not yet created — run `/create-stories camera-input`
+> **Stories**: 9 stories created
+
+## Stories
+
+| # | Story | Type | Status | ADR |
+|---|-------|------|--------|-----|
+| 001 | Camera config + spherical position derivation | Logic | Ready | ADR-0002 |
+| 002 | InputMap action registration + action_fired passthrough | Integration | Ready | ADR-0010 |
+| 003 | Orbit rotation — mmb drag + Q/E, pitch clamp | Logic | Ready | ADR-0002 |
+| 004 | Zoom — multiplicative, clamped, rapid-safe | Logic | Ready | ADR-0002 |
+| 005 | WASD pan — yaw-relative, distance-scaled, bound + delta clamp | Logic | Ready | ADR-0002 |
+| 006 | Mouse world-ray API + ground-plane intersection | Logic | Ready | ADR-0004 |
+| 007 | Active/Suspended state machine (exact-state restore) | Integration | Ready | ADR-0010 |
+| 008 | Exactly-one-owner-per-click arbitration | Integration | Ready | ADR-0010 |
+| 009 | Raw-delta + pause contract (controllable while paused) | Integration | Ready | ADR-0002 |
 
 ## Overview
 

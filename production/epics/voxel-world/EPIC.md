@@ -5,7 +5,29 @@
 > **Architecture Module**: Voxel World / Grid Data (the `Vector3i`-addressed cell grid; raw read/write primitives; change-signal emission; procedural terrain; chunked mesher + paged residency storage tier)
 > **Manifest Version**: 2026-07-23
 > **Status**: Ready
-> **Stories**: Not yet created — run `/create-stories voxel-world`
+> **Stories**: 17 stories created
+
+## Stories
+
+| # | Story | Type | Status | ADR |
+|---|-------|------|--------|-----|
+| 001 | Grid config + coordinate math + bounds | Logic | Ready | ADR-0002 |
+| 002 | Chunked packed-array storage + O(1) accessors + single-cell signal | Logic | Ready | ADR-0014 |
+| 003 | Bulk write + batched signal (per-cell before/after) | Logic | Ready | ADR-0014 |
+| 004 | Neighbor lookup + DDA cell-picking | Integration | Ready | ADR-0004 |
+| 005 | iterate_occupied (torn-read-free) | Integration | Ready | ADR-0014 |
+| 006 | Procedural terrain generation + single batched gen signal | Logic | Ready | ADR-0002 |
+| 007 | Chunked mesher CW-winding + culling ENABLED (TECH DEBT 1) | Visual/Feel | Ready | ADR-0014 |
+| 008 | Floor terrain-replace write path (restore_value) | Integration | Ready | ADR-0014 |
+| 009 | Terrain dig-order removal write path (1..5 family) | Integration | Ready | ADR-0014 |
+| 010 | Region-file format + paged residency working set | Integration | Ready | ADR-0015 |
+| 011 | Async region I/O + terrain-gen on capped WorkerThreadPool | Integration | Ready | ADR-0015 |
+| 012 | Time-based per-frame page-in / eviction budget | Integration | Ready | ADR-0015 |
+| 013 | Read-through in-flight-write cache | Integration | Ready | ADR-0015 |
+| 014 | Load-before-write for far-world mutations | Integration | Ready | ADR-0015 |
+| 015 | Mesh view-window streaming (build + unload budgets) | Integration | Ready | ADR-0014 |
+| 016 | ADR-0015 C1 — async cap + bounded gen cost (TECH DEBT 3) | Config/Data | Ready | ADR-0015 |
+| 017 | ADR-0015 C4 — completion-driven drain (TECH DEBT 3) | Integration | Ready | ADR-0015 |
 
 ## Overview
 

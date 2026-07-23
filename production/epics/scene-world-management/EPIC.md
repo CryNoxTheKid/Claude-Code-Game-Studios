@@ -5,7 +5,7 @@
 > **Architecture Module**: Scene/World Management (World Root lifecycle; the 3-signal transition contract; scene attach/detach topology)
 > **Manifest Version**: 2026-07-23
 > **Status**: Ready
-> **Stories**: Not yet created — run `/create-stories scene-world-management`
+> **Stories**: 3 stories created (2026-07-23) — story 001 carries a NEEDS-DECISION flag (main-menu boot-flow conflict; does not block M01)
 
 ## Overview
 
@@ -73,6 +73,17 @@ This epic is complete when:
 - Logic/Integration stories have passing test files in `tests/`
 - A headless test proves World Root persistence and the one-begin→one-complete/abort invariant
 
+## Stories
+
+| # | Story | Type | Status | ADR |
+|---|-------|------|--------|-----|
+| 001 | World Root + single-Valley attach topology ⚠️ NEEDS-DECISION (main-menu conflict, does not block M01) | Integration | Ready | ADR-0001, ADR-0013 |
+| 002 | Boot-gate integration — Valley attaches after RID Ready; DB-failure → HALT | Integration | Ready | ADR-0005 |
+| 003 | Transition-signal contract surface + transition state machine | Integration | Ready | ADR-0001 |
+
+Dependency order: 001 → 002 → 003. Story 001 depends on Foundation Spine story 001; story 002 depends on Foundation Spine story 002.
+MVP scope only — multi-scene (ADR-0013) and savepoint binding (ADR-0012) are VS-tier, deferred to Milestone 02+.
+
 ## Next Step
 
-Run `/create-stories scene-world-management` to break this epic into implementable stories.
+Run `/story-readiness production/epics/scene-world-management/story-001-world-root-valley-attach.md`, then `/dev-story` to begin implementation in dependency order. Resolve the story-001 NEEDS-DECISION flag with technical-director before the Main Menu ships (Alpha), not before M01.

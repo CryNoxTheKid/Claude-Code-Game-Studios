@@ -5,7 +5,7 @@
 > **Architecture Module**: No single module — the boot/DI/config spine that ALL injected-tier modules sit on (architecture.md "Initialization order" + Control Manifest Foundation Layer Rules)
 > **Manifest Version**: 2026-07-23
 > **Status**: Ready
-> **Stories**: Not yet created — run `/create-stories foundation-spine`
+> **Stories**: 5 stories created (2026-07-23)
 
 ## Overview
 
@@ -78,6 +78,18 @@ This epic is complete when:
 - The GdUnit4 headless harness runs and `CONTRACTS.md` exists
 - All Logic stories have passing test files in `tests/`
 
+## Stories
+
+| # | Story | Type | Status | ADR |
+|---|-------|------|--------|-----|
+| 001 | GameWorld root scene + injected-tier DI scaffold (`setup()` wiring) | Integration | Ready | ADR-0001 |
+| 002 | Boot-sequencing gate — BootState machine + RID Ready/Failed gate | Logic | Ready | ADR-0005 |
+| 003 | Config Resource pattern — typed `.tres` + `validate()` two-tier clamp/halt | Logic | Ready | ADR-0002 |
+| 004 | Headless boot integration test — DI wiring + gate + config reads, green | Integration | Ready | ADR-0005 |
+| 005 | CONTRACTS.md — spine contract sheet + data-definition immutability contract | Config/Data | Ready | ADR-0006 |
+
+Dependency order: 001 → 002 → 003 → 004 → 005 (005 drafted in parallel, finalized after 004).
+
 ## Next Step
 
-Run `/create-stories foundation-spine` to break this epic into implementable stories.
+Run `/story-readiness production/epics/foundation-spine/story-001-gameworld-di-scaffold.md`, then `/dev-story` to begin implementation in dependency order.

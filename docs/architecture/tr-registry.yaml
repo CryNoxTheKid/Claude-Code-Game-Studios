@@ -1922,9 +1922,9 @@ requirements:
   - id: TR-building-system-123
     system: building-system
     gdd: design/gdd/building-system.md
-    requirement: "Removal-tool micro-state branch: Draft -> instant cancel, no job; Queued/UnderConstruction (released but not yet Built) -> instant cancel with the claiming villager's job revoked; Built -> a demolition order; furniture is explicitly exempt and remains instantly removable regardless of Built state (the furniture-revocation contract requires it)."
+    requirement: "Removal-tool micro-state branch: Draft -> instant cancel, no job; Queued/UnderConstruction (released but not yet Built) -> instant cancel with the claiming villager's job revoked; Built -> a demolition order; furniture follows the SAME job-gated path with NO instant-removal carve-out (superseded 2026-07-23 by TR-building-system-127) — Built furniture creates a demolition order on its owning project (or a standalone removal order), and the entity/occupant record clears only on job completion."
     created: 2026-07-23
-    revised: ""
+    revised: "2026-07-23"
     status: active
   - id: TR-building-system-124
     system: building-system

@@ -5,7 +5,21 @@
 > **Architecture Module**: Resource & Item Database (item/material definitions; boot-time validation; `missing_item` fallback; category/tier/material_family vocabulary)
 > **Manifest Version**: 2026-07-23
 > **Status**: Ready
-> **Stories**: Not yet created — run `/create-stories resource-item-database`
+> **Stories**: 9 stories created
+
+## Stories
+
+| # | Story | Type | Status | ADR |
+|---|-------|------|--------|-----|
+| 001 | ItemDefinition two-type split + schema + getter-only immutability | Logic | Ready | ADR-0006 |
+| 002 | RID Autoload + load-once + Ready state + boot-gate signal | Integration | Ready | ADR-0005/0002/0001 |
+| 003 | Read-only lookup API (get_by_id + listing queries) | Logic | Ready | ADR-0006/0001 |
+| 004 | Boot validation — per-entry schema checks | Logic | Ready | ADR-0006/0005 |
+| 005 | Boot validation — reserved ids, retired ledger, tier-0 coverage, aggregate report + terminal Failed | Logic | Ready | ADR-0005/0006 |
+| 006 | visual_asset resolution validation (typed Mesh, two failure shapes) | Config/Data | Ready | ADR-0006 |
+| 007 | missing_item fallback definition + exclusion from listings | Logic | Ready | ADR-0006 |
+| 008 | Furniture footprint field + boot validation | Logic | Ready | ADR-0006 |
+| 009 | MVP data content (tier-0 set + bed) + content smoke checks | Config/Data | Ready | ADR-0002/0006 |
 
 ## Overview
 

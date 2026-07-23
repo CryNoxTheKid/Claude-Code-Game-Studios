@@ -5,7 +5,7 @@
 > **Architecture Module**: Villager AI & Behavior (per-villager state machine; walkability predicates — canonical ground truth; job-claim consumption; F1–F4 movement/selection formulas)
 > **Manifest Version**: 2026-07-23
 > **Status**: Ready
-> **Stories**: Not yet created — run `/create-stories villager-ai-behavior`
+> **Stories**: 25 stories created (see Stories table below)
 
 ## Overview
 
@@ -83,6 +83,43 @@ This epic is complete when:
 - Deterministic ordering, anti-stuck watchdog, and seal-prevention have passing logic unit tests
 - The `max_deciding_per_tick` re-tune is recorded as a config change with rationale
 
+## Stories
+
+| # | Story | Type | Status | ADR |
+|---|-------|------|--------|-----|
+| 001 | Villager AI config resource, DI scaffold & FSM state enum | Integration | Ready | ADR-0001/0002/0008 |
+| 002 | Walkability predicates (is_standable / is_step_legal) | Logic | Ready | ADR-0007 |
+| 003 | Body-column occupancy model (2-block character clearance) | Logic | Ready | ADR-0009 |
+| 004 | Deterministic position model & movement interpolation | Logic | Ready | ADR-0009 |
+| 005 | Deciding scheduler — FIFO queue + max_deciding_per_tick budget | Logic | Ready | ADR-0008 |
+| 006 | Activity priority decision loop | Logic | Ready | ADR-0008 |
+| 007 | AStar3D graph build & shortest-path query | Logic | Ready | ADR-0007 |
+| 008 | Incremental AStar3D patching on cell writes (incl. dig-order) | Integration | Ready | ADR-0007/0009 |
+| 009 | Traveling state — path following & mid-travel re-path | Integration | Ready | ADR-0009/0007 |
+| 010 | F2 job selection (nearest-reachable, bounded candidates) | Logic | Ready | ADR-0007 |
+| 011 | Job claim/release pipeline with worker attribution | Integration | Ready | ADR-0016/0008 |
+| 012 | On-site work & full claim→build→report cycle | Integration | Ready | ADR-0016/0009 |
+| 013 | Nudge-aside vacate (F4 target selection) | Logic | Ready | ADR-0009 |
+| 014 | Rescue-target BFS (F5 expanding-ring search) | Logic | Ready | ADR-0007/0009 |
+| 015 | Unstuck watchdog trigger, rescue teleport & telemetry | Logic | Ready | ADR-0008/0009 |
+| 016 | Seal prevention negative-write gate & livelock escape (F6) | Logic | Ready | ADR-0009 |
+| 017 | Dig/demolition on-site exclusion (self-undermine guard) | Logic | Ready | ADR-0009/0016 |
+| 018 | Sleep & home — bed claim (move-in moment) | Integration | Ready | ADR-0008/0012 |
+| 019 | Wandering & idle micro-behaviors (F3) | Logic | Ready | ADR-0008/0007 |
+| 020 | Breather beat (between-jobs rest) | Logic | Ready | ADR-0008 |
+| 021 | Starting roster spawn at world generation | Integration | Ready | ADR-0001/0002 |
+| 022 | max_deciding_per_tick production re-tune (TECH DEBT 2) | Config/Data | Ready | ADR-0002/0008 |
+| 023 | Scene-transition simulation continuity | Integration | Ready | ADR-0013/0008 |
+| 024 | Villager AI save/load serialization (VS-tier) | Integration | Ready | ADR-0012 |
+| 025 | Performance stress validation (30-villager, Advisory) | Integration | Ready | ADR-0008/0007 |
+
+**Type totals**: 13 Logic, 11 Integration, 1 Config/Data.
+
+**Needs-decision / flags**:
+- **022** (max_deciding_per_tick re-tune): cross-epic coordination — one config change with the time-tick-system base-tick-rate story, shared rationale.
+- **024** (save/load): Vertical-Slice-tier; **out of scope for Milestone 01** — testable now against a mocked serializer, but sequence into VS.
+- **025** (perf stress): Advisory/Performance, milestone-gated — not part of the Logic gate, not an MVP-Done blocker.
+
 ## Next Step
 
-Run `/create-stories villager-ai-behavior` to break this epic into implementable stories.
+Run `/story-readiness production/epics/villager-ai-behavior/story-001-config-and-scaffold.md`, then `/dev-story` to begin. Work stories in dependency order — each story's `Depends on:` field lists what must be DONE first.
