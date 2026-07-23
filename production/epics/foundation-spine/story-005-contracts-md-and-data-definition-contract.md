@@ -1,7 +1,7 @@
 # Story 005: CONTRACTS.md — spine contract sheet + data-definition immutability contract
 
 > **Epic**: Foundation Spine (Boot, DI, Config & Test Harness)
-> **Status**: Ready
+> **Status: Complete (2026-07-23 — doc story, signatures grep-verified, suite 128/128, parent-verified)
 > **Layer**: Foundation
 > **Type**: Config/Data
 > **Estimate**: 0.5 day

@@ -32,7 +32,7 @@ stories:
     name: "CONTRACTS.md — spine contract sheet + data-definition immutability contract"
     file: "production/epics/foundation-spine/story-005-contracts-md-and-data-definition-contract.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete-for-dev
     owner: "godot-gdscript-specialist"
     estimate_days: 0.5
     blocker: "finalize after spine-004 (in-sprint)"
