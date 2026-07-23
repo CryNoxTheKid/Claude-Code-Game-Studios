@@ -1,12 +1,12 @@
 # Story 003: Transition-signal contract surface + transition state machine
 
 > **Epic**: Scene/World Management
-> **Status**: Ready
+> **Status**: Complete (2026-07-24 — 276/276 suite green)
 > **Layer**: Foundation
 > **Type**: Integration
 > **Estimate**: 1 day
 > **Manifest Version**: 2026-07-23
-> **Last Updated**: (set by /dev-story when implementation begins)
+> **Last Updated**: 2026-07-24
 
 ## Context
 

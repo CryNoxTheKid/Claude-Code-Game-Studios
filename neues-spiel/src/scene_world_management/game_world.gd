@@ -64,6 +64,24 @@
 ## scene-topology REACTION to the Foundation Spine's gate (story 002 of this
 ## epic); it does not re-implement the gate mechanism itself (that remains
 ## `foundation-spine` story 002 / [method _on_database_settled]).
+##
+## Scene/World Management Story 003 scope note (ADR-0001 contract surface +
+## ADR-0013 Key Interfaces, which already anticipated this exact signal pair
+## living on the World Root): [signal transition_begun] / [signal
+## transition_ended] / [method get_transition_state] are the durable
+## transition-signal CONTRACT SURFACE (GDD Core Rule 7's three-outcome
+## contract, collapsed to two signals: begin, and end-with-a-[code]success[/code]
+## bool covering both transition-complete and transition-abort). At MVP no
+## real dungeon transition exists yet (VS-tier, ADR-0013) -- [method
+## begin_transition]/[method end_transition] are the synthetic driver this
+## story builds so the surface is testable in isolation today, and so VS-tier
+## dungeon-entry/exit stories can slot into it later without changing the
+## contract. Consumers (Camera & Input's Suspended entry/exit, Building
+## System's undo-clear) bind via these signals ONLY -- this class makes no
+## direct call into any consumer, by construction
+## [TR-scene-world-management-049]. The double-trigger debounce (GDD Edge
+## Cases, Logic/VS+) is deliberately NOT built here -- see [method
+## begin_transition]'s doc comment.
 class_name GameWorld
 extends Node3D
 
@@ -81,6 +99,44 @@ enum BootState { WAITING_FOR_DATABASE, WIRING, ACTIVE, HALTED }
 ## infrastructure, TR-scene-world-management-032) is a later scene-world-
 ## management story's job; this signal is the hook it connects to.
 signal boot_halted(issues: Array)
+
+## Scene/World Management Story 003 contract surface (ADR-0001 + ADR-0013;
+## GDD Core Rule 7). Fires exactly once per [method begin_transition] call.
+## Reserved for REVERSIBLE presentation/suspension effects only (camera
+## Suspended, UI hiding, overlay fade-in) -- consumers MUST NOT bind
+## irreversible state changes here [TR-scene-world-management-043]. Carries
+## no payload -- an opaque contract consumers bind to by effect class, never
+## by transition identity.
+signal transition_begun()
+
+## Scene/World Management Story 003 contract surface (ADR-0001 + ADR-0013;
+## GDD Core Rule 7). Fires exactly once per matching [signal
+## transition_begun], covering the GDD's two end outcomes in one signal:
+## transition-complete when [param success] is [code]true[/code]
+## [TR-scene-world-management-044], transition-abort when [param success] is
+## [code]false[/code] [TR-scene-world-management-045]. Either outcome MUST
+## unwind every reversible begin-effect (camera exits Suspended, UI
+## reappears) -- an abort must never strand a consumer in Suspended
+## [TR-scene-world-management-048]. Carries no scene-specific payload beyond
+## [param success].
+signal transition_ended(success: bool)
+
+## Scene/World Management Story 003 contract surface (ADR-0001 + ADR-0013).
+## The three MVP-scoped states peers observe via [method
+## get_transition_state] -- deliberately distinct from [enum BootState],
+## which this class also owns for the unrelated boot-gate concern (ADR-0005).
+## [constant Transitioning] is reachable today only via the synthetic [method
+## begin_transition]/[method end_transition] driver -- no real dungeon
+## transition exists yet (VS-tier).
+enum TransitionState { Booting, Active, Transitioning }
+
+## True while a transition is in progress -- between a [method
+## begin_transition] call and its matching [method end_transition] call.
+## Backs [method get_transition_state]'s [constant TransitionState.Transitioning]
+## branch, and is the structural guard that makes the GDD's one-begin ->
+## exactly-one-end invariant hold: [method end_transition] is a no-op once
+## this is already [code]false[/code] [TR-scene-world-management-047].
+var _transition_in_progress: bool = false
 
 ## Ordered list of injected-tier child modules whose [code]setup()[/code]
 ## this root invokes. Wired via the Inspector on [code]GameWorld.tscn[/code]
@@ -239,3 +295,59 @@ func _setup_injected_tier() -> void:
 ## firing the hook and guaranteeing no [code]setup()[/code] call happened.
 func _show_boot_halt_screen(issues: Array) -> void:
 	boot_halted.emit(issues)
+
+
+## Scene/World Management Story 003 (ADR-0001 contract surface). Returns the
+## current transition state so peers can observe a stable post-boot state
+## without inspecting [enum BootState] directly:
+## [constant TransitionState.Transitioning] while a transition is in
+## progress (see [member _transition_in_progress]); otherwise [constant
+## TransitionState.Active] once the boot gate has resolved to [constant
+## BootState.ACTIVE]; [constant TransitionState.Booting] at any earlier boot
+## state -- including [constant BootState.HALTED], which this story does not
+## need to distinguish (story 002 owns the HALT contract via [signal
+## boot_halted]).
+func get_transition_state() -> TransitionState:
+	if _transition_in_progress:
+		return TransitionState.Transitioning
+	if _boot_state == BootState.ACTIVE:
+		return TransitionState.Active
+	return TransitionState.Booting
+
+
+## Scene/World Management Story 003 (ADR-0001 contract surface, synthetic
+## MVP driver -- see class doc comment). Begins a transition: fires [signal
+## transition_begun] exactly once and marks [method get_transition_state] as
+## [constant TransitionState.Transitioning] until the matching [method
+## end_transition] call resolves it.
+##
+## The GDD's double-trigger debounce (Edge Cases, re-tiered Logic/VS+) is
+## deliberately NOT built here -- this story only guarantees the one-begin ->
+## exactly-one-end invariant (below), not the "ignore a second trigger while
+## one is in progress" policy, which is a later VS-tier story's job to layer
+## in front of this call. Calling this while a transition is already in
+## progress is therefore a caller-contract violation today, asserted
+## against rather than silently ignored.
+func begin_transition() -> void:
+	assert(
+		not _transition_in_progress,
+		"GameWorld.begin_transition() called while a transition is already in progress"
+		+ " -- the double-trigger debounce is VS-tier scope, not built yet (story 003)"
+	)
+	_transition_in_progress = true
+	transition_begun.emit()
+
+
+## Scene/World Management Story 003 (ADR-0001 contract surface, synthetic
+## MVP driver). Resolves the in-progress transition: fires [signal
+## transition_ended] with [param success] exactly once per [method
+## begin_transition] call [TR-scene-world-management-047]. A call made while
+## no transition is in progress -- including a SECOND call after the first
+## already resolved it -- is a structural no-op: it does NOT emit [signal
+## transition_ended] again. This is the enforcement mechanism for the GDD's
+## one-begin -> exactly-one-end invariant (Core Rule 7).
+func end_transition(success: bool) -> void:
+	if not _transition_in_progress:
+		return
+	_transition_in_progress = false
+	transition_ended.emit(success)
