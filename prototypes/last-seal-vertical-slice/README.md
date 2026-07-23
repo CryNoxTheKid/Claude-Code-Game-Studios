@@ -31,8 +31,21 @@ multiple villagers, streaming.
 
 ## Status
 
-**In progress** — Day 1 (2026-07-12): scaffold, contracts, core autoloads.
+**Concluded** — 2026-07-23, verdict **PROCEED** (5 active build days,
+2026-07-12 … 2026-07-23). Full debrief, velocity log, and production
+requirements in [REPORT.md](REPORT.md).
 
 ## Findings
 
-(updated when the slice concludes — see REPORT.md)
+- Full build→furnish→live loop validated end-to-end (headless LOOP_TEST gate
+  green on every commit) and playable unguided; tester verdict PROCEED.
+- Feasibility: ~1 specialist-agent day per feature package; 11 systems
+  integrated in 1 day via CONTRACTS.md.
+- Biggest pipeline lesson: validate geometry against ENGINE conventions
+  (Godot fronts are CLOCKWISE) — self-consistent audits proved nothing.
+- Stonehearth-style build workflow (projects, draft-first, worker demolition)
+  emerged as core UX and must be first-class in the building GDDs.
+- Experience gap for production: loop payoff (shelter → recovery → warmth)
+  under-communicated; atmosphere/mood is the weakest axis (Art Bible input).
+- Anti-stuck: watchdog + seal prevention as safety net; real fix
+  (build-order planning, scaffolding) is production scope with telemetry.
