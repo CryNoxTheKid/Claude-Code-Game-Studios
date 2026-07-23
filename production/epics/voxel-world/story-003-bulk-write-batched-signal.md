@@ -1,7 +1,7 @@
 # Story 003: Bulk write + single batched signal with per-cell before/after
 
 > **Epic**: Voxel World / Grid Data
-> **Status**: Ready
+> **Status: Complete (2026-07-23 — 215/215 suite green, parent-verified)
 > **Layer**: Foundation
 > **Type**: Logic
 > **Estimate**: 1 day

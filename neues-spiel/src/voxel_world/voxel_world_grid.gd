@@ -12,9 +12,15 @@
 ## per ADR-0014 Decision §1/Implementation Notes -- storage/streaming
 ## RESIDENCY (paging chunks to on-disk region files, ADR-0015) remains Story
 ## 010's concern; every chunk this class ever touches stays resident for the
-## session's lifetime. Bulk/batched writes and their single batched signal
-## are Story 003's scope; neighbor lookup and the DDA raycast are Story 004's.
-## Procedural terrain generation using [member VoxelWorldConfig.base_height]/
+## session's lifetime.
+##
+## Story 003 (this revision) adds [method bulk_write] and [signal
+## cells_changed_batch] (ADR-0014 Implementation Notes; TR-voxel-world-042/
+## 043) -- a bulk write reuses the same core mutation [method set_cell] uses
+## ([method _apply_write]) but suppresses the per-cell [signal cell_changed]
+## for the duration of the call, emitting exactly ONE batched signal instead.
+## Neighbor lookup and the DDA raycast are Story 004's scope; procedural
+## terrain generation using [member VoxelWorldConfig.base_height]/
 ## `amplitude`/`frequency` remains Story 006's scope.
 class_name VoxelWorldGrid
 extends Node
@@ -53,6 +59,16 @@ class _ChunkBuffer:
 ## batched here -- Story 003 owns the separate bulk/batched write path and
 ## its own single-batched-signal contract.
 signal cell_changed(cell: Vector3i, before: CellContents, after: CellContents)
+
+## Fires exactly ONCE per [method bulk_write] call that changes at least one
+## cell (TR-voxel-world-042) -- carries the full per-cell [CellChangeRecord]
+## array (cell, before, after) for every affected cell, the SAME array
+## [method bulk_write] returns (TR-voxel-world-043). [signal cell_changed] is
+## suppressed for the duration of a [method bulk_write] call -- Control
+## Manifest Forbidden: "one signal per cell on a bulk operation." Never fires
+## for a batch that changes zero cells (an empty [param changes], or one
+## whose every cell is out of bounds) -- "nothing changed" emits nothing.
+signal cells_changed_batch(changes: Array[CellChangeRecord])
 
 ## Tuning config dependency (ADR-0002). Wired via a scene file's Inspector in
 ## production, or assigned directly in a headless test. Never read inside
@@ -198,6 +214,79 @@ func set_cell(cell: Vector3i, contents: CellContents) -> CellContents:
 		contents.material_id >= 0 and contents.material_id <= 255,
 		"VoxelWorldGrid.set_cell material_id out of packed-byte range 0-255: %s" % contents.material_id
 	)
+	var record: CellChangeRecord = _apply_write(cell, contents)
+	if record == null:
+		return null
+	cell_changed.emit(record.cell, record.before, record.after)
+	return record.before
+
+
+## Convenience wrapper for [method set_cell] with [method CellContents.empty]
+## (Core Rule 5's "clear a cell") -- identical before/after-signal contract,
+## including the `null`/no-op result for an out-of-bounds cell.
+func clear_cell(cell: Vector3i) -> CellContents:
+	return set_cell(cell, CellContents.empty())
+
+
+## Bulk write API (Story vox-003, ADR-0014 Implementation Notes;
+## TR-voxel-world-042/043): applies every (cell, contents) pair in [param
+## changes] under this single call, reusing [method _apply_write] -- the same
+## core mutation [method set_cell] uses -- for each cell, but suppressing
+## [signal cell_changed] for every individual cell (Control Manifest
+## Forbidden: "one signal per cell on a bulk operation"). Emits
+## [signal cells_changed_batch] exactly ONCE at the end, carrying the full
+## per-cell [CellChangeRecord] array (cell, before, after) for every affected
+## cell -- the SAME array this method returns, so the Building System's undo
+## stack can restore every cell individually from either the signal payload
+## or the return value (TR-voxel-world-043).
+##
+## A cell outside the configured world bounds is skipped -- the same
+## "nothing changed" contract as [method set_cell]'s `null` return for a
+## single out-of-bounds write; it contributes no [CellChangeRecord] and is
+## never counted toward the batch. An empty [param changes] (or one whose
+## every cell is out of bounds) applies nothing and emits nothing -- there is
+## no "batch of zero" signal.
+##
+## [param changes] is a typed `Dictionary[Vector3i, CellContents]` rather
+## than an ordered array of pairs -- a caller targeting the same cell twice
+## is naturally deduplicated (the last value for that key wins, matching a
+## single [method set_cell] call's own overwrite semantics), and Godot's
+## [Dictionary] preserves insertion order, so per-cell write order stays
+## deterministic.
+func bulk_write(changes: Dictionary[Vector3i, CellContents]) -> Array[CellChangeRecord]:
+	assert(config != null, "VoxelWorldGrid.config not wired")
+	var records: Array[CellChangeRecord] = []
+	for cell: Vector3i in changes:
+		var contents: CellContents = changes[cell]
+		assert(contents != null, "VoxelWorldGrid.bulk_write contents must not be null")
+		assert(
+			contents.block_type_id >= 0 and contents.block_type_id <= 255,
+			"VoxelWorldGrid.bulk_write block_type_id out of packed-byte range 0-255: %s" % contents.block_type_id
+		)
+		assert(
+			contents.material_id >= 0 and contents.material_id <= 255,
+			"VoxelWorldGrid.bulk_write material_id out of packed-byte range 0-255: %s" % contents.material_id
+		)
+		var record: CellChangeRecord = _apply_write(cell, contents)
+		if record != null:
+			records.append(record)
+	if not records.is_empty():
+		cells_changed_batch.emit(records)
+	return records
+
+
+## Shared write-application core (Story vox-003, ADR-0014 Implementation
+## Notes: bulk_write "reuses the single-write mechanism internally") --
+## performs the bounds check, lazy chunk allocation, and packed-buffer
+## mutation common to both [method set_cell] and [method bulk_write],
+## returning the resulting [CellChangeRecord] (or `null` for an
+## out-of-bounds cell -- nothing changed, no record, and deliberately no
+## signal of any kind here; emitting [signal cell_changed]/[signal
+## cells_changed_batch] is each caller's own responsibility, not this
+## helper's). Callers validate [param contents] (packed-byte range,
+## non-null) BEFORE calling this -- this function assumes that check already
+## passed.
+func _apply_write(cell: Vector3i, contents: CellContents) -> CellChangeRecord:
 	if not is_in_bounds(cell):
 		return null
 	var key: Vector2i = _chunk_key(cell)
@@ -209,15 +298,7 @@ func set_cell(cell: Vector3i, contents: CellContents) -> CellContents:
 	buffer.block_type_ids[offset] = contents.block_type_id
 	buffer.material_ids[offset] = contents.material_id
 	var after := CellContents.new(contents.block_type_id, contents.material_id)
-	cell_changed.emit(cell, before, after)
-	return before
-
-
-## Convenience wrapper for [method set_cell] with [method CellContents.empty]
-## (Core Rule 5's "clear a cell") -- identical before/after-signal contract,
-## including the `null`/no-op result for an out-of-bounds cell.
-func clear_cell(cell: Vector3i) -> CellContents:
-	return set_cell(cell, CellContents.empty())
+	return CellChangeRecord.new(cell, before, after)
 
 
 ## Chunk coordinate for [param cell]
