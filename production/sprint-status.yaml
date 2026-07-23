@@ -84,7 +84,7 @@ stories:
     name: "Grid config + coordinate math + bounds"
     file: "production/epics/voxel-world/story-001-grid-config-and-coordinate-math.md"
     priority: should-have
-    status: backlog
+    status: complete
     owner: "godot-gdscript-specialist"
     estimate_days: 1
     blocker: ""

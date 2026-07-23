@@ -1,7 +1,7 @@
 # Story 001: Grid config + coordinate math + bounds
 
 > **Epic**: Voxel World / Grid Data
-> **Status**: Ready
+> **Status: Complete (2026-07-23 — 112/112 suite green, parent-verified)
 > **Layer**: Foundation
 > **Type**: Logic
 > **Estimate**: 1 day
