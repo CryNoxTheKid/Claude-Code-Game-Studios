@@ -81,7 +81,7 @@
 ## Test Evidence
 
 **Story Type**: Integration
-**Required evidence**: `tests/integration/time_tick_system/autoload_config_boot_test.gd` (GdUnit4) — instantiate via `Node.new()`, assign a mock config, call `setup()` directly; assert defaults and config-driven values without scene tree or Autoload registration.
+**Required evidence**: neues-spiel/`tests/integration/time_tick_system/autoload_config_boot_test.gd` (GdUnit4) — instantiate via `Node.new()`, assign a mock config, call `setup()` directly; assert defaults and config-driven values without scene tree or Autoload registration.
 
 **Status**: [ ] Not yet created
 

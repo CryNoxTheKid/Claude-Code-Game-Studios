@@ -21,7 +21,7 @@ stories:
     name: "GameWorld root + injected-tier DI scaffold (setup() wiring)"
     file: "production/epics/foundation-spine/story-001-gameworld-di-scaffold.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete
     owner: "godot-gdscript-specialist"
     estimate_days: 1
     blocker: ""

@@ -69,7 +69,7 @@
 ## Test Evidence
 
 **Story Type**: Logic
-**Required evidence**: `tests/unit/resource_item_database/footprint_validation_test.gd` (GdUnit4) — asserts on the structured result; synthetic fixtures; must pass.
+**Required evidence**: neues-spiel/`tests/unit/resource_item_database/footprint_validation_test.gd` (GdUnit4) — asserts on the structured result; synthetic fixtures; must pass.
 
 **Status**: [ ] Not yet created
 

@@ -67,7 +67,7 @@
 ## Test Evidence
 
 **Story Type**: Integration
-**Required evidence**: `tests/integration/time_tick_system/transition_persistence_test.gd` (GdUnit4) with a mock transition driver, PLUS a grep assertion (`rg --glob "*.gd"` for `Engine.time_scale|SceneTree.paused` in this system → zero). Must pass.
+**Required evidence**: neues-spiel/`tests/integration/time_tick_system/transition_persistence_test.gd` (GdUnit4) with a mock transition driver, PLUS a grep assertion (`rg --glob "*.gd"` for `Engine.time_scale|SceneTree.paused` in this system → zero). Must pass.
 
 **Status**: [ ] Not yet created
 

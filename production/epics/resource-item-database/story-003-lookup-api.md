@@ -73,7 +73,7 @@
 ## Test Evidence
 
 **Story Type**: Logic
-**Required evidence**: `tests/unit/resource_item_database/lookup_api_test.gd` (GdUnit4) — factory fixtures; must pass.
+**Required evidence**: neues-spiel/`tests/unit/resource_item_database/lookup_api_test.gd` (GdUnit4) — factory fixtures; must pass.
 
 **Status**: [ ] Not yet created
 

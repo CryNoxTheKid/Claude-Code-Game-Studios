@@ -78,7 +78,7 @@
 ## Test Evidence
 
 **Story Type**: Logic
-**Required evidence**: `tests/unit/resource_item_database/validation_schema_checks_test.gd` (GdUnit4) — asserts on the structured result records (never log strings); synthetic invalid fixtures; must pass.
+**Required evidence**: neues-spiel/`tests/unit/resource_item_database/validation_schema_checks_test.gd` (GdUnit4) — asserts on the structured result records (never log strings); synthetic invalid fixtures; must pass.
 
 **Status**: [ ] Not yet created
 

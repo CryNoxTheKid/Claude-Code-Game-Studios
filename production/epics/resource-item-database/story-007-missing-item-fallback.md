@@ -68,7 +68,7 @@
 ## Test Evidence
 
 **Story Type**: Logic
-**Required evidence**: `tests/unit/resource_item_database/missing_item_fallback_test.gd` (GdUnit4) — factory fixtures; must pass. (AC9b save round-trip explicitly deferred to Milestone 02.)
+**Required evidence**: neues-spiel/`tests/unit/resource_item_database/missing_item_fallback_test.gd` (GdUnit4) — factory fixtures; must pass. (AC9b save round-trip explicitly deferred to Milestone 02.)
 
 **Status**: [ ] Not yet created
 

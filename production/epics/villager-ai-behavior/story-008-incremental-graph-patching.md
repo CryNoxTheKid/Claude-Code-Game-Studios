@@ -73,7 +73,7 @@
 ## Test Evidence
 
 **Story Type**: Integration
-**Required evidence**: `tests/integration/villager_ai/graph_patching_test.gd` — must exist and pass.
+**Required evidence**: neues-spiel/`tests/integration/villager_ai/graph_patching_test.gd` — must exist and pass.
 
 **Status**: [ ] Not yet created
 

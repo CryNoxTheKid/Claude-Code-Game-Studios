@@ -1,12 +1,12 @@
 # Story 001: GameWorld root scene + injected-tier DI scaffold (`setup()` wiring)
 
 > **Epic**: Foundation Spine (Boot, DI, Config & Test Harness)
-> **Status**: Ready
+> **Status**: In Progress
 > **Layer**: Foundation
 > **Type**: Integration
 > **Estimate**: 1 day
 > **Manifest Version**: 2026-07-23
-> **Last Updated**: (set by /dev-story when implementation begins)
+> **Last Updated**: 2026-07-23
 
 ## Context
 
@@ -99,7 +99,7 @@
 **Required evidence**:
 - Integration test at `neues-spiel/tests/integration/foundation/gameworld_di_scaffold_test.gd` — must exist and pass headless. (The isolated `setup()`/mock-injection assertions may also live as a unit test at `neues-spiel/tests/unit/foundation/`.)
 
-**Status**: [ ] Not yet created
+**Status**: [x] Created — 3 integration test functions (`gameworld_di_scaffold_test.gd`) + 4 unit test functions (`reference_injected_module_test.gd`), all passing headless (2026-07-23)
 
 ---
 

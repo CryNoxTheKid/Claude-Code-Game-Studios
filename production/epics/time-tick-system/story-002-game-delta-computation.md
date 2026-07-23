@@ -69,7 +69,7 @@
 ## Test Evidence
 
 **Story Type**: Logic
-**Required evidence**: `tests/unit/time_tick_system/game_delta_computation_test.gd` (GdUnit4) — deterministic, fixed `raw_delta` inputs; must pass.
+**Required evidence**: neues-spiel/`tests/unit/time_tick_system/game_delta_computation_test.gd` (GdUnit4) — deterministic, fixed `raw_delta` inputs; must pass.
 
 **Status**: [ ] Not yet created
 

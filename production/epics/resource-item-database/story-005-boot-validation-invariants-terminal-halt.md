@@ -73,7 +73,7 @@
 ## Test Evidence
 
 **Story Type**: Logic
-**Required evidence**: `tests/unit/resource_item_database/validation_invariants_terminal_test.gd` (GdUnit4) — asserts on the structured result; must pass.
+**Required evidence**: neues-spiel/`tests/unit/resource_item_database/validation_invariants_terminal_test.gd` (GdUnit4) — asserts on the structured result; must pass.
 
 **Status**: [ ] Not yet created
 

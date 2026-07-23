@@ -75,7 +75,7 @@
 ## Test Evidence
 
 **Story Type**: Integration
-**Required evidence**: `tests/integration/building_system/worker_attribution_test.gd` (mocked-claim unit-level test acceptable now; full claim→build→report cycle is PROVISIONAL pending Villager AI).
+**Required evidence**: neues-spiel/`tests/integration/building_system/worker_attribution_test.gd` (mocked-claim unit-level test acceptable now; full claim→build→report cycle is PROVISIONAL pending Villager AI).
 
 **Status**: [ ] Not yet created
 

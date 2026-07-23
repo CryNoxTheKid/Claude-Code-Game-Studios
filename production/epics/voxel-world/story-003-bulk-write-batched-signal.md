@@ -67,7 +67,7 @@
 ## Test Evidence
 
 **Story Type**: Logic
-**Required evidence**: `tests/unit/voxel_world/bulk_write_batched_signal_test.gd` — must exist and pass
+**Required evidence**: neues-spiel/`tests/unit/voxel_world/bulk_write_batched_signal_test.gd` — must exist and pass
 **Status**: [ ] Not yet created
 
 ---

@@ -64,7 +64,7 @@
 ## Test Evidence
 
 **Story Type**: Logic
-**Required evidence**: `tests/unit/time_tick_system/max_ticks_cap_test.gd` (GdUnit4) — deterministic; must pass.
+**Required evidence**: neues-spiel/`tests/unit/time_tick_system/max_ticks_cap_test.gd` (GdUnit4) — deterministic; must pass.
 
 **Status**: [ ] Not yet created
 

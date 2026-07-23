@@ -73,7 +73,7 @@
 ## Test Evidence
 
 **Story Type**: Logic
-**Required evidence**: `tests/unit/time_tick_system/tick_accumulator_test.gd` (GdUnit4) — deterministic 10k-tick harness at fixed `raw_delta`; must pass; drift-corpus runtime kept under the CI ≤60 s budget.
+**Required evidence**: neues-spiel/`tests/unit/time_tick_system/tick_accumulator_test.gd` (GdUnit4) — deterministic 10k-tick harness at fixed `raw_delta`; must pass; drift-corpus runtime kept under the CI ≤60 s budget.
 
 **Status**: [ ] Not yet created
 

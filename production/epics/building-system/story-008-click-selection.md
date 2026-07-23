@@ -69,7 +69,7 @@
 ## Test Evidence
 
 **Story Type**: Integration
-**Required evidence**: `tests/integration/building_system/click_selection_test.gd` OR documented playtest (project-resolution unit-testable now; full arbitration integration verified with the input arbitration owner).
+**Required evidence**: neues-spiel/`tests/integration/building_system/click_selection_test.gd` OR documented playtest (project-resolution unit-testable now; full arbitration integration verified with the input arbitration owner).
 
 **Status**: [ ] Not yet created
 

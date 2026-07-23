@@ -65,7 +65,7 @@
 ## Test Evidence
 
 **Story Type**: Config/Data (validation of a data reference; asserts on the structured result)
-**Required evidence**: `tests/unit/resource_item_database/visual_asset_validation_test.gd` (GdUnit4) — synthetic broken-load and null-field fixtures; asserts distinct structured-result diagnostics. Must pass. (Classified with the validation-logic suite; a smoke check against shipped data lands in Story 009.)
+**Required evidence**: neues-spiel/`tests/unit/resource_item_database/visual_asset_validation_test.gd` (GdUnit4) — synthetic broken-load and null-field fixtures; asserts distinct structured-result diagnostics. Must pass. (Classified with the validation-logic suite; a smoke check against shipped data lands in Story 009.)
 
 **Status**: [ ] Not yet created
 

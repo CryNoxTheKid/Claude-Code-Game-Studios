@@ -69,7 +69,7 @@
 ## Test Evidence
 
 **Story Type**: Logic
-**Required evidence**: `tests/unit/resource_item_database/item_definition_immutability_test.gd` (GdUnit4) — factory-built fixture entries (no inline magic numbers except boundary cases); must pass.
+**Required evidence**: neues-spiel/`tests/unit/resource_item_database/item_definition_immutability_test.gd` (GdUnit4) — factory-built fixture entries (no inline magic numbers except boundary cases); must pass.
 
 **Status**: [ ] Not yet created
 

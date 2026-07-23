@@ -73,7 +73,7 @@
 ## Test Evidence
 
 **Story Type**: Logic
-**Required evidence**: `tests/unit/camera_input/camera_config_spherical_derivation_test.gd` — must exist and pass
+**Required evidence**: neues-spiel/`tests/unit/camera_input/camera_config_spherical_derivation_test.gd` — must exist and pass
 **Status**: [ ] Not yet created
 
 ---

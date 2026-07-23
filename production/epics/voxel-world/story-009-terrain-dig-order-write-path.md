@@ -69,7 +69,7 @@
 ## Test Evidence
 
 **Story Type**: Integration
-**Required evidence**: `tests/integration/voxel_world/terrain_dig_order_test.gd` OR documented playtest — must exist and pass
+**Required evidence**: neues-spiel/`tests/integration/voxel_world/terrain_dig_order_test.gd` OR documented playtest — must exist and pass
 **Status**: [ ] Not yet created
 
 ---

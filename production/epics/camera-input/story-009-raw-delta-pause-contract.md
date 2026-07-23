@@ -73,7 +73,7 @@
 ## Test Evidence
 
 **Story Type**: Integration
-**Required evidence**: `tests/integration/camera_input/raw_delta_pause_contract_test.gd` OR documented playtest — must exist and pass
+**Required evidence**: neues-spiel/`tests/integration/camera_input/raw_delta_pause_contract_test.gd` OR documented playtest — must exist and pass
 **Status**: [ ] Not yet created
 
 ---

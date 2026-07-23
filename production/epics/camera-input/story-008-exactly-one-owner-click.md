@@ -72,7 +72,7 @@
 ## Test Evidence
 
 **Story Type**: Integration
-**Required evidence**: `tests/integration/camera_input/exactly_one_owner_click_test.gd` OR documented playtest — must exist and pass
+**Required evidence**: neues-spiel/`tests/integration/camera_input/exactly_one_owner_click_test.gd` OR documented playtest — must exist and pass
 **Status**: [ ] Not yet created
 
 ---

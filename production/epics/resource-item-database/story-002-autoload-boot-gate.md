@@ -72,7 +72,7 @@
 ## Test Evidence
 
 **Story Type**: Integration
-**Required evidence**: `tests/integration/resource_item_database/boot_gate_test.gd` (GdUnit4) — instantiate via `Node.new()`, inject a mock config/data path, call `setup()` directly; assert states and the `validation_complete` emission without Autoload registration. Must pass.
+**Required evidence**: neues-spiel/`tests/integration/resource_item_database/boot_gate_test.gd` (GdUnit4) — instantiate via `Node.new()`, inject a mock config/data path, call `setup()` directly; assert states and the `validation_complete` emission without Autoload registration. Must pass.
 
 **Status**: [ ] Not yet created
 

@@ -73,7 +73,7 @@
 ## Test Evidence
 
 **Story Type**: Logic
-**Required evidence**: `tests/unit/villager_ai/deterministic_position_test.gd` — must exist and pass.
+**Required evidence**: neues-spiel/`tests/unit/villager_ai/deterministic_position_test.gd` — must exist and pass.
 
 **Status**: [ ] Not yet created
 

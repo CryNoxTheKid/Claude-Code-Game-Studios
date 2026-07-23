@@ -66,7 +66,7 @@
 ## Test Evidence
 
 **Story Type**: Logic
-**Required evidence**: `tests/unit/camera_input/multiplicative_zoom_test.gd` — must exist and pass
+**Required evidence**: neues-spiel/`tests/unit/camera_input/multiplicative_zoom_test.gd` — must exist and pass
 **Status**: [ ] Not yet created
 
 ---
