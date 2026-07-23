@@ -6,7 +6,7 @@
 > **Slice input**: prototypes/last-seal-vertical-slice/REPORT.md — "direction right, mood lacking" drives §5.3/§5.6/§6.5
 > **Foundation**: `design/art/visual-direction-note.md` (2026-07-09 interim anchor — this bible supersedes it as the production reference; the note's rules carry forward unless explicitly revised here)
 > **World scale**: LARGE (2000×2000×32, ADR-0014) — all sections must hold at expedition distance, not just settlement-camera distance
-> **AD-ART-BIBLE sign-off**: skipped — Lean mode (required before the Pre-Production → Production gate, not before Pre-Production entry)
+> **AD-ART-BIBLE sign-off**: **APPROVED** 2026-07-23 (retroactive, recorded during the Pre-Production → Production gate check's AD-PHASE-GATE panel; rationale: complete, self-consistent, closes the mood-gap debrief finding with specifics, standards/prohibitions enforceable as written — remaining gaps are follow-on artifacts outside the bible's scope)
 
 ---
 
