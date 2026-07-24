@@ -83,3 +83,106 @@ Ordered by leverage. Decisions first — two of them gate everything downstream.
 | 4 | Define the #13 stability observation window | producer | S8 |
 | 5 | Confirm #5 closure basis (certification vs vox-016/017) | producer + TD | S8 |
 | 6 | Re-baseline the M01 calendar estimate now the loop has landed (S6 action item) | producer | S8 |
+
+---
+
+## CD Scope Ruling (2026-07-25)
+
+> **Status: PROVISIONAL — pending user ratification (away-mode).** This is the Creative
+> Director's scope ruling on criteria #6 and #7, made under delegated authority. It is
+> binding on S8 planning only once the user ratifies. The razor applied is the **milestone
+> goal** — *"prove the Foundation/Core build-and-inhabit loop is sound"* — **not** the
+> criteria's as-written feature breadth. Where the two diverge, the goal wins.
+
+### The razor, stated once
+
+M01 exists to prove the *forward loop* on the production codebase: **the player draws a
+building → workers build it → villagers navigate and live in it without getting stuck.**
+"Sound" means: the player can perform the core verb, and the loop cannot deadlock a
+villager. It does **not** mean every lifecycle branch (edit-after-built, tear-down,
+pause) or every comfort tier is present — those are breadth, and breadth is M02's job.
+
+---
+
+### Criterion #6 — Building System playable
+
+**IN M01 (loop-critical — the core verb itself):**
+- **`024` wall tool** (1d), **`025` floor tool** (0.5d), **`026` roof tool** (1d),
+  **`027` block tool, place mode only** (0.5d) — **~3 ad total.**
+
+**Rationale:** The landed loop feeds *generic* cells into the commit pipeline
+programmatically. The **pipeline is proven; the player-facing verb is not** — a player
+literally cannot draw a wall yet. The milestone goal says *"the player draws a building"*;
+a building is walls + floor + roof (the unique hook: *"draw walls/roof/floor to make an
+enclosed room"*; Pillar 1: *"the building IS the game"*). Placing a house block-by-block
+is precisely what the anti-pillar forbids (*"NOT a free voxel-editor"*). Without these
+four verbs, M01 **cannot demonstrate its own headline goal at the review**. They are thin
+— rasterizers that emit cell-sets into the already-landed pipeline (024 depends on the
+landed 020/021/022) — so 3 ad buys the entire core verb.
+- *Marginal lever:* `026` roof is the single most-deferrable of the four — its *mechanical*
+  payoff (roofed+floored+walkable = livable) is Build-Validation, which is M02 regardless.
+  If S8 runs tight, dropping roof to M02 is the clean cut; walls+floor+block still prove
+  the draw-a-shelter verb. I recommend keeping it (a roofless demo undersells Pillar 1 for
+  1 day), but flag it as the honest release valve.
+- `027` ships **place-only** in M01; its remove mode routes to the removal-tool branch
+  (`031`/`015`), which follows demolition into M02.
+
+**DEFERRED to M02 (lifecycle breadth — proves ADR-0016 completeness, not loop soundness):**
+- **`007` change-orders** (edit an already-built project), **`009` block demolition**
+  (tear-down), **`006` pause/resume**, **`008` click-selection**, plus the non-loop-critical
+  remainder (furniture `016/017/028`, dig/mining `013/014`, Abriss `010`, tool-batch `018`,
+  removal-tool `031/015`).
+- *Why:* change-orders and demolition are the *reverse/edit* verbs. The forward loop
+  (draw → build → done) is sound without them. They are named in #6-as-written but fall on
+  the breadth side of the razor. This is the ~6–8 ad the review sized as "only if the ruling
+  holds it" — **it does not.**
+
+---
+
+### Criterion #7 — Villager AI playable (anti-stuck)
+
+**IN M01 (safety-critical — guarantees no permanent stuck; the goal's literal
+"without getting stuck"):**
+- **`014` rescue-target BFS** (1d), **`015` unstuck watchdog + F3 telemetry** (1d),
+  **`016` seal-prevention + livelock escape** (1d) — **~3 ad total.**
+
+**Rationale + a load-bearing correction:** The review's "minimum `015` + `016`" is
+**under-scoped by one story.** `015` (the watchdog) *hard-depends* on `014` — it calls
+the F5 rescue-BFS for its teleport target (see `015` Implementation Notes / Dependencies).
+You cannot ship the watchdog without a rescue target. The true safety base is **014 + 015 +
+016**: together they *guarantee* a villager can never be permanently stuck (watchdog) and a
+player's build can never entrap one (seal-prevention). This is the exact failure mode the
+slice testers flagged #1 (worker-stuck events), and it maps directly to the milestone goal.
+`015` also carries the **F3 telemetry** the criterion names explicitly. This is the
+non-negotiable spine of #7 and must land in M01.
+
+**DEFERRED to M02 (comfort tier — reduces temporary blocks, does not affect soundness):**
+- **`013` nudge-aside** (~1d). It handles a *builder-waits-for-an-idle-occupant* case
+  (comfort/flow), not a permanent-stuck case — `014/015/016` already guarantee recovery.
+- *Watch-item (named trigger to pull it forward):* `013` and `019` (idle wandering, the #9
+  Sub-B item) are **both** deferred. Together that leaves a seam: an idle villager parked in
+  a builder's only target cell will stall that *build cell* (not the villager — the watchdog
+  only rescues Traveling/Working agents with zero legal step, which this isn't). If S8
+  playtesting surfaces builders visibly frozen on an idle parker, **pull `013` forward** — it
+  is the direct fix and is only 1 ad. Absent that signal, it stays M02.
+
+---
+
+### Sizing this ruling produces
+
+- #6 trimmed: **~3 ad** (four tools) vs. ~9–11 ad as-written (tools + change-orders + demolition).
+- #7 trimmed: **~3 ad** (014/015/016) vs. ~4 ad full ladder (adds 013).
+- Combined loop-critical scope for #6+#7: **~6 ad**, down from the review's strict-as-written
+  ~18–22. With #4 (~1.5 ad) and #12 (~2–3 ad + remediation risk) this lands the M01 close
+  inside **~1 sprint (S8)**, confirming the review's "collapses toward ~1 sprint if trimmed."
+
+### Design test — how we'll know this ruling was right
+- **#6:** at the M01 review, a player (not a test harness) can draw a walled, floored,
+  roofed room, watch workers build it, and a villager moves in. If that demo is possible,
+  Pillar 1 is proven at milestone scale.
+- **#7:** across the S8 stability window, F3's `villager_unstuck` telemetry shows the
+  watchdog firing and recovering agents, and no villager remains permanently stuck. If the
+  counter works and no permanent-stuck is observed, the goal's "without getting stuck" holds.
+- **The deferrals were right if** M02 can add change-orders/demolition/013 as clean additive
+  work with zero rework to the M01 core — which the story dependency graph indicates (they
+  attach to stable pipeline/claim-release seams, not to their internals).
