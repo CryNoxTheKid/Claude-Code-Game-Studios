@@ -349,8 +349,18 @@ func test_tick_state_dispatches_without_error_for_every_state() -> void:
 	# structure. Story villager-ai-006 gives the `State.DECIDING` branch's
 	# gated body real priority-list behaviour when runnable — covered by its
 	# own `tests/unit/villager_ai/priority_decision_loop_test.gd`, not here.
+	# Story villager-ai-012 gives the `State.WORKING` branch real behaviour
+	# too ([method VillagerAi._tick_working]) — a genuinely mid-construction
+	# claim (`_claimed_blueprint_cell` still UNDER_CONSTRUCTION) is the
+	# no-op case that leaves state unchanged, exactly like every other
+	# still-a-stub branch here; the BUILT/revoked-transition branches are
+	# `build_job_cycle_test.gd`'s own scope, not this structural-dispatch
+	# test's.
 	var villager: VillagerAi = auto_free(VillagerAi.new())
 	villager.scheduler = VillagerDecidingScheduler.new()
+	villager._claimed_blueprint_cell = BlueprintCell.new(
+		Vector3i(0, 0, 0), BlueprintCell.MicroState.UNDER_CONSTRUCTION
+	)
 	var all_states: Array = [
 		VillagerAi.State.DECIDING, VillagerAi.State.TRAVELING, VillagerAi.State.WORKING,
 		VillagerAi.State.SLEEPING, VillagerAi.State.BREATHER, VillagerAi.State.WANDERING,

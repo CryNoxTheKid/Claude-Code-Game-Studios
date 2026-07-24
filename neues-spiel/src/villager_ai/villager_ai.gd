@@ -245,6 +245,33 @@
 ## every earlier story's own position-model unit tests (which call [method
 ## _process] directly without ever wiring [member time_tick_system]) keep
 ## passing unchanged.
+##
+## Story villager-ai-012 (this revision) implements [method _tick_working]
+## itself -- the CLOSED job loop (GDD Rule 5/[TR-villager-ai-behavior-054],
+## Edge Case 4/[TR-villager-ai-behavior-083]): "work progress accrues only
+## while on site," and "a job revoked mid-work stops at the tick boundary,
+## no failure reaction, re-enters Deciding." This class owns NO
+## progress-crediting mechanism of its own -- that stays [ConstructionTickLoop]'s
+## job, per its own doc comment -- the on-site GATE on that crediting is
+## wired for real, against actual villager positions, by the new
+## [VillagerOnSiteGate] collaborator (composing Rule 5's on-site predicate
+## with Building System Edge Case 6/AC40b's occupied-cell defer behind the
+## SAME `set_occupancy_predicate` seam both landed classes already reserved
+## for this exact story). [method _tick_working] itself is purely
+## OBSERVATIONAL: it reads [member _claimed_blueprint_cell]'s CURRENT
+## [member BlueprintCell.state] -- the SAME shared reference
+## [ConstructionTickLoop] mutates directly -- to detect completion (BUILT,
+## AC40) or revocation (anything but UNDER_CONSTRUCTION/BUILT, AC33) without
+## a second query back into [member job_queue]. [member
+## _claimed_blueprint_cell] is set the moment a claim succeeds ([method
+## _attempt_claim_and_travel_to_job], BEFORE travel even starts -- the
+## on-site gate must already exist for the full travel period too, since
+## [method ConstructionTickLoop.claim_job] flips a cell to
+## UNDER_CONSTRUCTION immediately at claim time) and cleared by [method
+## _release_job_claim] (the ONE existing helper every claim-relinquishing
+## path -- need-preemption, pathing failure, and this story's own
+## completion/revocation handling -- already funnels through, so it never
+## goes stale).
 class_name VillagerAi
 extends Node
 
@@ -544,6 +571,19 @@ var _tick_count: int = 0
 ## attempt occurs").
 var _unreachable_retry_after_tick: Dictionary[Vector3i, int] = {}
 
+## The [BlueprintCell] this villager currently holds a claim on while
+## [member _pursued_activity] == [constant PursuedActivity.WORK] (Story
+## villager-ai-012) -- the SAME shared reference [ConstructionTickLoop]
+## itself mutates directly (that class's own doc comment: "visible through
+## any other holder of the SAME RefCounted reference"), so [method
+## _tick_working] can read the REAL, live construction-progress state
+## without a second query back into [member job_queue]. `null` whenever no
+## claim is held (every state but Working, and Working itself immediately
+## after completion/abandonment clears it back to `null`). See this class's
+## own doc comment's villager-ai-012 paragraph for the full set/clear
+## lifecycle.
+var _claimed_blueprint_cell: BlueprintCell = null
+
 
 ## Explicitly callable wiring/validation entry point (ADR-0001). Asserts
 ## [member config], [member voxel_world], and a
@@ -618,6 +658,15 @@ func get_state() -> State:
 ## lands.
 func get_pursued_activity() -> PursuedActivity:
 	return _pursued_activity
+
+
+## Read-only observability seam (Story villager-ai-012) -- the cell address
+## of [member _claimed_blueprint_cell], or `null` if this villager holds no
+## claim right now. [VillagerOnSiteGate] is the real consumer: it has no
+## other way to learn WHICH registered villager is the assigned worker for
+## an arbitrary cell it is asked to gate.
+func get_claimed_job_cell() -> Variant:
+	return null if _claimed_blueprint_cell == null else _claimed_blueprint_cell.cell
 
 
 ## Returns this villager's stable identity/processing-order index (see
@@ -1074,12 +1123,21 @@ func _has_available_job() -> bool:
 
 
 ## Graceful-preemption claim release (GDD Rule 3/[TR-villager-ai-behavior-050]
-## "releases its job claim back to the queue"). Only ever called from
-## [method _tick_deciding]'s tier-1 branch when [member _pursued_activity]
-## was `WORK` -- i.e. only when a claim could plausibly be held. A no-op
-## when [member job_queue] was never wired (mocked-boundary nil-safety, same
-## as [method _has_urgent_need]/[method _has_available_job]).
+## "releases its job claim back to the queue"). Called from [method
+## _tick_deciding]'s tier-1 branch when [member _pursued_activity] was
+## `WORK`, from [method _abandon_travel]'s WORK branch (pathing failure to a
+## claimed job), and from this story's own [method _complete_claimed_job]/
+## [method _abandon_claimed_job] (job completion/revocation, story
+## villager-ai-012) -- i.e. only when a claim could plausibly be held.
+## Story villager-ai-012 (this revision): ALSO clears [member
+## _claimed_blueprint_cell] back to `null` unconditionally, regardless of
+## whether [member job_queue] is wired -- every one of this method's callers
+## is relinquishing a claim, so this field must never outlive the claim it
+## refers to. A no-op on the [member job_queue] side when it was never
+## wired (mocked-boundary nil-safety, same as [method _has_urgent_need]/
+## [method _has_available_job]).
 func _release_job_claim() -> void:
+	_claimed_blueprint_cell = null
 	if job_queue == null:
 		return
 	@warning_ignore("unsafe_method_access")
@@ -1211,6 +1269,11 @@ func _attempt_claim_and_travel_to_job() -> bool:
 		if not result.has_selection():
 			return false
 		if _claim_job(result.chosen.cell):
+			# Story villager-ai-012: recorded BEFORE travel starts -- Rule 5's
+			# on-site gate must already exist for the FULL travel period, not
+			# only once Working begins, since ConstructionTickLoop.claim_job
+			# already flipped this cell to UNDER_CONSTRUCTION.
+			_claimed_blueprint_cell = result.chosen
 			_pursued_activity = PursuedActivity.WORK
 			start_traveling(result.chosen.cell, State.WORKING)
 			return true
@@ -1384,9 +1447,76 @@ func _clear_travel_state() -> void:
 	_intra_tick_progress = 0.0
 
 
-## Working-state tick body -- stub (later work-progress story).
+## Working-state tick body (Story villager-ai-012; GDD Rule 5/[TR-villager-
+## ai-behavior-054], Edge Case 4/[TR-villager-ai-behavior-083]). This class
+## owns NO progress-crediting logic of its own -- [ConstructionTickLoop]'s
+## own [signal TimeTickSystem.tick] handler (gated on this villager's REAL
+## on-site position via [VillagerOnSiteGate]'s composed occupancy predicate,
+## see that class's own doc comment) is the SOLE place a tick actually gets
+## credited (AC12/AC13). This method's own job is purely OBSERVATIONAL: read
+## [member _claimed_blueprint_cell]'s CURRENT [member BlueprintCell.state] --
+## the SAME shared reference [ConstructionTickLoop] mutates directly -- and
+## react to whichever of the three outcomes it now holds:
+## - [constant BlueprintCell.MicroState.BUILT]: the job completed -- [method
+##   _complete_claimed_job] (AC40: "the job is removed from the real
+##   queue... villager re-enters Deciding").
+## - [constant BlueprintCell.MicroState.UNDER_CONSTRUCTION]: still in
+##   progress -- a no-op; nothing for this method to do while
+##   [ConstructionTickLoop] keeps crediting (or deferring, per Rule 5/
+##   Building Edge Case 6/this story's AC40b) on its own schedule.
+## - Anything else ([constant BlueprintCell.MicroState.PLANNED] -- released
+##   back by an external revocation, or [constant
+##   BlueprintCell.MicroState.CANCELED] -- a project-level cancel mid-work):
+##   the job was revoked out from under this villager (AC33/Edge Case 4) --
+##   [method _abandon_claimed_job] (no failure reaction, clean re-decide;
+##   bookkeeping was already cleared by the revocation itself, per this
+##   story's own Implementation Notes, so this branch never calls [method
+##   _release_job_claim]/[method _report_job_unreachable] again).
+## A `null` [member _claimed_blueprint_cell] (defensive -- should not occur
+## by construction, since [member _state] only ever reaches `WORKING` via a
+## successful claim that sets this field first) is treated identically to
+## the revoked case -- never a crash.
 func _tick_working() -> void:
-	pass
+	if _claimed_blueprint_cell == null:
+		_abandon_claimed_job()
+		return
+	match _claimed_blueprint_cell.state:
+		BlueprintCell.MicroState.BUILT:
+			_complete_claimed_job()
+		BlueprintCell.MicroState.UNDER_CONSTRUCTION:
+			pass
+		_:
+			_abandon_claimed_job()
+
+
+## Successful job completion (Story villager-ai-012, AC40's final stage):
+## clears this villager's own claim bookkeeping via [method
+## _release_job_claim] -- [ConstructionTickLoop]'s own completion write does
+## NOT clean up [ConstructionJobQueue]'s `_claims_by_villager` entry (that
+## class has no concept of [ConstructionJobQueue] at all, see its own doc
+## comment), so this villager must release its OWN claim explicitly here, or
+## a future claim attempt would wrongly find this villager still "holding a
+## claim" -- before re-entering Deciding.
+func _complete_claimed_job() -> void:
+	_release_job_claim()
+	_pursued_activity = PursuedActivity.NONE
+	_state = State.DECIDING
+	request_deciding_pass()
+
+
+## Revoked-mid-work handling (Story villager-ai-012, AC33/Edge Case 4): no
+## failure reaction, clean re-decide. Deliberately does NOT call [method
+## _release_job_claim]/[method _report_job_unreachable] -- the revocation
+## itself already cleared this villager's claim bookkeeping (this story's
+## own Implementation Notes: "Job revocation clears claim bookkeeping via
+## the revocation itself"); calling either again here would be, at best,
+## redundant, and at worst would wrongly report a legitimate revocation as
+## an unreachable-job PATHING failure (Rule 6), which it is not.
+func _abandon_claimed_job() -> void:
+	_claimed_blueprint_cell = null
+	_pursued_activity = PursuedActivity.NONE
+	_state = State.DECIDING
+	request_deciding_pass()
 
 
 ## Sleeping-state tick body -- stub (later needs/sleep story).

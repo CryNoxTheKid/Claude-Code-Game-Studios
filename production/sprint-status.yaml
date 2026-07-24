@@ -69,7 +69,7 @@ stories:
     name: "On-site work & full claim→build→report cycle — THE CROWN (criterion #2)"
     file: "production/epics/villager-ai-behavior/story-012-onsite-work-build-cycle.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete
     owner: "ai-programmer"
     estimate_days: 1.0
     blocker: "sequenced LAST — depends on villager-ai-011 (in-sprint) + real building-030 (in-sprint) for the AC40 integration test"

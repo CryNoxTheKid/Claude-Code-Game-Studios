@@ -1,7 +1,7 @@
 # Story 012: On-site work & full claim→build→report cycle
 
 > **Epic**: Villager AI & Behavior
-> **Status**: Ready
+> **Status: Complete (2026-07-24 — 758/758 suite green, parent-verified — SPRINT 7 CROWN: closed job loop, milestone criterion #2 met; resolves building-030 AC21/AC36b)
 > **Layer**: Core
 > **Type**: Integration
 > **Estimate**: ~1 agent-day

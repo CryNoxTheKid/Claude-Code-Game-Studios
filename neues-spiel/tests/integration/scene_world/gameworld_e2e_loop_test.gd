@@ -23,24 +23,26 @@
 ##   `dda_placement_pick_test.gd`'s established analytic-yaw camera rig, cam-005
 ##   precedent for driving a real [CameraInput] headlessly) through
 ##   [PlacementPick]'s real DDA -> [CommitPipeline]'s real commit ->
-##   [ConstructionTickLoop]'s real tick-driven completion — asserts the
-##   completion write lands in real Voxel World grid data AND fires exactly
-##   ONE `cell_changed` for the completion frame. (Deviation note: the
-##   landed `construction_tick_loop.gd`, story building-029, completes a job
-##   via the single-cell `VoxelWorldGrid.set_cell` path — NOT `bulk_write` —
-##   by its own explicit, documented design; batching same-frame completions
-##   into one `bulk_write`/`cells_changed_batch` is building-033's separate,
-##   not-yet-landed scope. This test asserts against the REAL signal the
-##   landed code actually fires, `cell_changed`, rather than a signal this
-##   path does not emit.)
+##   a REAL villager's own Deciding/F2/claim pass (Story villager-ai-012,
+##   see below) -> [ConstructionTickLoop]'s real tick-driven completion —
+##   asserts the completion write lands in real Voxel World grid data AND
+##   fires exactly ONE `cell_changed` for the completion frame. (Deviation
+##   note: the landed `construction_tick_loop.gd`, story building-029,
+##   completes a job via the single-cell `VoxelWorldGrid.set_cell` path —
+##   NOT `bulk_write` — by its own explicit, documented design; batching
+##   same-frame completions into one `bulk_write`/`cells_changed_batch` is
+##   building-033's separate, not-yet-landed scope. This test asserts
+##   against the REAL signal the landed code actually fires, `cell_changed`,
+##   rather than a signal this path does not emit.)
 ## - **AC-VILLAGER-WALKS**: a villager runs a REAL Deciding pass (005/006:
-##   scheduler dequeue -> priority-list commit to WORK against a mocked job
-##   queue), then — per this story's own Implementation Notes ("the test may
-##   seed a wander/travel target," since real job-site selection is Story
-##   010, not yet landed) — seeds a travel target directly into the REAL
-##   Traveling state machine (007 AStar3D path acquisition, 008/009 cell-by-
-##   cell following) to arrival, asserted purely on discrete `current_cell`
-##   transitions, never `_visual_position`.
+##   scheduler dequeue -> priority-list commit to WORK) against a REAL
+##   [ConstructionJobQueue]/[BuildProject] (Story villager-ai-012 smoke-item
+##   extension, Sprint 7 QA plan Call-out 5) -- F2 real nearest-reachable
+##   selection (010) atomically claims the real queued job (011), and the
+##   REAL Traveling state machine (007 AStar3D path acquisition, 008/009
+##   cell-by-cell following) drives it to arrival entirely on its own, never
+##   a manually-seeded travel target -- asserted purely on discrete
+##   `current_cell` transitions, never `_visual_position`.
 ## - **AC-E2E-GATE**: this file's own presence under
 ##   `tests/integration/scene_world/` (auto-discovered by
 ##   `tests/run-tests.cmd`'s `-a res://tests/integration` sweep — no separate
@@ -54,6 +56,21 @@
 ##   live against this engine install), which is exactly why every REAL
 ##   caller on this path stays statically `Array[Vector3i]`-typed end to end
 ##   (the AC-PLACE-A-BLOCK test above IS that real, never-crashing path).
+##
+## Story villager-ai-012 (this revision) replaces BOTH of this file's
+## previously-named seams (Sprint 7 QA plan Call-out 5): the manual
+## `loop.claim_job(target, 1)` call in AC-PLACE-A-BLOCK's own Act 2, and the
+## duck-typed `_MockJobQueue`/`villager.job_queue = jobs` assignment in
+## AC-VILLAGER-WALKS — both now go through the REAL
+## `BuildProject.release()` -> `ConstructionJobQueue` -> `VillagerAi`'s own
+## Deciding/F2/claim pass machinery `build_job_cycle_test.gd` proves in
+## isolation. Zero direct `.claim_job(` calls remain anywhere in this file
+## (grep-verified — see the smoke item's own edge case); `job_queue` is
+## still assigned per [VillagerAi]'s own documented DI pattern (its own doc
+## comment: "deliberately NOT `@export`ed... assigned directly by whichever
+## code assembles the population"), but every remaining assignment now
+## points at a REAL [ConstructionJobQueue] populated via the real release/
+## eligibility flow (004), never a duck-typed mock.
 class_name GameworldE2eLoopTest
 extends GdUnitTestSuite
 
@@ -63,46 +80,6 @@ const GameWorldScene: PackedScene = preload("res://src/scene_world_management/ga
 # ---------------------------------------------------------------------------
 # Test doubles (inner helper classes — kept ABOVE every test function)
 # ---------------------------------------------------------------------------
-
-## Minimal Building-System-job-queue-shaped test double (mocked boundary,
-## mirrors `traveling_repath_test.gd`'s own `MockJobQueue` precedent) — lets
-## a real Deciding pass commit to `PursuedActivity.WORK` and, since Story
-## villager-ai-011 wired the real F2-select + atomic-claim + travel handshake
-## into tier 2, now also supplies `get_available_jobs`/`claim_job`/
-## `report_unreachable` so that real handshake has something to select and
-## claim (this test's own AC-VILLAGER-WALKS still seeds the actual travel
-## TARGET directly in Act 2, per its own established Implementation Notes —
-## Story 010's real job-SITE selection is a separate concern from this
-## story's claim mechanics, both mocked/seeded here alike; the extension to
-## a fully real, unmocked queue is Story villager-ai-012's own smoke-item
-## scope, Sprint 7 QA plan Call-out 5).
-class _MockJobQueue:
-	var available: bool = false
-	var jobs: Array[BlueprintCell] = []
-	var _claimed_by: Dictionary[Vector3i, int] = {}
-
-	func has_available_job() -> bool:
-		return available
-
-	func get_available_jobs() -> Array[BlueprintCell]:
-		var result: Array[BlueprintCell] = []
-		for job: BlueprintCell in jobs:
-			if not _claimed_by.has(job.cell):
-				result.append(job)
-		return result
-
-	func claim_job(cell: Vector3i, villager_id: int) -> bool:
-		if _claimed_by.has(cell):
-			return false
-		_claimed_by[cell] = villager_id
-		return true
-
-	func release_claim(_villager_id: int) -> void:
-		pass
-
-	func report_unreachable(_cell: Vector3i) -> bool:
-		return true
-
 
 # ---------------------------------------------------------------------------
 # AC-ASSEMBLY — real GameWorld.tscn boots with all four tier-module groups
@@ -282,22 +259,75 @@ func test_ac_place_a_block_committed_through_real_pipeline_writes_voxel_world_an
 	assert_int(target.state).is_equal(BlueprintCell.MicroState.PLANNED)
 	assert_bool(grid.get_cell(target.cell).is_empty()).is_true()
 
-	# Act 2 -- the on-site job claim (Story 030's real worker-assignment AI
-	# is Sprint 7 scope, per this story's own Implementation Notes; the E2E
-	# test claims manually) + construction ticks to completion.
-	var claimed: bool = loop.claim_job(target, 1)
-	assert_bool(claimed).is_true()
+	# Act 2 -- Story villager-ai-012's real worker-assignment AI (Sprint 7 QA
+	# plan Call-out 5): the REAL Building System registry (BuildProject ->
+	# release() -> ConstructionJobQueue) plus a REAL claiming villager, its
+	# own Deciding/F2 pass, and the real on-site occupancy gate — never a
+	# manual `loop.claim_job(...)` call.
+	var project := BuildProject.new(1)
+	project.add_cell(target)
+	project.release()
+	var queue := ConstructionJobQueue.new(loop)
+	queue.add_project(project)
+	var gate := VillagerOnSiteGate.new(queue)
+
+	var predicate_source: VillagerAi = auto_free(VillagerAi.new())
+	predicate_source.voxel_world = grid
+	var nav_graph := VillagerNavGraph.new()
+	nav_graph.subscribe_to_voxel_world(grid, predicate_source)
+
+	var villager: VillagerAi = auto_free(VillagerAi.new())
+	villager.config = VillagerAIConfig.new()
+	villager.voxel_world = grid
+	villager.scheduler = VillagerDecidingScheduler.new()
+	villager.nav_graph = nav_graph
+	villager.time_tick_system = tick_source
+	villager.job_queue = queue
+	villager.villager_id = 1
+	# Starts standing exactly on the job's own cell -- this test's own focus
+	# is the commit -> construction-completion write, not travel (that is
+	# AC-VILLAGER-WALKS' own focus, below) -- an immediate-arrival claim
+	# (path.size() == 1) is sufficient here.
+	villager.current_cell = target.cell
+	villager._from_cell = villager.current_cell
+	villager._to_cell = villager.current_cell
+	villager.setup()
+	gate.register_villager(villager)
+	nav_graph.build(grid, predicate_source, target.cell, 5)
+
+	# Tick 1 -- the villager's own real Deciding pass: F2 selects the one
+	# available job (010), atomically claims it against the REAL queue
+	# (011), and arrives immediately (already standing on the cell).
+	tick_source.fire_tick()
 	assert_int(target.state).is_equal(BlueprintCell.MicroState.UNDER_CONSTRUCTION)
+	assert_int(villager.get_state()).is_equal(VillagerAi.State.WORKING)
+
+	# Ticks 2..N -- on-site (Rule 5/[TR-villager-ai-behavior-054]), so
+	# ConstructionTickLoop's own crediting (gated by VillagerOnSiteGate)
+	# advances normally to completion.
 	for _i in range(tick_loop_config.base_build_ticks_block):
 		tick_source.fire_tick()
 
 	# Assert -- the target cell is Built in REAL Voxel World grid data, and
 	# exactly one cell_changed fired for the completion frame (the landed
 	# building-029 write path -- single-cell set_cell, never bulk_write; see
-	# class doc comment's deviation note).
+	# class doc comment's deviation note). The closed loop also completes:
+	# the claim is released and the villager re-enters Deciding.
 	assert_int(target.state).is_equal(BlueprintCell.MicroState.BUILT)
 	assert_bool(grid.get_cell(target.cell).is_empty()).is_false()
 	assert_int(cell_changed_count[0]).is_equal(1)
+	# The villager re-enters the decision loop -- whether the exact terminal
+	# snapshot is DECIDING or WANDERING depends on whether Rule 2's own
+	# periodic decision_interval re-check (Story villager-ai-006, unrelated
+	# to this story) also lands on this same tick (see
+	# build_job_cycle_test.gd's AC40 test for the full explanation); either
+	# way it is no longer WORKING and no longer holds the claim.
+	var re_decided: bool = (
+		villager.get_state() == VillagerAi.State.DECIDING
+		or villager.get_state() == VillagerAi.State.WANDERING
+	)
+	assert_bool(re_decided).is_true()
+	assert_bool(queue.has_claim(1)).is_false()
 
 
 # ---------------------------------------------------------------------------
@@ -313,30 +343,42 @@ func test_ac_villager_walks_decides_paths_and_follows_cell_by_cell_to_arrival() 
 		for z in range(5):
 			grid.set_cell(Vector3i(x, 0, z), CellContents.new(1, 0))
 
+	var tick_source: MockTimeTickSystem = auto_free(MockTimeTickSystem.new())
+	var loop: ConstructionTickLoop = auto_free(ConstructionTickLoop.new())
+	loop.voxel_world = grid
+	loop.config = ConstructionTickLoopConfig.new()
+	loop.time_tick_system = tick_source
+	loop.setup()
+
+	# Story villager-ai-012 (Sprint 7 QA plan Call-out 5): a REAL released
+	# BuildProject/ConstructionJobQueue/VillagerOnSiteGate -- never the
+	# duck-typed `_MockJobQueue` this test used before Story villager-ai-010/
+	# 011/012 landed real F2/claim/on-site machinery.
+	var target_cell := Vector3i(4, 1, 0)
+	var project := BuildProject.new(1)
+	project.add_cell(BlueprintCell.new(target_cell))
+	project.release()
+	var queue := ConstructionJobQueue.new(loop)
+	queue.add_project(project)
+	var gate := VillagerOnSiteGate.new(queue)
+
 	var predicate_source: VillagerAi = auto_free(VillagerAi.new())
 	predicate_source.voxel_world = grid
 	var nav_graph := VillagerNavGraph.new()
+	# Wiring-order requirement (VillagerAi's own doc comment, load-bearing):
+	# subscribe the shared graph BEFORE this villager's own setup().
+	nav_graph.subscribe_to_voxel_world(grid, predicate_source)
 
 	var villager: VillagerAi = auto_free(VillagerAi.new())
 	villager.config = VillagerAIConfig.new()
 	villager.voxel_world = grid
 	villager.scheduler = VillagerDecidingScheduler.new()
-	var tick_source: MockTimeTickSystem = auto_free(MockTimeTickSystem.new())
 	villager.time_tick_system = tick_source
 	villager.nav_graph = nav_graph
-	# Wiring-order requirement (VillagerAi's own doc comment, load-bearing):
-	# subscribe the shared graph BEFORE this villager's own setup().
-	nav_graph.subscribe_to_voxel_world(grid, villager)
-	var jobs := _MockJobQueue.new()
-	jobs.available = true
-	# One step away from the villager's own starting cell -- enough for a
-	# real multi-step path (never the immediate-arrival `path.size() == 1`
-	# branch), so the real Deciding pass below lands in TRAVELING exactly as
-	# this test already asserted before Story villager-ai-011 wired the real
-	# claim/travel handshake into tier 2.
-	jobs.jobs = [BlueprintCell.new(Vector3i(1, 1, 0))]
-	villager.job_queue = jobs
+	villager.job_queue = queue
+	villager.villager_id = 1
 	villager.setup()
+	gate.register_villager(villager)
 
 	nav_graph.build(grid, predicate_source, Vector3i(2, 1, 2), 5)
 
@@ -344,31 +386,27 @@ func test_ac_villager_walks_decides_paths_and_follows_cell_by_cell_to_arrival() 
 	villager._from_cell = villager.current_cell
 	villager._to_cell = villager.current_cell
 
-	# Act 1 -- a REAL Deciding pass (005/006): the villager is already queued
+	# Act -- a REAL Deciding pass (005/006): the villager is already queued
 	# (setup()'s own initial-eligible-at-boot call); one real tick lets the
 	# shared scheduler dequeue it under its budget and run the real
-	# priority-list evaluation, which commits to WORK against the mocked
-	# available job (Story 010's real job-site selection is not yet landed).
+	# priority-list evaluation, which now (Story villager-ai-010/011 landed)
+	# selects (F2) and atomically claims (against the REAL
+	# ConstructionJobQueue) the SAME real job, entirely on its own -- never a
+	# manually-seeded travel target.
 	assert_bool(villager.scheduler.is_queued(villager.villager_id)).is_true()
 	tick_source.fire_tick()
 	assert_int(villager.get_pursued_activity()).is_equal(VillagerAi.PursuedActivity.WORK)
 	assert_int(villager.get_state()).is_equal(VillagerAi.State.TRAVELING)
+	assert_vector(Vector3(villager.get_claimed_job_cell())).is_equal(Vector3(target_cell))
 
-	# Act 2 -- path acquisition (007) + cell-by-cell following (008/009): job-
-	# SITE selection is Story 010's scope (not landed) -- per this story's own
-	# Implementation Notes ("the test may seed a wander/travel target"), the
-	# travel target is seeded directly here, then the REAL Traveling state
-	# machine drives it to arrival.
-	var target_cell := Vector3i(4, 1, 0)
-	var started: bool = villager.start_traveling(target_cell, VillagerAi.State.WORKING)
-	assert_bool(started).is_true()
-	assert_int(villager.get_state()).is_equal(VillagerAi.State.TRAVELING)
-
+	# Cell-by-cell following (008/009) to arrival -- driven purely by firing
+	# the SAME shared tick signal (never a manual `_on_tick()` poke), matching
+	# the assembled scene's own real dispatch path.
 	var max_ticks: int = 20
 	var ticks_elapsed: int = 0
 	while villager.get_current_cell() != target_cell and ticks_elapsed < max_ticks:
 		villager.advance_travel_progress(1000.0)
-		villager._on_tick()
+		tick_source.fire_tick()
 		ticks_elapsed += 1
 
 	# Assert -- discrete current_cell transitions ending at the target, never
