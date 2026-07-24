@@ -23,7 +23,7 @@ stories:
     name: "Procedural terrain generation + single batched gen signal"
     file: "production/epics/voxel-world/story-006-procedural-terrain-generation.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete-for-dev
     owner: "godot-gdscript-specialist"
     estimate_days: 1
     blocker: ""

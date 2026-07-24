@@ -1,12 +1,12 @@
 # Story 006: Procedural terrain generation + single batched gen signal
 
 > **Epic**: Voxel World / Grid Data
-> **Status**: Ready
+> **Status: Complete (2026-07-24 — 319/319 suite green, parent-verified)
 > **Layer**: Foundation
 > **Type**: Logic
 > **Estimate**: 1 day
 > **Manifest Version**: 2026-07-23
-> **Last Updated**: (set by /dev-story)
+> **Last Updated**: 2026-07-24
 
 ## Context
 
@@ -80,7 +80,7 @@
 
 **Story Type**: Logic
 **Required evidence**: neues-spiel/`tests/unit/voxel_world/procedural_terrain_generation_test.gd` — must exist and pass
-**Status**: [ ] Not yet created
+**Status**: [x] Created — 8 test functions, full suite green (see `/dev-story` implementation summary)
 
 ---
 

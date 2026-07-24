@@ -89,6 +89,18 @@ const FREQUENCY_MAX: float = 0.2
 ## default: 0.05; Story 006 scope). [TR-voxel-world-023]
 @export var frequency: float = 0.05
 
+## Deterministic seed for [method VoxelWorldGrid.generate_terrain]'s
+## `noise2D` (TR-voxel-world-039: "deterministic, seeded 2D noise function").
+## Not itself a named row in the GDD's Tuning Knobs table (added this story
+## to satisfy TR-voxel-world-039's seeding requirement without a hardcoded
+## literal, per ADR-0002's "data-driven, never hardcoded" mandate) -- any
+## `int` is a valid seed, so [method validate] applies no range check here.
+## Two [VoxelWorldGrid.generate_terrain] runs with the same [member
+## terrain_seed] (and otherwise-identical config) produce byte-identical
+## terrain; a different seed produces different terrain (ADR-0015's
+## deterministic-seeded-regen premise). [TR-voxel-world-039] [TR-voxel-world-023]
+@export var terrain_seed: int = 12345
+
 
 ## See [ConfigResource.validate]. Clamps every ranged knob to its
 ## GDD-documented safe bound in place (the sole sanctioned runtime write to

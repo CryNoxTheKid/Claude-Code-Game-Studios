@@ -26,9 +26,15 @@
 ## [method get_cell] (ADR-0004 Decision, ADR-0014 Decision Section 4;
 ## TR-voxel-world-017/049/018) -- no physics API of any kind is used for
 ## picking anywhere in this file (grep-verified by
-## `tests/integration/voxel_world/dda_raycast_test.gd`). Procedural terrain
-## generation using [member VoxelWorldConfig.base_height]/`amplitude`/
-## `frequency` remains Story 006's scope.
+## `tests/integration/voxel_world/dda_raycast_test.gd`).
+##
+## Story 006 (this revision) adds [method generate_terrain] -- procedural
+## terrain fill (GDD Formulas' `procedural_terrain_height`, TR-voxel-world-038/
+## 039) writing through [method bulk_write] (ADR-0014 Implementation Notes: at
+## most ONE batched signal, TR-voxel-world-044) and the [enum GridState]
+## Uninitialized->Generated lifecycle transition (TR-voxel-world-029). Meshing
+## the generated terrain (Story 007/015) and removing it via dig orders
+## (Story 009) remain out of this class's scope.
 class_name VoxelWorldGrid
 extends Node
 
@@ -38,6 +44,30 @@ extends Node
 ## configured vertical extent (no vertical chunking), matching the reference
 ## `prototypes/last-seal-vertical-slice/voxel_world.gd`'s `CHUNK`.
 const CHUNK_SIZE: int = 16
+
+## System lifecycle state (GDD "System lifecycle, not per-cell state" table,
+## TR-voxel-world-029) -- [constant UNINITIALIZED] is this grid's state at
+## construction, before [method generate_terrain] has ever run;
+## [constant GENERATED] is entered once [method generate_terrain] completes
+## and persists for the session. Deliberately NOT an access guard on any
+## other method (`get_cell`/`set_cell`/`bulk_write`/`raycast_cells` all
+## predate this story and none of their contracts changed) -- this exists
+## purely as the observable milestone AC1/AC-4 (QA plan) require.
+enum GridState { UNINITIALIZED, GENERATED }
+
+## Opaque terrain block-type id (Story vox-006) [CellContents]'s "Resource &
+## Item Database vocabulary" doc-comment applies -- this class never resolves
+## what the id MEANS (Core Rule 2, TR-voxel-world-028); a single fixed id is
+## a placeholder consistent with the GDD's "terrain-band/sand 1..5 value
+## family" convention (TR-voxel-world-051, Story 009 dig-order eligibility),
+## not itself a designer tuning knob (same "locked engine-shape data"
+## rationale as [constant CHUNK_SIZE]/[constant NEIGHBOR_OFFSETS]).
+const TERRAIN_BLOCK_TYPE_ID: int = 1
+
+## Opaque terrain material id (Story vox-006) -- paired with [constant
+## TERRAIN_BLOCK_TYPE_ID]; see that constant's doc comment. Texturing/material
+## variety is a later (mesher/RID) concern, out of this story's scope.
+const TERRAIN_MATERIAL_ID: int = 0
 
 ## Private per-chunk storage (ADR-0014 Decision §1: "each chunk holds a flat
 ## `PackedByteArray`-class buffer indexed by local offset"). Two parallel
@@ -99,6 +129,11 @@ var _boot_blocking_issues: Array[String] = []
 ## paging/eviction is Story 010 (ADR-0015), not this class's concern yet.
 var _chunks: Dictionary[Vector2i, _ChunkBuffer] = {}
 
+## Current [enum GridState] -- see [method get_state] and [method
+## generate_terrain]. Starts UNINITIALIZED for every new instance
+## (TR-voxel-world-029).
+var _state: GridState = GridState.UNINITIALIZED
+
 
 ## Explicitly callable wiring/validation entry point (ADR-0001). Asserts
 ## [member config] was wired, then applies ADR-0002's two-tier policy: every
@@ -129,6 +164,95 @@ func is_set_up() -> bool:
 ## demonstrated [GameWorld] boot-gate wiring this mirrors.
 func get_boot_blocking_issues() -> Array[String]:
 	return _boot_blocking_issues
+
+
+## Current lifecycle [enum GridState] (GDD "System lifecycle" table,
+## TR-voxel-world-029) -- UNINITIALIZED until [method generate_terrain] has
+## completed at least once, GENERATED afterward (persists for the session).
+func get_state() -> GridState:
+	return _state
+
+
+## Procedural terrain generation (Story vox-006, ADR-0002 config + ADR-0014
+## chunked storage; TR-voxel-world-026/029/038/039/044/046). For every
+## in-bounds column `(x, z)` across the configured world extent, computes
+## `h(x, z)` via the GDD Formulas' `procedural_terrain_height` --
+## `clamp(round(base_height + amplitude * noise2D(x*frequency, z*frequency)),
+## min_y, max_y)` (TR-voxel-world-038) -- and fills every cell from [member
+## VoxelWorldConfig.min_y] up to and including that column's height `h` with
+## [constant TERRAIN_BLOCK_TYPE_ID]/[constant TERRAIN_MATERIAL_ID]; cells
+## above `h` (up to `max_y`) are left empty. "Every in-bounds cell holds
+## either a terrain block or empty" (AC1/AC-4, QA plan) follows directly from
+## this fill rule.
+##
+## Writes through [method bulk_write] -- reusing the already-established
+## single-write core ([method _apply_write]) -- so the entire fill emits AT
+## MOST ONE [signal cells_changed_batch] and ZERO [signal cell_changed]
+## (TR-voxel-world-044, Control Manifest Forbidden: "per-cell signals at
+## boot"; QA plan AC-3). Transitions [member _state] from UNINITIALIZED to
+## GENERATED (TR-voxel-world-029) unconditionally on completion, even for a
+## degenerate zero-cell extent.
+##
+## Deterministic and seeded (TR-voxel-world-039): every [FastNoiseLite]
+## property this method depends on ([member FastNoiseLite.seed], [member
+## FastNoiseLite.noise_type], [member FastNoiseLite.frequency], [member
+## FastNoiseLite.fractal_type]) is set explicitly rather than left at engine
+## defaults, so behavior cannot silently drift across engine versions --
+## two calls with the same [member VoxelWorldConfig.terrain_seed] (and
+## otherwise-identical config) produce byte-identical terrain; two different
+## seeds produce different terrain. This is the load-bearing
+## deterministic-seeded-regen premise ADR-0015 §5 depends on for the later
+## sparse far-terrain regeneration layer. [member FastNoiseLite.frequency] is
+## deliberately pinned at `1.0` (neutral) -- the GDD's `frequency` tuning
+## knob is applied manually to `x`/`z` below, matching
+## `procedural_terrain_height`'s literal `noise2D(x*frequency, z*frequency)`
+## form -- so there is exactly ONE frequency knob in effect, never two
+## silently-stacked ones. [member FastNoiseLite.fractal_type] is pinned at
+## `FRACTAL_NONE` so `noise2D` stays a single-octave call matching the GDD
+## Formula's plain `noise2D` term, never a multi-octave fractal sum.
+##
+## Guardrail (Control Manifest, TR-voxel-world-046): a misconfigured
+## `base_height > max_y` logs exactly one [method push_warning] up front and
+## is otherwise left entirely to the height formula's own `clamp()` to
+## flatten every column at `max_y` -- no second/special-cased clamp path, no
+## crash. Never writes to [member config] (ADR-0002's read-only-config rule)
+## -- the warning is diagnostic only, [method VoxelWorldConfig.validate]
+## (run separately, at boot) owns the actual field clamp.
+func generate_terrain() -> void:
+	assert(config != null, "VoxelWorldGrid.config not wired")
+	if config.base_height > config.max_y:
+		push_warning(
+			"VoxelWorldGrid.generate_terrain: base_height (%d) exceeds max_y (%d) -- terrain clamps flat at max_y" %
+			[config.base_height, config.max_y]
+		)
+
+	var noise := FastNoiseLite.new()
+	noise.seed = config.terrain_seed
+	noise.noise_type = FastNoiseLite.TYPE_PERLIN
+	noise.frequency = 1.0
+	noise.fractal_type = FastNoiseLite.FRACTAL_NONE
+
+	var changes: Dictionary[Vector3i, CellContents] = {}
+	for x in config.world_width_cells:
+		for z in config.world_depth_cells:
+			var height: int = _terrain_height(x, z, noise)
+			for y in range(config.min_y, height + 1):
+				changes[Vector3i(x, y, z)] = CellContents.new(TERRAIN_BLOCK_TYPE_ID, TERRAIN_MATERIAL_ID)
+	bulk_write(changes)
+	_state = GridState.GENERATED
+
+
+## Pure per-column height evaluation for [method generate_terrain] -- the
+## GDD Formulas' `procedural_terrain_height` (TR-voxel-world-038), with
+## [param noise] already fully parameterized by the caller (see [method
+## generate_terrain]'s doc comment). Hard-clamped to `[min_y, max_y]`
+## regardless of [param noise]'s returned value, so `noise2D` returning
+## exactly `+-1` (QA plan AC-1 edge case) can never escape bounds.
+func _terrain_height(x: int, z: int, noise: FastNoiseLite) -> int:
+	var raw: float = float(config.base_height) + config.amplitude * noise.get_noise_2d(
+		float(x) * config.frequency, float(z) * config.frequency
+	)
+	return clampi(roundi(raw), config.min_y, config.max_y)
 
 
 ## Cell->World conversion (GDD Formulas, TR-voxel-world-035): returns the
