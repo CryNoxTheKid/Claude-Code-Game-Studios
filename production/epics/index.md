@@ -16,7 +16,7 @@ approached (`/create-epics layer: feature`).
 | Epic | Layer | System / Scope | GDD | Stories | Status |
 |------|-------|----------------|-----|---------|--------|
 | foundation-spine | Foundation | Boot/DI/config spine + test harness + CONTRACTS.md (cross-cutting; ADR-0001/0002/0005/0006) | N/A — ADR-driven | 5 stories | Ready |
-| scene-world-management | Foundation | World Root + transition contract + boot-gate host | design/gdd/scene-world-management.md | 3 stories | Ready |
+| scene-world-management | Foundation | World Root + transition contract + boot-gate host + **GameWorld assembly / E2E LOOP** (story-004, added 2026-07-24) | design/gdd/scene-world-management.md | 4 stories | Ready |
 | voxel-world | Foundation | Grid data + chunked mesher + paged residency | design/gdd/voxel-world.md | 17 stories | Ready |
 | camera-input | Foundation | Orbit camera + InputMap + world-ray API | design/gdd/camera-input.md | 9 stories | Ready |
 | time-tick-system | Foundation | `game_delta`/pause/warp + `tick` signal | design/gdd/time-tick-system.md | 7 stories | Ready |

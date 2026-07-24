@@ -5,7 +5,7 @@
 > **Architecture Module**: Scene/World Management (World Root lifecycle; the 3-signal transition contract; scene attach/detach topology)
 > **Manifest Version**: 2026-07-23
 > **Status**: Ready
-> **Stories**: 3 stories created (2026-07-23) — story 001 carries a NEEDS-DECISION flag (main-menu boot-flow conflict; does not block M01)
+> **Stories**: 4 stories created — 001–003 (2026-07-23; epic closed 3/3 after S3), plus **story 004 (2026-07-24)** re-opening the epic to close the integration-to-playable / E2E LOOP gap (Milestone 01 criterion #8; scheduled Sprint 6). Story 001 carries a NEEDS-DECISION flag (main-menu boot-flow conflict; does not block M01).
 
 ## Overview
 
@@ -80,8 +80,9 @@ This epic is complete when:
 | 001 | World Root + single-Valley attach topology ⚠️ NEEDS-DECISION (main-menu conflict, does not block M01) | Integration | Ready | ADR-0001, ADR-0013 |
 | 002 | Boot-gate integration — Valley attaches after RID Ready; DB-failure → HALT | Integration | Ready | ADR-0005 |
 | 003 | Transition-signal contract surface + transition state machine | Integration | Ready | ADR-0001 |
+| 004 | **GameWorld scene assembly + headless E2E LOOP test — THE INTEGRATION CROWN** (criterion #8) | Integration | Ready | ADR-0001, ADR-0005, ADR-0013 |
 
-Dependency order: 001 → 002 → 003. Story 001 depends on Foundation Spine story 001; story 002 depends on Foundation Spine story 002.
+Dependency order: 001 → 002 → 003 (closed 3/3 after S3). **Story 004 (added 2026-07-24, Sprint 6)** re-opens the epic to assemble grid+mesher+camera+building+villager into GameWorld's `injected_tier_modules` and land the headless E2E LOOP test — it depends on Building (021+029) and Villager AI (009) reaching the place-a-block and villager-walk seams, plus the DONE mesher (vox-007), residency (vox-010), World Root (001), and GameWorld DI scaffold (spine-001). It closes the integration-to-playable / E2E LOOP gap the Milestone 01 Feature List named but never storyed.
 MVP scope only — multi-scene (ADR-0013) and savepoint binding (ADR-0012) are VS-tier, deferred to Milestone 02+.
 
 ## Next Step
