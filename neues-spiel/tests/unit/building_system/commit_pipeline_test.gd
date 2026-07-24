@@ -65,7 +65,16 @@ func _new_pipeline(pick: PlacementPick, grid: VoxelWorldGrid) -> CommitPipeline:
 	var pipeline: CommitPipeline = auto_free(CommitPipeline.new())
 	pipeline.placement_pick = pick
 	pipeline.voxel_world = grid
+	pipeline.config = CommitPipelineConfig.new()
 	pipeline.setup()
+	# Story building-022's material-selection gate (AC42) is out of THIS
+	# story's own scope -- select a placeholder item so every pre-existing
+	# 021 test keeps exercising discrimination/clamp behavior unaffected.
+	# `resource_item_database` stays unwired (null) here -- see
+	# `CommitPipeline._is_selected_item_available`'s documented MVP fallback:
+	# a non-empty selection is trusted at face value when no RID reference is
+	# reachable, exactly the case for this bare test construction.
+	pipeline.set_selected_item(&"placeholder_material")
 	return pipeline
 
 
@@ -320,7 +329,12 @@ func _new_live_rig() -> Dictionary:
 	var pipeline: CommitPipeline = auto_free(CommitPipeline.new())
 	pipeline.placement_pick = pick
 	pipeline.voxel_world = grid
+	pipeline.config = CommitPipelineConfig.new()
 	pipeline.setup()
+	# See `_new_pipeline`'s own comment -- Story building-022's material gate
+	# is out of this file's scope; select a placeholder so the live-flow
+	# tests below keep proving discrimination/commit wiring unaffected.
+	pipeline.set_selected_item(&"placeholder_material")
 
 	return {"grid": grid, "machine": machine, "pick": pick, "pipeline": pipeline}
 

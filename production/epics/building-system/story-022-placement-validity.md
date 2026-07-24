@@ -1,7 +1,7 @@
 # Story 022: Placement validity checks
 
 > **Epic**: Building System
-> **Status**: Ready
+> **Status: Complete (2026-07-24 — 651/651 suite green, parent-verified)
 > **Layer**: Core
 > **Type**: Logic
 > **Estimate**: 1 day

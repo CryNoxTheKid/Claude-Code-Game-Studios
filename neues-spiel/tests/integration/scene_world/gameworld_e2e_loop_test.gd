@@ -212,7 +212,12 @@ func test_ac_place_a_block_committed_through_real_pipeline_writes_voxel_world_an
 	var pipeline: CommitPipeline = auto_free(CommitPipeline.new())
 	pipeline.placement_pick = pick
 	pipeline.voxel_world = grid
+	pipeline.config = CommitPipelineConfig.new()
 	pipeline.setup()
+	# Story building-022's material-selection gate (AC42) is out of THIS
+	# story's own scope -- select a placeholder so the real pipeline this E2E
+	# test drives keeps committing exactly as before that story landed.
+	pipeline.set_selected_item(&"placeholder_material")
 
 	var tick_source: MockTimeTickSystem = auto_free(MockTimeTickSystem.new())
 	var tick_loop_config := ConstructionTickLoopConfig.new()
@@ -387,7 +392,12 @@ func test_ac_e2e_gate_typed_array_param_rejects_plain_untyped_array_caller() -> 
 	var pipeline: CommitPipeline = auto_free(CommitPipeline.new())
 	pipeline.placement_pick = pick
 	pipeline.voxel_world = grid
+	pipeline.config = CommitPipelineConfig.new()
 	pipeline.setup()
+	# The typed-Array crash this test proves happens at the engine's own
+	# call-boundary type check, before `commit`'s body (and therefore Story
+	# building-022's validity gate) ever runs -- no material selection is
+	# needed for this test to reach its assertion.
 
 	# Deliberately UNTYPED -- never `Array[Vector3i]` -- the historical
 	# crash-class caller shape.

@@ -1,4 +1,4 @@
-[gd_scene load_steps=15 format=3]
+[gd_scene load_steps=16 format=3]
 
 [ext_resource type="Script" path="res://src/scene_world_management/valley.gd" id="1_valley"]
 [ext_resource type="Script" path="res://src/voxel_world/voxel_world_grid.gd" id="2_voxelgrid"]
@@ -10,6 +10,7 @@
 [ext_resource type="Script" path="res://src/building_system/placement_pick.gd" id="8_placementpick"]
 [ext_resource type="Resource" path="res://data/config/placement_pick_config.tres" id="9_placementcfg"]
 [ext_resource type="Script" path="res://src/building_system/commit_pipeline.gd" id="10_commitpipeline"]
+[ext_resource type="Resource" path="res://data/config/commit_pipeline_config.tres" id="10b_commitpipelinecfg"]
 [ext_resource type="Script" path="res://src/building_system/construction_tick_loop.gd" id="11_tickloop"]
 [ext_resource type="Resource" path="res://data/config/construction_tick_loop_config.tres" id="12_tickloopcfg"]
 [ext_resource type="Script" path="res://src/villager_ai/villager_ai.gd" id="13_villagerai"]
@@ -38,6 +39,7 @@ config = ExtResource("9_placementcfg")
 
 [node name="CommitPipeline" type="Node" parent="."]
 script = ExtResource("10_commitpipeline")
+config = ExtResource("10b_commitpipelinecfg")
 
 [node name="ConstructionTickLoop" type="Node" parent="."]
 script = ExtResource("11_tickloop")
