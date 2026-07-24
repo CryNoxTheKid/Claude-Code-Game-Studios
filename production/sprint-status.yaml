@@ -24,7 +24,7 @@ stories:
     name: "Project entity + blueprint-cell lifecycle rollup + persistence"
     file: "production/epics/building-system/story-002-project-entity-lifecycle.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete
     owner: "godot-gdscript-specialist"
     estimate_days: 1.0
     blocker: ""

@@ -1,12 +1,12 @@
 # Story 002: Project entity + blueprint-cell lifecycle rollup + persistence
 
 > **Epic**: Building System
-> **Status**: Ready
+> **Status: Complete (2026-07-24 — 702/702 suite green, parent-verified)
 > **Layer**: Core
 > **Type**: Logic
 > **Estimate**: 1 day
 > **Manifest Version**: 2026-07-23
-> **Last Updated**: —
+> **Last Updated**: 2026-07-24
 
 ## Context
 
