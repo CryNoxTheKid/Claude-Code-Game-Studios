@@ -1,7 +1,7 @@
 # Story 007: AStar3D graph build & shortest-path query
 
 > **Epic**: Villager AI & Behavior
-> **Status**: Ready
+> **Status: Complete (2026-07-24 — 563/563 suite green, parent-verified)
 > **Layer**: Core
 > **Type**: Logic
 > **Estimate**: ~1 agent-day

@@ -60,7 +60,7 @@ stories:
     name: "AStar3D graph build & shortest-path query"
     file: "production/epics/villager-ai-behavior/story-007-astar-graph-build-query.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete
     owner: "ai-programmer"
     estimate_days: 1.0
     blocker: ""

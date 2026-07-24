@@ -129,6 +129,26 @@
 ## full ordering rationale (GDD Rule 3's graceful preemption: the CURRENT
 ## tick's activity body always runs first, only then does a runnable
 ## Deciding pass reassign [member _state]).
+##
+## Story villager-ai-007 (this revision) does NOT add an AStar3D member to
+## this class, despite ADR-0007's Key Interfaces snippet showing an
+## `_astar: AStar3D` field inline in its pseudocode. That ADR's own
+## Performance Implications section is explicit that memory holds "ONE
+## AStar3D instance" for the whole settlement-core region -- one per
+## [VillagerAi] instance (this codebase's established one-instance-per-
+## villager shape, see [method get_current_cell]'s own doc comment) would
+## duplicate tens of thousands of points N times over, for a population of up
+## to 30. This story instead adds [VillagerNavGraph] as a separate shared
+## collaborator class -- the SAME "separate shared object, not a per-instance
+## member" architecture [VillagerDecidingScheduler] already established for
+## the identical reason (see that class's own doc comment). [VillagerNavGraph]
+## reuses this class's own [method is_standable]/[method is_step_legal] as
+## its predicate source (ADR-0007 Decision Section 1's "every consumer calls
+## these same two functions"); this story's only other change here is
+## extracting [method classify_step_length_cells] as a reusable static twin
+## of [method _current_step_length_cells] (see that method's own doc
+## comment). Wiring a shared [VillagerNavGraph] instance into this class's
+## own Traveling state is story 009's scope, untouched here.
 class_name VillagerAi
 extends Node
 
@@ -609,18 +629,32 @@ func advance_travel_progress(game_delta: float) -> void:
 
 
 ## GDD F1's step-length classification for the CURRENT travel step
-## ([member _from_cell] -> [member _to_cell]): orthogonal steps (differing
-## on at most one horizontal axis) are `1.0`; a true diagonal (differing on
-## BOTH the X and Z axes -- the same diagonal test [method is_step_legal]
-## already uses, reused here rather than re-derived) is `1.4`. Height
-## difference (Y) never affects step length, per F1. Returns `0.0` when
-## [member _from_cell] equals [member _to_cell] -- F1's documented
-## zero-length/immediate-arrival case.
+## ([member _from_cell] -> [member _to_cell]) -- delegates entirely to
+## [method classify_step_length_cells] (Story villager-ai-007 extraction: the
+## exact math this method always computed inline before that story;
+## behavior-preserving refactor, not a semantic change -- the same
+## "extract a pure static twin" pattern [VoxelWorldGrid._pure_terrain_height]
+## already established in this codebase).
 func _current_step_length_cells() -> float:
-	if _from_cell == _to_cell:
+	return VillagerAi.classify_step_length_cells(_from_cell, _to_cell)
+
+
+## Pure, static GDD F1 step-length classifier (Story villager-ai-007
+## extraction, [TR-villager-ai-behavior-072]): orthogonal steps (differing on
+## at most one horizontal axis) are `1.0`; a true diagonal (differing on BOTH
+## the X and Z axes -- the same diagonal test [method is_step_legal] already
+## uses) is `1.4`. Height difference (Y) never affects step length, per F1.
+## Returns `0.0` when [param from_cell] equals [param to_cell] -- F1's
+## documented zero-length/immediate-arrival case. Reused by [method
+## _current_step_length_cells] (this class's own Traveling-step math,
+## story 004) AND by [VillagerNavGraph.path_length_cells] (story 007's
+## AStar3D path-length summation) -- ONE classification, never two
+## independently-written copies of the same F1 formula.
+static func classify_step_length_cells(from_cell: Vector3i, to_cell: Vector3i) -> float:
+	if from_cell == to_cell:
 		return 0.0
-	var dx: int = _to_cell.x - _from_cell.x
-	var dz: int = _to_cell.z - _from_cell.z
+	var dx: int = to_cell.x - from_cell.x
+	var dz: int = to_cell.z - from_cell.z
 	return 1.4 if (dx != 0 and dz != 0) else 1.0
 
 

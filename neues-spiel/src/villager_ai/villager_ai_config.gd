@@ -100,6 +100,20 @@ const UNSTUCK_RESCUE_MAX_RADIUS_MAX: int = 48
 const SEAL_PREVENTION_ABANDON_LIMIT_MIN: int = 1
 const SEAL_PREVENTION_ABANDON_LIMIT_MAX: int = 6
 
+## Safe range for [member nav_region_size] (Story villager-ai-007, ADR-0007:
+## "the nav graph covers a bounded settlement-core region... Measured limit:
+## region <= 200x200 cells... 300x300+ measured frame-breaking at p95 24-49
+## ms per query"). The upper bound is the ADR's own measured PERFORMANCE
+## CEILING, not merely a design preference -- exceeding it is an accepted
+## frame-budget regression, not just an aesthetic tuning choice, so
+## [method validate]'s clamp is load-bearing here in a way most other knobs'
+## clamps are not. The lower bound is an `[assumption]` (no GDD/ADR floor
+## stated) picked wide enough that even a degenerately small region still
+## covers more than a handful of standable cells around the starting roster
+## (Rule 14b).
+const NAV_REGION_SIZE_MIN: int = 20
+const NAV_REGION_SIZE_MAX: int = 200
+
 ## Travel pacing, cells per game-second (GDD default: 3.0, F1). Consumed by
 ## Traveling-state movement (story 002+, out of scope here).
 @export var move_speed: float = 3.0
@@ -171,6 +185,16 @@ const SEAL_PREVENTION_ABANDON_LIMIT_MAX: int = 6
 ## F6/Rule 16b). Consumed by a later story's seal-prevention gate, out of
 ## scope here.
 @export var seal_prevention_abandon_limit: int = 3
+
+## Bounded settlement-core region size, in cells, the AStar3D travel-
+## pathfinding graph is built over (Story villager-ai-007, ADR-0007
+## Constraints: "the nav graph covers a bounded settlement-core region, NOT
+## the whole world"; spike-validated default 200). Consumed by
+## [VillagerNavGraph.build] -- never a per-GDD-Tuning-Knob row (this is an
+## ADR-owned architectural bound, same "authored here as another typed
+## `@export`" precedent as [member max_deciding_per_tick]), out of scope for
+## any other story.
+@export var nav_region_size: int = 200
 
 
 ## See [ConfigResource.validate]. Clamps every knob to its GDD-documented (or
@@ -303,4 +327,10 @@ func validate() -> Array[String]:
 		seal_prevention_abandon_limit = clampi(
 			seal_prevention_abandon_limit, SEAL_PREVENTION_ABANDON_LIMIT_MIN, SEAL_PREVENTION_ABANDON_LIMIT_MAX
 		)
+	if nav_region_size < NAV_REGION_SIZE_MIN or nav_region_size > NAV_REGION_SIZE_MAX:
+		issues.append(
+			"nav_region_size out of range [%s, %s], got %s -- clamped" %
+			[NAV_REGION_SIZE_MIN, NAV_REGION_SIZE_MAX, nav_region_size]
+		)
+		nav_region_size = clampi(nav_region_size, NAV_REGION_SIZE_MIN, NAV_REGION_SIZE_MAX)
 	return issues

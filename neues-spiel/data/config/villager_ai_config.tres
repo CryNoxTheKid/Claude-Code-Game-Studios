@@ -19,3 +19,4 @@ unstuck_watchdog_threshold_ticks = 12
 unstuck_rescue_search_radius = 6
 unstuck_rescue_max_radius = 24
 seal_prevention_abandon_limit = 3
+nav_region_size = 200
