@@ -1,7 +1,7 @@
 # Story 010: F2 job selection (nearest-reachable, bounded candidates)
 
 > **Epic**: Villager AI & Behavior
-> **Status**: Ready
+> **Status: Complete (2026-07-24 — 740/740 suite green, parent-verified)
 > **Layer**: Core
 > **Type**: Logic
 > **Estimate**: ~1 agent-day

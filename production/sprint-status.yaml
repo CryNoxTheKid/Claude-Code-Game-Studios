@@ -51,7 +51,7 @@ stories:
     name: "F2 job selection — nearest-reachable, bounded candidates"
     file: "production/epics/villager-ai-behavior/story-010-job-selection-f2.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete
     owner: "ai-programmer"
     estimate_days: 1.0
     blocker: "depends on villager-ai-007 (DONE)"
