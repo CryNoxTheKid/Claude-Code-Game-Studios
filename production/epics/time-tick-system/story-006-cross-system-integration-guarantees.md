@@ -1,12 +1,12 @@
 # Story 006: Cross-system integration guarantees (Engine.time_scale untouched, transition non-suspension)
 
 > **Epic**: Time & Tick System
-> **Status**: Ready
+> **Status: Complete (2026-07-24 — 669/669 suite green, parent-verified)
 > **Layer**: Foundation
 > **Type**: Integration
 > **Estimate**: 0.5 day
 > **Manifest Version**: 2026-07-23
-> **Last Updated**: (set by /dev-story when implementation begins)
+> **Last Updated**: 2026-07-24
 
 ## Context
 
