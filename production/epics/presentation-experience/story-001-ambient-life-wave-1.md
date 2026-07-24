@@ -1,7 +1,7 @@
 # Story 001: Ambient-life wave 1 — chimney smoke, foliage sway, idle-behaviors hook, interior clutter, torch flicker
 
 > **Epic**: Presentation Experience
-> **Status**: Ready
+> **Status: Sub-scope A Complete (2026-07-24 — 819/819 suite green, parent-verified; CD sign-off pass pending; Sub-B awaits villager-ai-019)
 > **Layer**: Presentation
 > **Type**: Visual/Feel
 > **Estimate**: ~2.5 days (sub-scope A environmental ~1.5d + sub-scope B villager-idle hook ~1d) — split-schedulable per its two different dependency gates

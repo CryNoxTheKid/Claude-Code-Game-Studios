@@ -52,7 +52,13 @@ func test_no_autoload_reference_or_file_access_in_source() -> void:
 	# (comment-stripped -- this codebase's established precedent, see
 	# `tests/integration/villager_ai/config_and_scaffold_test.gd`'s
 	# `_read_all_gd_source` helper), and it performs no file I/O of its own.
-	var source: String = _read_all_gd_source("res://src/presentation")
+	# Scoped to THIS module's own file, not the whole `src/presentation/`
+	# directory (Presentation Experience story presentation-001 added
+	# sibling files there with their own, unrelated per-frame presentation
+	# code -- e.g. `TorchFlicker`'s `_process`, ADR-0011's sanctioned raw-
+	# delta pattern -- a directory-wide scan would wrongly attribute their
+	# code to this surface's own compliance checks).
+	var source: String = _read_module_source_only()
 
 	var banned_substrings: Array[String] = [
 		"ResourceItemDatabase",
@@ -174,8 +180,12 @@ func test_clear_payoff_removes_the_live_key() -> void:
 
 func test_no_process_or_physics_process_defined() -> void:
 	# Structural check: this is an event-driven surface, never a per-frame
-	# simulation hook.
-	var source: String = _read_all_gd_source("res://src/presentation")
+	# simulation hook. Scoped to THIS module's own file -- see
+	# test_no_autoload_reference_or_file_access_in_source's doc comment for
+	# why a directory-wide scan is no longer correct now that sibling
+	# `src/presentation/` files carry their OWN legitimate per-frame
+	# presentation code.
+	var source: String = _read_module_source_only()
 
 	assert_bool(source.contains("func _process(")).is_false()
 	assert_bool(source.contains("func _physics_process(")).is_false()
@@ -186,7 +196,7 @@ func test_no_mechanic_or_simulation_keywords_in_source() -> void:
 	# reward feedback, UI presentation) must not exist in this module's own
 	# CODE (comment-stripped -- doc comments are allowed to name the
 	# out-of-scope mechanic to document that it is excluded).
-	var source: String = _read_all_gd_source("res://src/presentation").to_lower()
+	var source: String = _read_module_source_only().to_lower()
 
 	var banned_substrings: Array[String] = [
 		"mood",
@@ -203,15 +213,34 @@ func test_no_mechanic_or_simulation_keywords_in_source() -> void:
 # Test helpers
 # ---------------------------------------------------------------------------
 
+## Reads `res://src/presentation/loop_payoff_signal_surface.gd` ONLY,
+## STRIPPING full-line `#`/`##` doc-comment lines first -- this module's own
+## doc comments legitimately name the out-of-scope mechanic to document its
+## exclusion, so a naive raw-text scan would flag its own compliance
+## documentation as a violation. Stripping comment lines means only actual
+## CODE usage can trip the checks above. Deliberately scoped to this ONE
+## file rather than the whole `src/presentation/` directory (see
+## test_no_autoload_reference_or_file_access_in_source's doc comment) --
+## every AC this suite proves is specifically about [LoopPayoffSignalSurface]
+## itself, never about whatever else later lands in the same directory.
+func _read_module_source_only() -> String:
+	var combined: String = ""
+	var text: String = FileAccess.get_file_as_string("res://src/presentation/loop_payoff_signal_surface.gd")
+	for line: String in text.split("\n"):
+		if not line.strip_edges().begins_with("#"):
+			combined += line
+			combined += "\n"
+	return combined
+
+
 ## Reads and concatenates every `.gd` source file directly under
 ## [param dir_path] (non-recursive), STRIPPING full-line `#`/`##`
 ## doc-comment lines first. Mirrors
 ## `tests/integration/villager_ai/config_and_scaffold_test.gd`'s
-## `_read_all_gd_source` helper (this codebase's established precedent) --
-## this module's own doc comments legitimately name the out-of-scope
-## mechanic to document its exclusion, so a naive raw-text scan would flag
-## its own compliance documentation as a violation. Stripping comment lines
-## means only actual CODE usage can trip the checks above.
+## `_read_all_gd_source` helper (this codebase's established precedent).
+## Retained for reference/reuse by future tests in this suite; the ACs above
+## now use [method _read_module_source_only] instead (see that method's doc
+## comment for why).
 func _read_all_gd_source(dir_path: String) -> String:
 	var combined: String = ""
 	var dir: DirAccess = DirAccess.open(dir_path)

@@ -96,7 +96,7 @@ stories:
     name: "Ambient-life wave 1 — Sub-scope A (environmental: smoke/foliage/clutter/flicker) CD-protected (criterion #9)"
     file: "production/epics/presentation-experience/story-001-ambient-life-wave-1.md"
     priority: should-have
-    status: backlog
+    status: sub_a_complete
     owner: "godot-specialist"
     estimate_days: 1.5
     blocker: "depends on vox-007 (DONE); Sub-scope B deferred (needs villager-ai-019); AD/CD sign-off is the binding gate"
