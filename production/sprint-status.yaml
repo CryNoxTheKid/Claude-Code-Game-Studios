@@ -87,7 +87,7 @@ stories:
     name: "Undo/redo stack core — command model, bounded depth, transition-COMPLETE clear"
     file: "production/epics/building-system/story-032-undo-redo-stack-core.md"
     priority: should-have
-    status: backlog
+    status: complete
     owner: "godot-specialist"
     estimate_days: 1.0
     blocker: "depends on building-021, building-022 (DONE), scene-003 (DONE)"

@@ -1,12 +1,12 @@
 # Story 032: Undo/redo stack core (command model, bounded depth, redo-branch clear, transition-complete clear)
 
 > **Epic**: Building System
-> **Status**: Ready
+> **Status: Complete (2026-07-24 — 786/786 suite green, parent-verified)
 > **Layer**: Core
 > **Type**: Logic
 > **Estimate**: 1 day
 > **Manifest Version**: 2026-07-23
-> **Last Updated**: —
+> **Last Updated**: 2026-07-24
 
 ## Context
 
