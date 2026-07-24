@@ -33,7 +33,7 @@ stories:
     name: "Construction tick loop — Planned→UnderConstruction→Built; issues the Voxel World write"
     file: "production/epics/building-system/story-029-construction-tick-loop.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete
     owner: "godot-specialist"
     estimate_days: 1.0
     blocker: "depends on building-021 (in-sprint)"
@@ -42,7 +42,7 @@ stories:
     name: "Deciding scheduler — FIFO queue + max_deciding_per_tick budget"
     file: "production/epics/villager-ai-behavior/story-005-deciding-scheduler-budget.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete
     owner: "ai-programmer"
     estimate_days: 1.0
     blocker: ""
@@ -87,7 +87,7 @@ stories:
     name: "GameWorld scene assembly + headless E2E LOOP test — THE CROWN (criterion #8)"
     file: "production/epics/scene-world-management/story-004-gameworld-assembly-e2e-loop.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete
     owner: "godot-specialist"
     estimate_days: 1.5
     blocker: "sequenced LAST — depends on building-021+029, villager-ai-009 (in-sprint)"
@@ -96,7 +96,7 @@ stories:
     name: "Placement validity checks — hardens the block path"
     file: "production/epics/building-system/story-022-placement-validity.md"
     priority: should-have
-    status: backlog
+    status: complete
     owner: "godot-specialist"
     estimate_days: 1.0
     blocker: "depends on building-021 (in-sprint)"
@@ -105,7 +105,7 @@ stories:
     name: "Read-through in-flight-write cache — closes an ADR-0015 invariant"
     file: "production/epics/voxel-world/story-013-read-through-inflight-write-cache.md"
     priority: should-have
-    status: in_progress
+    status: complete
     owner: "godot-gdscript-specialist"
     estimate_days: 1.0
     blocker: "depends on vox-011 (DONE)"
@@ -114,7 +114,7 @@ stories:
     name: "Load-before-write for far-world mutations — the seam far-world building writes inherit"
     file: "production/epics/voxel-world/story-014-load-before-write-far-world.md"
     priority: should-have
-    status: backlog
+    status: complete
     owner: "godot-gdscript-specialist"
     estimate_days: 1.0
     blocker: "depends on vox-013 (in-sprint)"
@@ -123,7 +123,7 @@ stories:
     name: "Cross-system integration guarantees — consumed by the E2E LOOP test"
     file: "production/epics/time-tick-system/story-006-cross-system-integration-guarantees.md"
     priority: should-have
-    status: in_progress
+    status: complete
     owner: "godot-gdscript-specialist"
     estimate_days: 0.5
     blocker: "depends on tick-003, tick-004 (DONE)"

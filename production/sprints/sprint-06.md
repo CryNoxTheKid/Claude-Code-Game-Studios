@@ -248,3 +248,21 @@ boot-gate precedent. Owner remains godot-specialist per the milestone's Integrat
 - **Next step:** run `/qa-plan sprint` to define test cases per story (especially the crown's
   place-a-block + villager-walk pass conditions, and villager-ai-008/009's synchronous-signal race
   assertions) before `/dev-story`.
+
+
+---
+
+## Sprint Result — CLOSED 2026-07-24
+
+**13/13 stories complete** (5 Must villager lane, 2 Must building lane, 1 Must crown, 4 Should, 1 Nice). Suite grew 587 -> 682, green on every story commit, no open regressions.
+
+Highlights:
+- **THE CROWN (scene-004) landed**: headless E2E over the assembled GameWorld — real pipeline block placement (ray->DDA->commit->blueprint->4 build ticks->voxel write) AND a villager deciding->pathing->walking to arrival. Milestone M01 criterion #8 MET.
+- Villager binding lane complete (005-009): scheduler, activity loop, AStar graph, incremental synchronous patching, traveling state with mid-travel re-path.
+- ADR-0015 fully certified: vox-013 (read-through in-flight write cache) + vox-014 (load-before-write, never blind/never dropped) close the last residency invariants.
+- vox-015 mesh view-window streaming lands the machinery for criterion #12 (60FPS measurement is milestone work).
+- tick-006: cross-system tick guarantees locked by regression guards (no code changes needed — the system already held them).
+
+Engine facts recorded this sprint: GdUnit CLI runner is fail-fast PER SUITE; Godot 4.7 hard-rejects plain Array into typed Array params; Node-typed @export cannot be wired via hand-authored NodePath in a text .tscn (code-assign in _ready instead).
+
+Carried to Sprint 7 (unchanged from plan): building-030 + villager-ai-011/012 closed job loop, tick-007 + villager-ai-022 coordinated re-tune (needs a designer value decision), building-032->033, presentation-001 ambient-life wave 1, criterion #12 measurement.
