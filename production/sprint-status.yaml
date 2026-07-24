@@ -114,7 +114,7 @@ stories:
     name: "Grouping/merge (26-neighbourhood) + cell→project reverse index"
     file: "production/epics/building-system/story-003-grouping-merge-reverse-index.md"
     priority: nice-to-have
-    status: backlog
+    status: complete
     owner: "godot-gdscript-specialist"
     estimate_days: 1.0
     blocker: "depends on building-002 (in-sprint)"

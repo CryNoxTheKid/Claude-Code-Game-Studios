@@ -1,7 +1,7 @@
 # Story 003: 26-neighborhood grouping/merge + cell→project reverse index
 
 > **Epic**: Building System
-> **Status**: Ready
+> **Status: Complete (2026-07-24 — 843/843 suite green 0 orphans, parent-verified)
 > **Layer**: Core
 > **Type**: Logic
 > **Estimate**: 1 day
