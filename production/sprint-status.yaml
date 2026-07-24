@@ -9,125 +9,253 @@
 #   done           ↔  Complete
 #   blocked        ↔  Blocked
 #
-# Active sprint: 7 (THE CLOSED-LOOP SPRINT — villagers build what the player draws; criterion #2).
-# Sprint 1–6 history retained below the Sprint 7 block.
+# Active sprint: 8 (THE MILESTONE-CLOSING SPRINT — close M01: #4 re-tune, #12 60-FPS measurement,
+# #6 four drawing verbs, #7 anti-stuck base; #5 on certification, #13 stability window defined).
+# Sprint 1–7 history retained below the Sprint 8 block.
 
-sprint: 7
-goal: "Close the build-and-inhabit loop end-to-end — villagers build what the player draws. Stand up the Building project-lifecycle → release → job-queue chain (building-002 → 004 → 030) and the Villager AI job-selection → claim → on-site-build cycle (villager-ai-010 → 011 → 012), converging on the full claim→build→report crown (villager-ai-012, AC40 against the real Building System — criterion #2 full-depth integration). Capacity-permitting close worker attribution (building-005), stand up the undo/redo stack core (building-032), and land ambient-life wave 1 Sub-scope A (presentation-001, CD-protected, criterion #9). Set up the still-blocked coordinated re-tune (#4) and criterion #12 measurement via villager-ai-025 (Nice) + surfacing the designer value decision + flagging the missing #12 measurement story."
-start: "2026-07-24"
+sprint: 8
+goal: "Close Milestone 01. Land the coordinated per-tick re-tune at the decided values (tick-007 + villager-ai-022, criterion #4; villager-ai-022 carries decision_interval + the story-025 stress re-run), run the 60-FPS-with-culling measurement on the live Valley EARLY (vox-018, criterion #12 — the one unretired unknown), stand up the four player-facing drawing verbs (building-024/025/026/027, criterion #6 loop-critical subset per the CD scope ruling), and land the safety-critical anti-stuck ladder base (villager-ai-014 → 015 → 016, criterion #7 — 'without getting stuck' + F3 telemetry). Close #5 on ADR-0015 certification (vox-016/017 as Nice opportunistic measured-value pulls); define the #13 stability window at plan level. After the sprint: /milestone-review current for the M01 Go/No-Go."
+start: "2026-07-25"
 end: ""
-generated: "2026-07-24"
-updated: "2026-07-24"
+generated: "2026-07-25"
+updated: "2026-07-25"
 
 stories:
-  - id: "building-002"
-    name: "Project entity + blueprint-cell lifecycle rollup + persistence"
-    file: "production/epics/building-system/story-002-project-entity-lifecycle.md"
+  - id: "vox-018"
+    name: "60-FPS-with-culling measurement on the live Valley (criterion #12) — THE UNRETIRED UNKNOWN, sequenced FIRST"
+    file: "production/epics/voxel-world/story-018-60fps-culling-measurement.md"
     priority: must-have
-    status: complete
+    status: ready-for-dev
+    owner: "godot-gdscript-specialist"
+    estimate_days: 2.5
+    blocker: "sequenced FIRST on the gdscript lane; deps vox-015, scene-004, vox-007, cam-006 all DONE (S4–S6); MISS-remediation risk — 2-day buffer reserved"
+    completed: ""
+  - id: "tick-007"
+    name: "Per-tick re-tune — tick-budget half (max_ticks_per_frame 10→12) (criterion #4)"
+    file: "production/epics/time-tick-system/story-007-per-tick-retune-pass.md"
+    priority: must-have
+    status: ready-for-dev
     owner: "godot-gdscript-specialist"
     estimate_days: 1.0
-    blocker: ""
+    blocker: "PENDING USER RATIFICATION of the decided values (design/quick-specs/tick-rate-retune-2026-07-25.md); coordinated ONE change with villager-ai-022"
     completed: ""
-  - id: "building-004"
-    name: "Release (Bau starten) + job-eligibility transition"
-    file: "production/epics/building-system/story-004-release-job-eligibility.md"
+  - id: "villager-ai-022"
+    name: "Per-tick re-tune — Deciding half (max_deciding_per_tick 1→5) + decision_interval 2→4 (scope home here) + story-025 stress re-run (criterion #4)"
+    file: "production/epics/villager-ai-behavior/story-022-max-deciding-retune.md"
     priority: must-have
-    status: complete
-    owner: "godot-gdscript-specialist"
-    estimate_days: 1.0
-    blocker: "depends on building-002 (in-sprint)"
-    completed: ""
-  - id: "building-030"
-    name: "Construction job queue — claim/report + on-site + occupied-defer + unreachable feedback"
-    file: "production/epics/building-system/story-030-construction-job-queue.md"
-    priority: must-have
-    status: complete
-    owner: "godot-gdscript-specialist"
-    estimate_days: 1.0
-    blocker: "depends on building-029 (DONE), building-004 (in-sprint)"
-    completed: ""
-  - id: "villager-ai-010"
-    name: "F2 job selection — nearest-reachable, bounded candidates"
-    file: "production/epics/villager-ai-behavior/story-010-job-selection-f2.md"
-    priority: must-have
-    status: complete
+    status: ready-for-dev
     owner: "ai-programmer"
     estimate_days: 1.0
-    blocker: "depends on villager-ai-007 (DONE)"
+    blocker: "PENDING USER RATIFICATION of the decided values; villager-ai-025 DONE (S7 basis); coordinated ONE change with tick-007; folds the story-025 stress re-run as evidence"
     completed: ""
-  - id: "villager-ai-011"
-    name: "Job claim/release pipeline with worker attribution"
-    file: "production/epics/villager-ai-behavior/story-011-job-claim-attribution.md"
+  - id: "building-024"
+    name: "Wall tool (F1) — drag→line rasterization + wall-height extrude (criterion #6)"
+    file: "production/epics/building-system/story-024-wall-tool.md"
     priority: must-have
-    status: complete
-    owner: "ai-programmer"
-    estimate_days: 1.0
-    blocker: "depends on villager-ai-010 (in-sprint), villager-ai-006 (DONE)"
-    completed: ""
-  - id: "villager-ai-012"
-    name: "On-site work & full claim→build→report cycle — THE CROWN (criterion #2)"
-    file: "production/epics/villager-ai-behavior/story-012-onsite-work-build-cycle.md"
-    priority: must-have
-    status: complete
-    owner: "ai-programmer"
-    estimate_days: 1.0
-    blocker: "sequenced LAST — depends on villager-ai-011 (in-sprint) + real building-030 (in-sprint) for the AC40 integration test"
-    completed: ""
-  - id: "building-005"
-    name: "Worker attribution on job claim — on_job_claimed records worker_ids"
-    file: "production/epics/building-system/story-005-worker-attribution.md"
-    priority: should-have
-    status: complete
-    owner: "godot-gdscript-specialist"
-    estimate_days: 1.0
-    blocker: "depends on building-004 (in-sprint)"
-    completed: ""
-  - id: "building-032"
-    name: "Undo/redo stack core — command model, bounded depth, transition-COMPLETE clear"
-    file: "production/epics/building-system/story-032-undo-redo-stack-core.md"
-    priority: should-have
-    status: complete
+    status: ready-for-dev
     owner: "godot-specialist"
     estimate_days: 1.0
-    blocker: "depends on building-021, building-022 (DONE), scene-003 (DONE)"
+    blocker: "deps building-020/021/022 all DONE (S5/S6); independent leaf tool"
     completed: ""
-  - id: "presentation-001"
-    name: "Ambient-life wave 1 — Sub-scope A (environmental: smoke/foliage/clutter/flicker) CD-protected (criterion #9)"
-    file: "production/epics/presentation-experience/story-001-ambient-life-wave-1.md"
-    priority: should-have
-    status: sub_a_complete
+  - id: "building-025"
+    name: "Floor tool (F2) — drag→rectangle fill on the locked plane (criterion #6)"
+    file: "production/epics/building-system/story-025-floor-tool.md"
+    priority: must-have
+    status: ready-for-dev
     owner: "godot-specialist"
-    estimate_days: 1.5
-    blocker: "depends on vox-007 (DONE); Sub-scope B deferred (needs villager-ai-019); AD/CD sign-off is the binding gate"
+    estimate_days: 0.5
+    blocker: "deps building-020/021/022 all DONE; independent leaf tool"
     completed: ""
-  - id: "building-033"
-    name: "Voxel World write seam — batched bulk-write + self-write exemption + completion signal"
-    file: "production/epics/building-system/story-033-voxel-write-seam.md"
-    priority: nice-to-have
-    status: complete
+  - id: "building-026"
+    name: "Roof tool — Flat formation MVP + formation-picker seam (criterion #6) — NAMED RELEASE VALVE"
+    file: "production/epics/building-system/story-026-roof-tool.md"
+    priority: must-have
+    status: ready-for-dev
     owner: "godot-specialist"
     estimate_days: 1.0
-    blocker: "depends on building-029 (DONE), building-032 (in-sprint)"
+    blocker: "deps building-020/021/022 all DONE; Flat ONLY (no Gable/Hip/Shed). CD-ruling cut lever — drops to M02 if S8 runs tight"
     completed: ""
-  - id: "building-003"
-    name: "Grouping/merge (26-neighbourhood) + cell→project reverse index"
-    file: "production/epics/building-system/story-003-grouping-merge-reverse-index.md"
-    priority: nice-to-have
-    status: complete
-    owner: "godot-gdscript-specialist"
-    estimate_days: 1.0
-    blocker: "depends on building-002 (in-sprint)"
+  - id: "building-027"
+    name: "Block tool — single-cell place/replace, PLACE MODE ONLY in M01 (criterion #6)"
+    file: "production/epics/building-system/story-027-block-tool.md"
+    priority: must-have
+    status: ready-for-dev
+    owner: "godot-specialist"
+    estimate_days: 0.5
+    blocker: "deps building-020/021/022 all DONE; remove mode OUT of M01 (routes to 031 → M02)"
     completed: ""
-  - id: "villager-ai-025"
-    name: "Perf stress validation (30-villager) — produces the production-load measurement the #4 re-tune needs (Advisory)"
-    file: "production/epics/villager-ai-behavior/story-025-perf-stress-validation.md"
-    priority: nice-to-have
-    status: complete
+  - id: "villager-ai-014"
+    name: "Rescue-target BFS (F5 expanding-ring) — anti-stuck base (criterion #7)"
+    file: "production/epics/villager-ai-behavior/story-014-rescue-target-bfs-f5.md"
+    priority: must-have
+    status: ready-for-dev
     owner: "ai-programmer"
     estimate_days: 1.0
-    blocker: "depends on villager-ai-005, villager-ai-009 (DONE), villager-ai-012 (in-sprint)"
+    blocker: "sequenced FIRST on the anti-stuck chain; deps villager-ai-002/003 DONE; unlocks 015"
     completed: ""
+  - id: "villager-ai-015"
+    name: "Unstuck watchdog trigger, rescue teleport & F3 telemetry — anti-stuck base (criterion #7)"
+    file: "production/epics/villager-ai-behavior/story-015-unstuck-watchdog-telemetry.md"
+    priority: must-have
+    status: ready-for-dev
+    owner: "ai-programmer"
+    estimate_days: 1.0
+    blocker: "depends on villager-ai-014 (in-sprint), 003/011 DONE; carries the criterion's named F3 telemetry"
+    completed: ""
+  - id: "villager-ai-016"
+    name: "Seal-prevention negative-write gate & livelock escape (F6) — anti-stuck base (criterion #7)"
+    file: "production/epics/villager-ai-behavior/story-016-seal-prevention-and-livelock.md"
+    priority: must-have
+    status: ready-for-dev
+    owner: "ai-programmer"
+    estimate_days: 1.0
+    blocker: "depends on villager-ai-015 (in-sprint), 003/011/012 DONE; guarantees no permanent-stuck under player builds"
+    completed: ""
+  - id: "vox-016"
+    name: "ADR-0015 C1 — async concurrency cap + bounded per-chunk gen cost (measured) — opportunistic #5 measured-value close"
+    file: "production/epics/voxel-world/story-016-c1-async-cap-gen-cost-tuning.md"
+    priority: nice-to-have
+    status: backlog
+    owner: "godot-gdscript-specialist"
+    estimate_days: 0.75
+    blocker: "#5 baseline closes on certification; pull only if the residency lane clears vox-018 + tick-007 with headroom, OR as vox-018 residency-stall remediation"
+    completed: ""
+  - id: "vox-017"
+    name: "ADR-0015 C4 — completion-driven residency drain loop — opportunistic #5 measured-value close"
+    file: "production/epics/voxel-world/story-017-c4-completion-driven-drain.md"
+    priority: nice-to-have
+    status: backlog
+    owner: "godot-gdscript-specialist"
+    estimate_days: 1.0
+    blocker: "#5 baseline closes on certification; pull only if the residency lane clears vox-016 with headroom"
+    completed: ""
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SPRINT 7 HISTORY (retained; 12/12 Complete, suite 682→843 blocking + 5 advisory perf, green 0 orphans;
+# THE CROWN (villager-ai-012) closed the job loop — release→queue→F2 select→claim→travel→on-site work→
+# construction ticks→real voxel write→report→re-decide, all real components; milestone criterion #2 MET;
+# building chain (project entity/release/queue/attribution/registry union-find grouping); undo/redo core
+# (plan-only, grep-guarded) + write-seam batching; ambient life Sub-A CD-approved (7 advisories for later
+# waves); perf stress basis for the re-tune (3.02ms @30 villagers, chronic-full-queue finding);
+# zero unplanned rework, zero carryover.)
+# ─────────────────────────────────────────────────────────────────────────────
+sprint_7_history:
+  sprint: 7
+  goal: "Close the build-and-inhabit loop end-to-end — villagers build what the player draws. Stand up the Building project-lifecycle → release → job-queue chain (building-002 → 004 → 030) and the Villager AI job-selection → claim → on-site-build cycle (villager-ai-010 → 011 → 012), converging on the full claim→build→report crown (villager-ai-012, AC40 against the real Building System — criterion #2 full-depth integration). Capacity-permitting close worker attribution (building-005), stand up the undo/redo stack core (building-032), and land ambient-life wave 1 Sub-scope A (presentation-001, CD-protected, criterion #9). Set up the still-blocked coordinated re-tune (#4) and criterion #12 measurement via villager-ai-025 (Nice) + surfacing the designer value decision + flagging the missing #12 measurement story."
+  start: "2026-07-24"
+  end: "2026-07-24"
+  generated: "2026-07-24"
+  updated: "2026-07-24"
+  result: "12/12 Complete (6 Must, 3 Should, 3 Nice; presentation-001 = Sub-A with CD sign-off APPROVED WITH ADVISORIES, Sub-B formally open awaiting villager-ai-019); suite 682→843 blocking + 5 advisory perf, green 0 orphans on every commit; THE CROWN (villager-ai-012) landed — closed job loop, milestone criterion #2 MET; building chain + undo/redo core + write-seam; ambient life Sub-A CD-approved; perf stress basis (3.02ms @30, chronic-queue finding) for the #4 re-tune; zero unplanned rework, zero carryover."
+  stories:
+    - id: "building-002"
+      name: "Project entity + blueprint-cell lifecycle rollup + persistence"
+      file: "production/epics/building-system/story-002-project-entity-lifecycle.md"
+      priority: must-have
+      status: complete
+      owner: "godot-gdscript-specialist"
+      estimate_days: 1.0
+      blocker: ""
+      completed: "2026-07-24"
+    - id: "building-004"
+      name: "Release (Bau starten) + job-eligibility transition"
+      file: "production/epics/building-system/story-004-release-job-eligibility.md"
+      priority: must-have
+      status: complete
+      owner: "godot-gdscript-specialist"
+      estimate_days: 1.0
+      blocker: "depends on building-002 (in-sprint)"
+      completed: "2026-07-24"
+    - id: "building-030"
+      name: "Construction job queue — claim/report + on-site + occupied-defer + unreachable feedback"
+      file: "production/epics/building-system/story-030-construction-job-queue.md"
+      priority: must-have
+      status: complete
+      owner: "godot-gdscript-specialist"
+      estimate_days: 1.0
+      blocker: "depends on building-029 (DONE), building-004 (in-sprint)"
+      completed: "2026-07-24"
+    - id: "villager-ai-010"
+      name: "F2 job selection — nearest-reachable, bounded candidates"
+      file: "production/epics/villager-ai-behavior/story-010-job-selection-f2.md"
+      priority: must-have
+      status: complete
+      owner: "ai-programmer"
+      estimate_days: 1.0
+      blocker: "depends on villager-ai-007 (DONE)"
+      completed: "2026-07-24"
+    - id: "villager-ai-011"
+      name: "Job claim/release pipeline with worker attribution"
+      file: "production/epics/villager-ai-behavior/story-011-job-claim-attribution.md"
+      priority: must-have
+      status: complete
+      owner: "ai-programmer"
+      estimate_days: 1.0
+      blocker: "depends on villager-ai-010 (in-sprint), villager-ai-006 (DONE)"
+      completed: "2026-07-24"
+    - id: "villager-ai-012"
+      name: "On-site work & full claim→build→report cycle — THE CROWN (criterion #2)"
+      file: "production/epics/villager-ai-behavior/story-012-onsite-work-build-cycle.md"
+      priority: must-have
+      status: complete
+      owner: "ai-programmer"
+      estimate_days: 1.0
+      blocker: "sequenced LAST — depends on villager-ai-011 (in-sprint) + real building-030 (in-sprint) for the AC40 integration test"
+      completed: "2026-07-24"
+    - id: "building-005"
+      name: "Worker attribution on job claim — on_job_claimed records worker_ids"
+      file: "production/epics/building-system/story-005-worker-attribution.md"
+      priority: should-have
+      status: complete
+      owner: "godot-gdscript-specialist"
+      estimate_days: 1.0
+      blocker: "depends on building-004 (in-sprint)"
+      completed: "2026-07-24"
+    - id: "building-032"
+      name: "Undo/redo stack core — command model, bounded depth, transition-COMPLETE clear"
+      file: "production/epics/building-system/story-032-undo-redo-stack-core.md"
+      priority: should-have
+      status: complete
+      owner: "godot-specialist"
+      estimate_days: 1.0
+      blocker: "depends on building-021, building-022 (DONE), scene-003 (DONE)"
+      completed: "2026-07-24"
+    - id: "presentation-001"
+      name: "Ambient-life wave 1 — Sub-scope A (environmental: smoke/foliage/clutter/flicker) CD-protected (criterion #9)"
+      file: "production/epics/presentation-experience/story-001-ambient-life-wave-1.md"
+      priority: should-have
+      status: sub_a_complete
+      owner: "godot-specialist"
+      estimate_days: 1.5
+      blocker: "depends on vox-007 (DONE); Sub-scope B deferred (needs villager-ai-019); AD/CD sign-off is the binding gate"
+      completed: "2026-07-24"
+    - id: "building-033"
+      name: "Voxel World write seam — batched bulk-write + self-write exemption + completion signal"
+      file: "production/epics/building-system/story-033-voxel-write-seam.md"
+      priority: nice-to-have
+      status: complete
+      owner: "godot-specialist"
+      estimate_days: 1.0
+      blocker: "depends on building-029 (DONE), building-032 (in-sprint)"
+      completed: "2026-07-24"
+    - id: "building-003"
+      name: "Grouping/merge (26-neighbourhood) + cell→project reverse index"
+      file: "production/epics/building-system/story-003-grouping-merge-reverse-index.md"
+      priority: nice-to-have
+      status: complete
+      owner: "godot-gdscript-specialist"
+      estimate_days: 1.0
+      blocker: "depends on building-002 (in-sprint)"
+      completed: "2026-07-24"
+    - id: "villager-ai-025"
+      name: "Perf stress validation (30-villager) — produces the production-load measurement the #4 re-tune needs (Advisory)"
+      file: "production/epics/villager-ai-behavior/story-025-perf-stress-validation.md"
+      priority: nice-to-have
+      status: complete
+      owner: "ai-programmer"
+      estimate_days: 1.0
+      blocker: "depends on villager-ai-005, villager-ai-009 (DONE), villager-ai-012 (in-sprint)"
+      completed: "2026-07-24"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SPRINT 6 HISTORY (retained; 13/13 Complete, suite 587→682 green; THE CROWN (scene-004) landed —
