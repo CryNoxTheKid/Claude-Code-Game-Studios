@@ -1,7 +1,7 @@
 # Story 029: Blueprint-then-build — construction tick loop (Planned→UnderConstruction→Built, F3)
 
 > **Epic**: Building System
-> **Status**: Ready
+> **Status: Complete (2026-07-24 — 629/629 suite green, parent-verified)
 > **Layer**: Core
 > **Type**: Logic
 > **Estimate**: 1 day

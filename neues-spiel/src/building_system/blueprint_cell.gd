@@ -24,6 +24,18 @@
 ## drive transitions into -- Story building-004 (release/job eligibility),
 ## building-029/030 (construction), and building-009/015/032 (demolition/
 ## cancel/undo). No transition method is implemented by this story.
+##
+## Story building-029 (this revision) adds [member category]/[member
+## contents] -- GDD Formula F3's `cell_build_ticks = base_build_ticks
+## [category]` needs to know WHICH tuning knob a cell uses
+## ([TR-building-system-079]), and completing a cell needs to know WHAT to
+## write into [VoxelWorldGrid] ([TR-building-system-057]). Both default to a
+## PLACEHOLDER (`Category.BLOCK` / a generic solid [CellContents]) -- Story
+## 022's real material-selection wiring (Core Rule 9) is the future caller
+## that will pass a real resolved value into [method _init] instead of
+## relying on this default, mirroring [CommitPipeline]'s own established
+## placeholder-pending-a-later-story precedent (`_default_cell_set`'s doc
+## comment).
 class_name BlueprintCell
 extends RefCounted
 
@@ -38,6 +50,15 @@ enum MicroState {
 	CANCELED,
 }
 
+## GDD Formula F3's `category` axis (`base_build_ticks[block]` = 4,
+## `[furniture]` = 8, [TR-building-system-079]) -- Story building-029
+## addition (see class doc comment). Determines which tuning knob
+## [method ConstructionTickLoop.required_ticks_for] reads for this cell.
+enum Category {
+	BLOCK,
+	FURNITURE,
+}
+
 ## The cell address this blueprint cell occupies.
 var cell: Vector3i
 
@@ -45,7 +66,25 @@ var cell: Vector3i
 ## [CommitPipeline] itself creates (this story never drives a transition).
 var state: MicroState
 
+## See [enum Category] -- Story building-029 addition. Defaults to
+## [constant Category.BLOCK]; [CommitPipeline] does not yet set this
+## explicitly (Story 028's furniture placement is the future real caller).
+var category: Category
 
-func _init(p_cell: Vector3i, p_state: MicroState = MicroState.PLANNED) -> void:
+## The [CellContents] [ConstructionTickLoop] writes into [VoxelWorldGrid]
+## once this cell completes construction ([TR-building-system-057]) --
+## Story building-029 addition, PLACEHOLDER pending Story 022's real
+## material selection (see class doc comment).
+var contents: CellContents
+
+
+func _init(
+	p_cell: Vector3i,
+	p_state: MicroState = MicroState.PLANNED,
+	p_category: Category = Category.BLOCK,
+	p_contents: CellContents = null
+) -> void:
 	cell = p_cell
 	state = p_state
+	category = p_category
+	contents = p_contents if p_contents != null else CellContents.new(1, 0)
