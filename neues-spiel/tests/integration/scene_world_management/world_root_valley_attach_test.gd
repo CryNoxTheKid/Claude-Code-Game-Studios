@@ -131,10 +131,15 @@ func test_hosted_systems_remain_valid_instances_across_several_frames() -> void:
 	assert_bool(valley.is_inside_tree()).is_true()
 
 
-func test_time_tick_and_villager_ai_are_not_valley_children_by_design() -> void:
-	# Arrange -- regression guard for the two documented, deliberate absences
-	# (Valley's class doc comment): Time & Tick is Autoload-tier (never a
-	# scene child of anything); Villager AI has no landed code yet.
+func test_time_tick_system_autoload_is_never_a_valley_child() -> void:
+	# Arrange -- regression guard for the ONE still-standing documented
+	# absence (Valley's class doc comment): Time & Tick is Autoload-tier,
+	# never a scene child of anything, including Valley. This is a standing
+	# architectural fact, unaffected by Story scene-004's addition of the
+	# remaining Foundation/Core hosted modules (Villager AI's own absence
+	# from this list was retired by that story -- see
+	# test_hosted_building_system_and_villager_ai_modules_are_children_of_valley
+	# below for its own now-landed presence).
 	var world: GameWorld = auto_free(GameWorld.new())
 	var database: MockResourceItemDatabase = auto_free(MockResourceItemDatabase.new())
 	database.configure_ready_immediately()
@@ -146,9 +151,35 @@ func test_time_tick_and_villager_ai_are_not_valley_children_by_design() -> void:
 
 	# Assert
 	var valley: Valley = world.get_valley() as Valley
-	assert_int(valley.get_child_count()).is_equal(2)
 	assert_object(_find_descendant_named(valley, &"TimeTickSystem")).is_null()
-	assert_object(_find_descendant_named(valley, &"VillagerAI")).is_null()
+
+
+func test_hosted_building_system_and_villager_ai_modules_are_children_of_valley() -> void:
+	# Arrange -- Story scene-004 (THE INTEGRATION CROWN) addition: the four
+	# Building System modules and one Villager AI instance are now real,
+	# landed hosted children of Valley (this test's own predecessor asserted
+	# their absence when neither epic had landed code yet -- see
+	# gameworld_e2e_loop_test.gd for this story's own dedicated, fuller
+	# assembly proof; this is a light presence/count regression guard local
+	# to this suite's own established child-topology coverage).
+	var world: GameWorld = auto_free(GameWorld.new())
+	var database: MockResourceItemDatabase = auto_free(MockResourceItemDatabase.new())
+	database.configure_ready_immediately()
+	world.resource_item_database = database
+	world.valley_scene = ValleyScene
+
+	# Act
+	add_child(world)
+
+	# Assert
+	var valley: Valley = world.get_valley() as Valley
+	assert_int(valley.get_child_count()).is_equal(8)
+	assert_object(valley.get_voxel_world_mesher()).is_not_null()
+	assert_object(valley.get_tool_state_machine()).is_not_null()
+	assert_object(valley.get_placement_pick()).is_not_null()
+	assert_object(valley.get_commit_pipeline()).is_not_null()
+	assert_object(valley.get_construction_tick_loop()).is_not_null()
+	assert_object(valley.get_villager_ai()).is_not_null()
 
 
 # ---------------------------------------------------------------------------

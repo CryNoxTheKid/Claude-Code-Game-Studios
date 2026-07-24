@@ -1,7 +1,7 @@
 # Story 004: GameWorld scene assembly + headless E2E LOOP test — THE INTEGRATION CROWN
 
 > **Epic**: Scene / World Management
-> **Status**: Ready
+> **Status: Complete (2026-07-24 — 636/636 suite green, parent-verified — THE CROWN: milestone criterion #8 met)
 > **Layer**: Foundation (scene composition) → integrates Core (Building + Villager AI)
 > **Type**: Integration
 > **Estimate**: 1.5 days

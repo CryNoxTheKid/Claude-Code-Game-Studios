@@ -65,6 +65,26 @@
 ## epic); it does not re-implement the gate mechanism itself (that remains
 ## `foundation-spine` story 002 / [method _on_database_settled]).
 ##
+## Scene/World Management Story 004 scope note (THE INTEGRATION CROWN,
+## ADR-0001 primary): [method _gather_valley_tier_modules] is the GameWorld
+## assembly seam this story adds, called from [method _on_database_settled]
+## immediately after [method _attach_valley] returns, BEFORE the injected-tier
+## sweep. [Valley]'s own hosted tier modules (Voxel World grid + mesher,
+## Camera & Input, the four Building System modules, Villager AI -- see
+## [Valley]'s own class doc comment) cannot be Inspector-wired directly onto
+## this scene's [member injected_tier_modules] array, because [Valley] is
+## instantiated from a [PackedScene] at RUNTIME ([method _attach_valley]), not
+## present in `GameWorld.tscn`'s own saved node tree -- there is nothing for
+## the Inspector to reference at edit time. This method closes that gap by
+## reading [Valley]'s own reported module list ([method
+## Valley.get_injected_tier_modules], duck-typed via [method
+## Object.has_method] so the pre-existing DI/boot-gate-only test suites that
+## predate this story -- which never wire a [Valley] exposing that method --
+## remain unaffected) and appending it to the array [method
+## _setup_injected_tier] already iterates. [method _setup_injected_tier]
+## itself is UNCHANGED -- this remains the sole `setup()` call site (ADR-0005);
+## this story only widens what feeds that array, never how it is consumed.
+##
 ## Scene/World Management Story 003 scope note (ADR-0001 contract surface +
 ## ADR-0013 Key Interfaces, which already anticipated this exact signal pair
 ## living on the World Root): [signal transition_begun] / [signal
@@ -255,9 +275,27 @@ func _on_database_settled(success: bool, issues: Array) -> void:
 		return
 	_boot_state = BootState.WIRING
 	_attach_valley()
+	_gather_valley_tier_modules()
 	_setup_injected_tier()
 	if _boot_state != BootState.HALTED:
 		_boot_state = BootState.ACTIVE
+
+
+## The GameWorld assembly seam (Story scene-004) -- see class doc comment's
+## Story 004 scope note. A no-op when no Valley was ever attached (a null
+## [member valley_scene], the existing DI/boot-gate-only suites' precedent) or
+## when the attached Valley does not expose [method
+## Valley.get_injected_tier_modules] (any hand-constructed test Valley stand-in
+## that predates this story) -- either way, [member injected_tier_modules]
+## is left exactly as scene-file/test wiring set it, unaffected.
+func _gather_valley_tier_modules() -> void:
+	if _valley == null:
+		return
+	if not _valley.has_method(&"get_injected_tier_modules"):
+		return
+	@warning_ignore("unsafe_method_access")
+	var valley_modules: Array[Node] = _valley.get_injected_tier_modules()
+	injected_tier_modules.append_array(valley_modules)
 
 
 ## Calls [code]setup()[/code] on every wired injected-tier module, in array

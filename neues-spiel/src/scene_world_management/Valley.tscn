@@ -1,10 +1,19 @@
-[gd_scene load_steps=6 format=3]
+[gd_scene load_steps=15 format=3]
 
 [ext_resource type="Script" path="res://src/scene_world_management/valley.gd" id="1_valley"]
 [ext_resource type="Script" path="res://src/voxel_world/voxel_world_grid.gd" id="2_voxelgrid"]
 [ext_resource type="Resource" path="res://data/config/voxel_world_config.tres" id="3_voxelcfg"]
 [ext_resource type="Script" path="res://src/camera_input/camera_input.gd" id="4_camerainput"]
 [ext_resource type="Resource" path="res://data/config/camera_input_config.tres" id="5_cameracfg"]
+[ext_resource type="Script" path="res://src/voxel_world/voxel_world_mesher.gd" id="6_mesher"]
+[ext_resource type="Script" path="res://src/building_system/tool_state_machine.gd" id="7_toolsm"]
+[ext_resource type="Script" path="res://src/building_system/placement_pick.gd" id="8_placementpick"]
+[ext_resource type="Resource" path="res://data/config/placement_pick_config.tres" id="9_placementcfg"]
+[ext_resource type="Script" path="res://src/building_system/commit_pipeline.gd" id="10_commitpipeline"]
+[ext_resource type="Script" path="res://src/building_system/construction_tick_loop.gd" id="11_tickloop"]
+[ext_resource type="Resource" path="res://data/config/construction_tick_loop_config.tres" id="12_tickloopcfg"]
+[ext_resource type="Script" path="res://src/villager_ai/villager_ai.gd" id="13_villagerai"]
+[ext_resource type="Resource" path="res://data/config/villager_ai_config.tres" id="14_villagercfg"]
 
 [node name="Valley" type="Node3D"]
 script = ExtResource("1_valley")
@@ -13,6 +22,28 @@ script = ExtResource("1_valley")
 script = ExtResource("2_voxelgrid")
 config = ExtResource("3_voxelcfg")
 
+[node name="VoxelWorldMesher" type="Node3D" parent="."]
+script = ExtResource("6_mesher")
+
 [node name="CameraInput" type="Node" parent="."]
 script = ExtResource("4_camerainput")
 config = ExtResource("5_cameracfg")
+
+[node name="ToolStateMachine" type="Node" parent="."]
+script = ExtResource("7_toolsm")
+
+[node name="PlacementPick" type="Node" parent="."]
+script = ExtResource("8_placementpick")
+config = ExtResource("9_placementcfg")
+
+[node name="CommitPipeline" type="Node" parent="."]
+script = ExtResource("10_commitpipeline")
+
+[node name="ConstructionTickLoop" type="Node" parent="."]
+script = ExtResource("11_tickloop")
+config = ExtResource("12_tickloopcfg")
+
+[node name="VillagerAi" type="Node" parent="."]
+script = ExtResource("13_villagerai")
+config = ExtResource("14_villagercfg")
+villager_id = 0
