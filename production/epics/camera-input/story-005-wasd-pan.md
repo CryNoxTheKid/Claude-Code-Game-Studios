@@ -1,7 +1,7 @@
 # Story 005: WASD pan — yaw-relative, distance-scaled, bound + delta clamp
 
 > **Epic**: Camera & Input
-> **Status**: Ready
+> **Status: Complete (2026-07-24 — 370/370 suite green, parent-verified)
 > **Layer**: Foundation
 > **Type**: Logic
 > **Estimate**: 1 day

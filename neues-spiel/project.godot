@@ -50,6 +50,26 @@ camera_rotate_right={
 "events": [Object(InputEventKey,"keycode":69)
 ]
 }
+camera_pan_forward={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"keycode":87)
+]
+}
+camera_pan_back={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"keycode":83)
+]
+}
+camera_pan_left={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"keycode":65)
+]
+}
+camera_pan_right={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"keycode":68)
+]
+}
 tool_select_1={
 "deadzone": 0.5,
 "events": [Object(InputEventKey,"keycode":49)

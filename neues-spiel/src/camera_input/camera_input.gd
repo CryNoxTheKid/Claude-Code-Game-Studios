@@ -47,10 +47,32 @@
 ## rest of this class's input handling, so the raw-delta contract holds
 ## structurally rather than by a conditional bypass.
 ##
+## Story cam-005 (ADR-0002 primary) additionally owns WASD ground-plane pan
+## (GDD Core Rule 5 [TR-camera-input-025]): [method _apply_pan], driven by
+## [method _process]'s own per-frame delta -- this class's ONE sanctioned
+## per-frame hook, since a held-key pan (unlike Q/E's discrete step or the
+## wheel's discrete event) genuinely needs continuous per-frame movement
+## while held. That frame delta is Godot's own engine-provided value; this
+## class structurally never reads the Time & Tick Autoload nor any of its
+## warp/pause-affected accumulator state anywhere, so the raw-delta contract
+## [TR-camera-input-030] holds exactly as it does for rotation/zoom. The
+## delta is clamped to `config.max_delta_time` BEFORE entering the pan
+## formula [TR-camera-input-043], and the resulting target is clamped to the
+## world extent via [method clamp_target_to_bounds] -- silently, with no
+## error, and margin 0 (the default) is a fully valid configuration, not an
+## edge case [TR-camera-input-026] [TR-camera-input-049]. [method
+## derive_pan_delta] and [method clamp_target_to_bounds] are pure/stateless,
+## mirroring [method derive_position]'s already-established testable-pure-
+## function shape. WASD is read via `Input.get_vector` over
+## [constant PAN_ACTIONS] -- deliberately NOT part of [constant
+## OWNED_ACTIONS]/[signal action_fired]'s opaque one-shot passthrough (that
+## list's semantics are "fired on press," which doesn't fit a continuously-
+## held direction key); [constant PAN_ACTIONS] still gets its own boot-time
+## registration guard, [method _assert_pan_actions_registered].
+##
 ## Out of scope for this class as authored here (later stories extend this
-## same class, not new ones): WASD pan input handling (story cam-005), the
-## mouse world-ray query (story cam-006), and the Active/Suspended state
-## machine (story cam-007).
+## same class, not new ones): the mouse world-ray query (story cam-006), and
+## the Active/Suspended state machine (story cam-007).
 class_name CameraInput
 extends Node
 
@@ -101,14 +123,28 @@ const OWNED_ACTIONS: Array[StringName] = [
 	&"slice_up", &"slice_down", &"slice_reset",
 ]
 
+## WASD ground-plane pan actions (story cam-005, GDD Core Rule 5)
+## [TR-camera-input-025], registered in `project.godot` at project scope like
+## every other action this system owns [TR-camera-input-032]. Kept OUT of
+## [constant OWNED_ACTIONS] deliberately: that list drives [signal
+## action_fired]'s one-shot "fired on press" passthrough (matching Q/E's
+## discrete step), whereas pan is read every frame via `Input.get_vector`
+## inside [method _apply_pan] while a key is HELD -- a continuously-polled
+## direction, not a discrete press event. Re-emitting a one-shot
+## `action_fired` for a held key would misrepresent it, so these get their
+## own boot-time registration guard instead, [method
+## _assert_pan_actions_registered], rather than joining the passthrough list.
+const PAN_ACTIONS: Array[StringName] = [
+	&"camera_pan_forward", &"camera_pan_back", &"camera_pan_left", &"camera_pan_right",
+]
+
 ## Tuning config dependency (ADR-0002). Wired via a scene file's Inspector in
 ## production, or assigned directly in a headless test. Never read inside
 ## `_ready()` -- see [method setup].
 @export var config: CameraInputConfig
 
-## Orbit target point (ground-plane look-at). Mutated by the pan formula
-## (story cam-005, out of scope here); starts at the world origin.
-## [TR-camera-input-021]
+## Orbit target point (ground-plane look-at). Mutated by [method _apply_pan]
+## (story cam-005); starts at the world origin. [TR-camera-input-021]
 var _target: Vector3 = Vector3.ZERO
 
 ## Spherical radius from [member _target] to the camera. Mutated by the zoom
@@ -142,6 +178,7 @@ func setup() -> void:
 	_yaw = config.start_yaw
 	_pitch = clampf(config.start_pitch, config.pitch_min, config.pitch_max)
 	_assert_owned_actions_registered()
+	_assert_pan_actions_registered()
 	_is_set_up = true
 
 
@@ -156,6 +193,16 @@ func _assert_owned_actions_registered() -> void:
 		func(action_name: StringName) -> bool: return not InputMap.has_action(action_name)
 	)
 	assert(missing.is_empty(), "CameraInput owned actions missing from project.godot: %s" % [missing])
+
+
+## Boot-time guard for [constant PAN_ACTIONS], mirroring [method
+## _assert_owned_actions_registered]'s shape exactly but against the separate
+## pan-action list (story cam-005) -- same fail-loudly-on-drift reasoning.
+func _assert_pan_actions_registered() -> void:
+	var missing: Array[StringName] = PAN_ACTIONS.filter(
+		func(action_name: StringName) -> bool: return not InputMap.has_action(action_name)
+	)
+	assert(missing.is_empty(), "CameraInput pan actions missing from project.godot: %s" % [missing])
 
 
 ## Returns whether [method setup] has completed.
@@ -326,3 +373,92 @@ func _apply_mouse_drag_rotation(event: InputEvent) -> void:
 	if event is InputEventMouseMotion and event.button_mask & MOUSE_BUTTON_MASK_MIDDLE:
 		_yaw += event.relative.x * config.mouse_drag_sensitivity
 		set_pitch(_pitch + event.relative.y * config.mouse_drag_sensitivity)
+
+
+## Godot's per-frame engine callback -- this class's ONE sanctioned per-frame
+## hook (story cam-005). [param delta] is Godot's own engine-provided frame
+## delta, never a value read from this project's separate tick-warp/pause
+## clock -- structurally, this class never reads that Autoload anywhere, so
+## the raw-delta contract [TR-camera-input-030] holds the same way it does
+## for rotation/zoom (both purely event-driven, this one purely frame-driven,
+## neither ever touching the other clock).
+##
+## Reads [constant PAN_ACTIONS] via `Input.get_vector` every frame (a
+## held-key, continuously-polled direction -- see [constant PAN_ACTIONS] for
+## why this is distinct from the discrete [signal action_fired] passthrough)
+## and forwards the resolved direction to [method _apply_pan]. This is
+## deliberately the ONLY place this class reads the `Input` singleton for
+## pan -- [method _apply_pan] takes the already-resolved direction as a
+## parameter rather than querying `Input` itself, keeping the formula fully
+## testable without depending on engine-level input dispatch (mirroring how
+## [method _unhandled_input] takes a synthesizable [InputEvent] rather than
+## reading global input state internally). `camera_pan_forward` is the
+## `Input.get_vector` negative-Y parameter: at yaw=0 the camera sits at world
+## +Z relative to the target (see [method derive_position]'s
+## `distance*cos(yaw)` term), so "forward relative to view" -- the direction
+## from camera to target -- is -Z before yaw rotation, matching `vec.y == -1`
+## when the forward key is held.
+func _process(delta: float) -> void:
+	var input_vec: Vector2 = Input.get_vector(
+		&"camera_pan_left", &"camera_pan_right", &"camera_pan_forward", &"camera_pan_back"
+	)
+	_apply_pan(delta, Vector3(input_vec.x, 0.0, input_vec.y))
+
+
+## WASD ground-plane pan formula (GDD Core Rule 5) [TR-camera-input-025].
+## [param input_dir] is the already-resolved, not-necessarily-normalized
+## direction for this frame (see [method _process] for how it's read from
+## [constant PAN_ACTIONS]) -- taking it as a parameter, rather than reading
+## `Input` internally, is what makes this method exercisable directly in a
+## headless test with an arbitrary direction, with no dependency on engine
+## input dispatch.
+##
+## [param delta] is clamped to `config.max_delta_time` BEFORE entering the
+## pan formula [TR-camera-input-043], preventing a large jump after a hitch/
+## stall. The resulting delta vector is added to [member _target], then
+## clamped to the world extent via [method clamp_target_to_bounds] --
+## silently, with no error, and margin 0 (the config default) is a fully
+## valid configuration, not an edge case [TR-camera-input-026]
+## [TR-camera-input-049]. Input still registers at a bound; it simply
+## produces zero further movement in that axis, never a blocked/ignored
+## event.
+func _apply_pan(delta: float, input_dir: Vector3) -> void:
+	var clamped_delta: float = clampf(delta, 0.0, config.max_delta_time)
+	var pan_delta: Vector3 = CameraInput.derive_pan_delta(
+		input_dir, _yaw, _distance, clamped_delta, config.pan_speed_factor
+	)
+	_target = CameraInput.clamp_target_to_bounds(
+		_target + pan_delta,
+		config.world_width_cells, config.world_depth_cells, config.cell_size, config.pan_bound_margin
+	)
+
+
+## Pure pan-formula derivation (GDD Formulas section, Pan):
+## `input_dir.normalized().rotated(UP, yaw) * delta * distance * pan_speed_factor`.
+## Stateless -- exercisable directly with arbitrary values, without an
+## instance or [method setup], mirroring [method derive_position]'s testable-
+## pure-function shape. [param input_dir] need not be pre-normalized -- a
+## [constant Vector3.ZERO] input (no keys held) normalizes to zero safely, no
+## division-by-zero. [TR-camera-input-025] [TR-camera-input-043]
+static func derive_pan_delta(
+	input_dir: Vector3, yaw: float, distance: float, delta: float, pan_speed_factor: float
+) -> Vector3:
+	return input_dir.normalized().rotated(Vector3.UP, yaw) * delta * distance * pan_speed_factor
+
+
+## Pure world-extent bound clamp for the pan target (GDD Formulas section,
+## Pan): clamps X to `[margin, world_width_cells * cell_size - margin]` and Z
+## to `[margin, world_depth_cells * cell_size - margin]`; `target.y` passes
+## through untouched (the orbit target lives on the ground plane, Y is never
+## part of this clamp). Stateless, mirroring [method derive_position]'s
+## testable-pure-function shape. Margin 0 (the config default) is a fully
+## valid configuration -- `clampf` degenerates gracefully to the raw extent
+## bounds, no special-case needed. [TR-camera-input-026] [TR-camera-input-049]
+static func clamp_target_to_bounds(
+	target: Vector3, world_width_cells: int, world_depth_cells: int, cell_size: float, margin: float
+) -> Vector3:
+	return Vector3(
+		clampf(target.x, margin, world_width_cells * cell_size - margin),
+		target.y,
+		clampf(target.z, margin, world_depth_cells * cell_size - margin)
+	)

@@ -47,6 +47,24 @@ const PAN_SPEED_FACTOR_MAX: float = 1.5
 const MAX_DELTA_TIME_MIN: float = 0.05
 const MAX_DELTA_TIME_MAX: float = 0.2
 
+## Sanity floor for [member world_width_cells] -- not a GDD-stated tuning
+## range (that range, 256-2048 validated / 16,000 production target, belongs
+## to voxel-world.md's OWN config and is that module's own concern to
+## enforce). This is only a positivity guard so story cam-005's pan-bound
+## clamp formula never divides/multiplies against a zero or negative extent.
+const WORLD_WIDTH_CELLS_MIN: int = 1
+
+## Sanity floor for [member world_depth_cells]. See [constant WORLD_WIDTH_CELLS_MIN].
+const WORLD_DEPTH_CELLS_MIN: int = 1
+
+## Sanity floor for [member cell_size]. See [constant WORLD_WIDTH_CELLS_MIN].
+const CELL_SIZE_MIN: float = 0.01
+
+## Sanity floor for [member pan_bound_margin] -- a negative margin would push
+## the pan-bound clamp outside the world extent, which is nonsensical; margin
+## 0 (the GDD default) is the valid floor. [TR-camera-input-049]
+const PAN_BOUND_MARGIN_MIN: float = 0.0
+
 ## Starting spherical radius (GDD default: 18.0). [TR-camera-input-021]
 @export var start_distance: float = 18.0
 
@@ -96,9 +114,33 @@ const MAX_DELTA_TIME_MAX: float = 0.2
 @export var pan_speed_factor: float = 0.7
 
 ## Clamp ceiling applied to raw engine delta-time before it enters the pan
-## formula, seconds (GDD default: 0.1). Consumed by story cam-005, out of
-## scope here.
+## formula, seconds (GDD default: 0.1). Consumed by
+## [CameraInput._apply_pan] (story cam-005). [TR-camera-input-043]
 @export var max_delta_time: float = 0.1
+
+## Mirrored copy of Voxel World's `world_width_cells` tuning knob
+## (voxel-world.md Tuning Knobs, GDD default: 2000) -- Camera & Input reads
+## this as a plain config value and never calls Voxel World directly
+## (camera-input.md Interactions + Cross-References). Bounds the pan target's
+## X axis: `[pan_bound_margin, world_width_cells * cell_size - pan_bound_margin]`.
+## [TR-camera-input-026]
+@export var world_width_cells: int = 2000
+
+## Mirrored copy of Voxel World's `world_depth_cells` tuning knob (GDD
+## default: 2000). See [member world_width_cells]. Bounds the pan target's Z
+## axis. [TR-camera-input-026]
+@export var world_depth_cells: int = 2000
+
+## Mirrored copy of Voxel World's fixed `cell_size` (voxel-world.md
+## TR-voxel-world-012, locked at 1.0 -- flush blocks, no gap). [TR-camera-input-026]
+@export var cell_size: float = 1.0
+
+## Small margin subtracted from the world-extent pan-bound clamp on every
+## side (GDD default: 0.0 -- RESOLVED in camera-input.md Open Questions: no
+## building-driven extra margin needed, keep 0 until playtest says otherwise).
+## Margin 0 is a valid, fully-supported configuration, not an edge case.
+## [TR-camera-input-049]
+@export var pan_bound_margin: float = 0.0
 
 
 ## See [ConfigResource.validate]. Clamps every ranged knob to its GDD-stated
@@ -160,4 +202,27 @@ func validate() -> Array[String]:
 			[MAX_DELTA_TIME_MIN, MAX_DELTA_TIME_MAX, max_delta_time]
 		)
 		max_delta_time = clampf(max_delta_time, MAX_DELTA_TIME_MIN, MAX_DELTA_TIME_MAX)
+	if world_width_cells < WORLD_WIDTH_CELLS_MIN:
+		issues.append(
+			"world_width_cells must be >= %s, got %s -- clamped" %
+			[WORLD_WIDTH_CELLS_MIN, world_width_cells]
+		)
+		world_width_cells = WORLD_WIDTH_CELLS_MIN
+	if world_depth_cells < WORLD_DEPTH_CELLS_MIN:
+		issues.append(
+			"world_depth_cells must be >= %s, got %s -- clamped" %
+			[WORLD_DEPTH_CELLS_MIN, world_depth_cells]
+		)
+		world_depth_cells = WORLD_DEPTH_CELLS_MIN
+	if cell_size < CELL_SIZE_MIN:
+		issues.append(
+			"cell_size must be >= %s, got %s -- clamped" % [CELL_SIZE_MIN, cell_size]
+		)
+		cell_size = CELL_SIZE_MIN
+	if pan_bound_margin < PAN_BOUND_MARGIN_MIN:
+		issues.append(
+			"pan_bound_margin must be >= %s, got %s -- clamped" %
+			[PAN_BOUND_MARGIN_MIN, pan_bound_margin]
+		)
+		pan_bound_margin = PAN_BOUND_MARGIN_MIN
 	return issues
