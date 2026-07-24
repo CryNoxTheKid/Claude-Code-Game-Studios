@@ -77,6 +77,33 @@
 ## re-pathing, and calling [method advance_travel_progress] every frame with
 ## a live `game_delta` -- is story 009's Traveling-state-machine scope,
 ## explicitly NOT implemented here.
+##
+## Story villager-ai-005 (this revision) lands ADR-0008's Deciding-pass
+## staggering: a per-tick budget (`max_deciding_per_tick`) plus a
+## stable-order FIFO queue, so a mass-Deciding event cannot let every
+## eligible villager run an expensive F2 selection pass in the same tick.
+## Because stories 001-004 already fixed this codebase's shape as ONE
+## [VillagerAi] instance PER villager (no manager coordinating them --
+## [method get_current_cell]'s own doc comment), the cross-villager
+## queue+budget bookkeeping ADR-0008 describes is factored into a separate,
+## dependency-free collaborator, [VillagerDecidingScheduler] (see its own
+## class doc comment for the full architecture rationale), rather than being
+## duplicated onto every instance's own tick handler -- which would have let
+## an N-villager population drain up to N queue entries per GLOBAL tick
+## instead of `max_deciding_per_tick`. [member scheduler] is an
+## explicitly-injected shared dependency (like [member voxel_world]/
+## [member time_tick_system], NOT a static/class-level singleton -- that
+## would be hidden shared state surviving across independent test runs).
+## [method request_deciding_pass] is the ONE generic eligibility-enqueue
+## entry point every trigger source calls (this story wires the initial
+## Deciding-eligible-at-boot case and the periodic `decision_interval`
+## re-check via [method _check_decision_interval_trigger]; future stories --
+## need-urgent, job-complete -- call the SAME method from their own trigger
+## points, no second enqueue path is ever introduced). [method _tick_state]'s
+## `State.DECIDING` branch now gates the (still-stub) [method _tick_deciding]
+## call behind [method VillagerDecidingScheduler.is_runnable_this_tick] --
+## the actual priority-list logic inside a Deciding pass remains story 006's
+## scope, untouched here.
 class_name VillagerAi
 extends Node
 
@@ -139,6 +166,35 @@ const MAX_STEP_HEIGHT: int = 1
 ## depends on: `signal tick()`.
 var time_tick_system: Object = null
 
+## Deciding-pass scheduler dependency (Story villager-ai-005, ADR-0008
+## Decision §2) -- the ONE shared, cross-villager FIFO-queue-and-budget
+## collaborator every [VillagerAi] instance in the same population must
+## point at the SAME object. Unlike [member config]/[member voxel_world]
+## (typed `@export` Resource/Node references), [VillagerDecidingScheduler] is
+## a plain [RefCounted] with no Inspector-editable representation --
+## deliberately NOT `@export`ed, mirroring [member time_tick_system]'s own
+## duck-typed, code-assigned precedent. Assigned directly by whichever code
+## assembles the villager population (a headless test, or a future spawner
+## story) BEFORE calling [method setup] -- asserted non-null there, exactly
+## like [member config]/[member voxel_world]. This is NOT a manager: see
+## [VillagerDecidingScheduler]'s own class doc comment for why sharing this
+## one object across instances does not reintroduce a manager architecture.
+var scheduler: VillagerDecidingScheduler = null
+
+## This villager's stable identity/processing-order index (GDD Edge Case 3 /
+## F2 tie-break convention: "stable villager processing order (villager
+## index)"). Explicitly assigned by whichever code assembles the population
+## (0, 1, 2... in creation order) -- deliberately NOT a static
+## auto-incrementing counter on this class (hidden shared state would
+## survive across independent GdUnit4 test runs in the same process,
+## violating this codebase's test-isolation discipline); the wirer already
+## controls creation order and is in the best position to assign this
+## explicitly and deterministically. Used as the FIFO key [member scheduler]
+## orders its queue by (this story's stable-order AC) and, in a future
+## story, the value a job claim's worker-attribution record carries
+## (Story 011, [TR-villager-ai-behavior-097]).
+@export var villager_id: int = 0
+
 ## Current agent state (GDD "States and Transitions": Deciding is every
 ## agent's loop-start entry). Read-only from outside this class -- see
 ## [method get_state].
@@ -146,6 +202,16 @@ var _state: State = State.DECIDING
 
 ## True once [method setup] has completed at least once.
 var _is_set_up: bool = false
+
+## Ticks elapsed since this villager's last Deciding-pass ELIGIBILITY
+## trigger fired (not since a pass actually RAN -- those can differ once
+## [member scheduler]'s budget queues a villager for a later tick). Drives
+## the GDD Rule 2 periodic re-check ("`decision_interval` ticks so an urgent
+## need can preempt long work"): this story implements the trigger itself
+## ([method _check_decision_interval_trigger] calling [method
+## request_deciding_pass] on cadence) -- the actual preemption/priority-list
+## BEHAVIOUR once a pass runs is story 006's scope, untouched here.
+var _ticks_since_last_decision: int = 0
 
 ## DISCRETE, tick-boundary-quantized occupancy value -- the SOLE
 ## authoritative value for every logic/occupancy query (ADR-0009 Decision
@@ -212,10 +278,19 @@ var _intra_tick_progress: float = 0.0
 ## [member _visual_position] lerp, double-interpolation jitter) -- applied
 ## here since this class IS the villager's own node; a later
 ## presentation-layer story's dedicated visual child, if one is ever added,
-## must carry this forward too.
+## must carry this forward too. Story villager-ai-005 additionally asserts
+## [member scheduler] is wired, connects it to [member time_tick_system]'s
+## own tick broadcast via [method VillagerDecidingScheduler.
+## connect_to_tick_source] (idempotent -- safe even if every villager in a
+## shared population calls this during their own `setup()`), and marks this
+## villager Deciding-eligible for its very first pass via [method
+## request_deciding_pass] (the default [member _state] is `DECIDING` from
+## construction -- without this call a freshly-created villager would never
+## enter [member scheduler]'s queue at all).
 func setup() -> void:
 	assert(config != null, "VillagerAi.config not wired")
 	assert(voxel_world != null, "VillagerAi.voxel_world not wired")
+	assert(scheduler != null, "VillagerAi.scheduler not wired")
 	if time_tick_system == null:
 		time_tick_system = get_node_or_null(^"/root/TimeTickSystem")
 	assert(
@@ -227,9 +302,11 @@ func setup() -> void:
 	for issue: String in config.validate():
 		if not issue.begins_with(ConfigResource.BLOCKING_PREFIX):
 			push_warning(issue)
+	scheduler.connect_to_tick_source(time_tick_system, config)
 	@warning_ignore("unsafe_property_access")
 	time_tick_system.tick.connect(_on_tick)
 	physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
+	request_deciding_pass()
 	_is_set_up = true
 
 
@@ -241,6 +318,28 @@ func is_set_up() -> bool:
 ## Returns the current agent state (read-only observability/test seam).
 func get_state() -> State:
 	return _state
+
+
+## Returns this villager's stable identity/processing-order index (see
+## [member villager_id]'s own doc comment).
+func get_villager_id() -> int:
+	return villager_id
+
+
+## Marks this villager Deciding-eligible (ADR-0008 Decision §2 -- "a villager
+## becomes eligible for a Deciding pass... enters a pending queue"). This is
+## the generic entry point every eligibility trigger calls: this story wires
+## it to [method setup]'s initial-eligible-at-boot call and [method
+## _check_decision_interval_trigger]'s periodic re-check; future stories
+## (006's state-transition-into-Deciding, 011/018's job-complete, Needs &
+## Mood's need-urgent) call this SAME method from their own trigger points --
+## no second enqueue path is ever introduced. Delegates entirely to [method
+## VillagerDecidingScheduler.enqueue], which is itself idempotent -- calling
+## this repeatedly while already queued never bumps this villager to the
+## back of the stable FIFO order.
+func request_deciding_pass() -> void:
+	assert(scheduler != null, "VillagerAi.scheduler not wired")
+	scheduler.enqueue(villager_id)
 
 
 ## Public occupancy query (ADR-0009 Decision §1 Key Interfaces
@@ -488,10 +587,36 @@ func _is_passable(cell: Vector3i) -> bool:
 ## directly) so a later story's Deciding-pass staggering budget (ADR-0008's
 ## `max_deciding_per_tick` FIFO queue, story 005) has an obvious, single seam
 ## to insert into without touching the signal-wiring line in [method setup].
+## Story villager-ai-005 uses that seam: [method
+## _check_decision_interval_trigger] runs before dispatch, marking this
+## villager Deciding-eligible on the GDD Rule 2 periodic cadence regardless
+## of its current state (so an urgent need can later preempt long work, per
+## that rule) -- [method _tick_state]'s own `State.DECIDING` branch is what
+## actually gates the (still-stub) Deciding pass body behind [member
+## scheduler]'s budget.
 func _on_tick() -> void:
 	if _travel_complete():
 		current_cell = _to_cell
+	_check_decision_interval_trigger()
 	_tick_state()
+
+
+## GDD Rule 2's periodic re-check trigger ("re-evaluated... periodically
+## every `decision_interval` ticks so an urgent need can preempt long
+## work") -- this story's own concrete, independently-testable eligibility
+## enqueue trigger (its Implementation Notes explicitly name
+## `decision_interval` elapsed as one of the triggers this story owns,
+## alongside need-urgent/job-complete, which remain future stories' scope
+## since neither Needs & Mood nor the Building System's job queue exist in
+## this codebase yet). Runs every tick regardless of [member _state] -- the
+## cadence itself is what lets a Working villager's need be periodically
+## reconsidered; deciding what to actually DO once reconsidered is story
+## 006's priority-list logic.
+func _check_decision_interval_trigger() -> void:
+	_ticks_since_last_decision += 1
+	if _ticks_since_last_decision >= config.decision_interval:
+		_ticks_since_last_decision = 0
+		request_deciding_pass()
 
 
 ## FSM dispatch (ADR-0008 Key Interfaces): one `match` branch per
@@ -499,11 +624,18 @@ func _on_tick() -> void:
 ## intentionally empty stub for this story -- real per-state behaviour
 ## (movement, work progress, sleep recovery, breather pacing, wander
 ## micro-behaviours, the Deciding priority list) lands in stories 002/004/
-## 005/006/etc., never here.
+## 005/006/etc., never here. Story villager-ai-005's own contribution lives
+## entirely in the `State.DECIDING` branch: it gates the (still-stub) [method
+## _tick_deciding] call behind [method VillagerDecidingScheduler.
+## is_runnable_this_tick] -- a villager sitting in `DECIDING` but not yet
+## dequeued by [member scheduler]'s budget simply does nothing this tick,
+## remaining queued for a later one (ADR-0008 Decision §2). No other branch
+## is touched by this story.
 func _tick_state() -> void:
 	match _state:
 		State.DECIDING:
-			_tick_deciding()
+			if scheduler.is_runnable_this_tick(villager_id):
+				_tick_deciding()
 		State.TRAVELING:
 			_tick_traveling()
 		State.WORKING:
@@ -516,8 +648,11 @@ func _tick_state() -> void:
 			_tick_wandering()
 
 
-## Deciding-state tick body -- stub (story 005 scheduler queue/budget,
-## story 006 priority decision logic).
+## Deciding-state tick BODY -- stub (story 006's priority decision logic).
+## Story villager-ai-005 owns everything that decides WHETHER this gets
+## called on a given tick (the queue/budget gate in [method _tick_state]);
+## this function itself remains untouched, still an empty stub, per that
+## story's explicit Out of Scope boundary.
 func _tick_deciding() -> void:
 	pass
 

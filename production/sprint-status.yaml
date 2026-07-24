@@ -24,7 +24,7 @@ stories:
     name: "Commit pipeline — click-vs-drag + bounds clamp; pick→preview→commit blueprint"
     file: "production/epics/building-system/story-021-commit-pipeline.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete
     owner: "godot-specialist"
     estimate_days: 1.0
     blocker: ""

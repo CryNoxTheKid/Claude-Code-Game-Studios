@@ -217,6 +217,7 @@ func test_villager_ai_setup_headless_with_mocks_succeeds_no_scene_tree() -> void
 	var villager: VillagerAi = auto_free(VillagerAi.new())
 	villager.config = VillagerAIConfig.new()
 	villager.voxel_world = auto_free(VoxelWorldGrid.new())
+	villager.scheduler = VillagerDecidingScheduler.new()
 	var mock_tick: MockTimeTickSystem = auto_free(MockTimeTickSystem.new())
 	villager.time_tick_system = mock_tick
 	assert_bool(villager.is_set_up()).is_false()
@@ -260,6 +261,7 @@ func test_villager_ai_setup_missing_time_tick_system_raises_assertion() -> void:
 	var villager: VillagerAi = auto_free(VillagerAi.new())
 	villager.config = VillagerAIConfig.new()
 	villager.voxel_world = auto_free(VoxelWorldGrid.new())
+	villager.scheduler = VillagerDecidingScheduler.new()
 
 	# Act + Assert
 	await assert_error(func() -> void: villager.setup()).is_runtime_error(
@@ -299,6 +301,7 @@ func test_villager_ai_setup_connects_tick_signal_to_dispatch() -> void:
 	var villager: VillagerAi = auto_free(VillagerAi.new())
 	villager.config = VillagerAIConfig.new()
 	villager.voxel_world = auto_free(VoxelWorldGrid.new())
+	villager.scheduler = VillagerDecidingScheduler.new()
 	var mock_tick: MockTimeTickSystem = auto_free(MockTimeTickSystem.new())
 	villager.time_tick_system = mock_tick
 
@@ -314,10 +317,15 @@ func test_villager_ai_tick_signal_fire_dispatches_without_error_and_stays_decidi
 	# Arrange — a manually-fired tick (no real physics frame needed) must
 	# reach the FSM dispatch without crashing; DECIDING's body is an empty
 	# stub this story (story 005/006 give it real behaviour), so state stays
-	# unchanged.
+	# unchanged. Story villager-ai-005: the villager's own initial
+	# request_deciding_pass() (setup()) enqueues it before this tick fires,
+	# and the shared scheduler's own tick listener (connected first, inside
+	# setup()) dequeues it this same tick, so DECIDING's stub body is
+	# actually reached here too — still a harmless no-op.
 	var villager: VillagerAi = auto_free(VillagerAi.new())
 	villager.config = VillagerAIConfig.new()
 	villager.voxel_world = auto_free(VoxelWorldGrid.new())
+	villager.scheduler = VillagerDecidingScheduler.new()
 	var mock_tick: MockTimeTickSystem = auto_free(MockTimeTickSystem.new())
 	villager.time_tick_system = mock_tick
 	villager.setup()
@@ -333,8 +341,15 @@ func test_tick_state_dispatches_without_error_for_every_state() -> void:
 	# Arrange — every [enum VillagerAi.State] value is exercised directly
 	# against [method VillagerAi._tick_state], proving every `match` branch
 	# is present and callable (all stub bodies this story) without needing
-	# a real tick signal for each one.
+	# a real tick signal for each one. Story villager-ai-005: the
+	# `State.DECIDING` branch now reads `scheduler.is_runnable_this_tick`, so
+	# this villager needs a scheduler wired even though `setup()` is never
+	# called in this test — a fresh one, with this villager's default id (0)
+	# marked runnable, so the DECIDING branch is exercised for real.
 	var villager: VillagerAi = auto_free(VillagerAi.new())
+	villager.scheduler = VillagerDecidingScheduler.new()
+	villager.scheduler.enqueue(villager.villager_id)
+	villager.scheduler.advance_tick(1)
 	var all_states: Array = [
 		VillagerAi.State.DECIDING, VillagerAi.State.TRAVELING, VillagerAi.State.WORKING,
 		VillagerAi.State.SLEEPING, VillagerAi.State.BREATHER, VillagerAi.State.WANDERING,

@@ -38,10 +38,15 @@ extends GdUnitTestSuite
 
 ## Pure position-model functions need only `config` wired -- no
 ## `voxel_world`, no `time_tick_system`, no `setup()` call, no scene tree
-## (AC20: "drivable directly... no real engine frames").
+## (AC20: "drivable directly... no real engine frames"). Story
+## villager-ai-005: `_on_tick()` now also dispatches through `_tick_state()`,
+## whose `State.DECIDING` branch reads `scheduler` -- wired here (a fresh,
+## unshared instance; these tests never populate its queue) so calling
+## `_on_tick()` directly never crashes on a null scheduler.
 func _make_villager_ai() -> VillagerAi:
 	var villager_ai: VillagerAi = auto_free(VillagerAi.new())
 	villager_ai.config = VillagerAIConfig.new()
+	villager_ai.scheduler = VillagerDecidingScheduler.new()
 	return villager_ai
 
 
@@ -326,6 +331,7 @@ func test_setup_sets_physics_interpolation_mode_off() -> void:
 	var villager_ai: VillagerAi = auto_free(VillagerAi.new())
 	villager_ai.config = VillagerAIConfig.new()
 	villager_ai.voxel_world = auto_free(VoxelWorldGrid.new())
+	villager_ai.scheduler = VillagerDecidingScheduler.new()
 	villager_ai.time_tick_system = auto_free(MockTimeTickSystem.new())
 
 	villager_ai.setup()

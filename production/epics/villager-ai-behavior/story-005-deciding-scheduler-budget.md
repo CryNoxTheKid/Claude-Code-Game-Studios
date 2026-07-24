@@ -1,7 +1,7 @@
 # Story 005: Deciding scheduler — FIFO queue + max_deciding_per_tick budget
 
 > **Epic**: Villager AI & Behavior
-> **Status**: Ready
+> **Status: Complete (2026-07-24 — 538/538 suite green, parent-verified)
 > **Layer**: Core
 > **Type**: Logic
 > **Estimate**: ~1 agent-day
