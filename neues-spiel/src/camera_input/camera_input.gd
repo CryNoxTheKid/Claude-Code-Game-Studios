@@ -33,10 +33,24 @@
 ## `Input.mouse_mode = MOUSE_MODE_CAPTURED` during the drag -- the cursor
 ## stays visible and free, per the GDD/manifest.
 ##
+## Story cam-004 (ADR-0002 primary) additionally owns mouse-wheel zoom
+## ([method _apply_zoom], GDD Core Rule 4 [TR-camera-input-024]): each wheel
+## event scales [member _distance] multiplicatively by
+## `config.zoom_factor_in` (wheel-up, "zoom in") or `config.zoom_factor_out`
+## (wheel-down, "zoom out"), then clamps the result to
+## `[config.distance_min, config.distance_max]` via the new
+## [method set_distance] primitive -- mirroring [method set_pitch]'s
+## clamp-on-write shape from stories cam-001/003. There is no accumulator
+## state: every wheel event applies the formula once, independently, so N
+## rapid successive events (any N) still respect the clamp with no
+## compounding overshoot [TR-camera-input-044]. Purely event-driven like the
+## rest of this class's input handling, so the raw-delta contract holds
+## structurally rather than by a conditional bypass.
+##
 ## Out of scope for this class as authored here (later stories extend this
-## same class, not new ones): mouse-wheel zoom and WASD pan input handling
-## (stories cam-004/005), the mouse world-ray query (story cam-006), and the
-## Active/Suspended state machine (story cam-007).
+## same class, not new ones): WASD pan input handling (story cam-005), the
+## mouse world-ray query (story cam-006), and the Active/Suspended state
+## machine (story cam-007).
 class_name CameraInput
 extends Node
 
@@ -190,6 +204,17 @@ func get_yaw() -> float:
 	return _yaw
 
 
+## Sets the spherical radius, clamped to
+## `[config.distance_min, config.distance_max]` -- the zoom clamp bound
+## [TR-camera-input-024]. The zoom input handling that calls this
+## (mouse-wheel, story cam-004) is this story's scope; this is the shared
+## clamp primitive, mirroring [method set_pitch]'s shape, that any future
+## distance-changing input can reuse without duplicating the clamp.
+func set_distance(value: float) -> void:
+	assert(config != null, "CameraInput.config not wired")
+	_distance = clampf(value, config.distance_min, config.distance_max)
+
+
 ## Returns the current spherical radius.
 func get_distance() -> float:
 	return _distance
@@ -225,6 +250,11 @@ func get_target() -> Vector3:
 ## loop still treats uniformly). [TR-camera-input-027]'s "no branch on
 ## action identity" guarantee is about the opaque re-emission of OTHER
 ## systems' actions and is unaffected.
+##
+## Story cam-004 similarly appends a third unconditional call site,
+## [method _apply_zoom], for this system's own mouse-wheel zoom -- same
+## reasoning: the branch lives inside that method, on the wheel event's own
+## button index, never here on [constant OWNED_ACTIONS] identity.
 func _unhandled_input(event: InputEvent) -> void:
 	var fired: Array[StringName] = OWNED_ACTIONS.filter(
 		func(action_name: StringName) -> bool: return event.is_action_pressed(action_name)
@@ -233,6 +263,28 @@ func _unhandled_input(event: InputEvent) -> void:
 		action_fired.emit(action_name)
 	_apply_qe_rotation(event)
 	_apply_mouse_drag_rotation(event)
+	_apply_zoom(event)
+
+
+## Mouse-wheel multiplicative zoom (GDD Core Rule 4) [TR-camera-input-024].
+## Each wheel event is a discrete [InputEventMouseButton] with
+## `pressed = true` -- never accumulated across frames and never scaled by
+## delta-time (the GDD formula applies once per wheel event, matching how
+## Q/E applies once per key press in [method _apply_qe_rotation], not once
+## per frame). Wheel-up ([constant MOUSE_BUTTON_WHEEL_UP]) zooms in
+## (`config.zoom_factor_in`, GDD default 0.9, shrinks distance); wheel-down
+## ([constant MOUSE_BUTTON_WHEEL_DOWN]) zooms out (`config.zoom_factor_out`,
+## GDD default 1.1, grows distance). Routes through [method set_distance],
+## which owns the `[distance_min, distance_max]` clamp -- so any number of
+## rapid successive events can never overshoot the bound regardless of event
+## count [TR-camera-input-044]. Factors are read from [member config] --
+## never a hardcoded literal [TR-camera-input-019].
+func _apply_zoom(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.pressed:
+		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
+			set_distance(_distance * config.zoom_factor_in)
+		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			set_distance(_distance * config.zoom_factor_out)
 
 
 ## Q/E fixed-step yaw rotation (GDD Core Rule 3) [TR-camera-input-023].

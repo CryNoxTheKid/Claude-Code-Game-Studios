@@ -1,7 +1,7 @@
 # Story 004: Zoom — multiplicative, clamped, rapid-event safe
 
 > **Epic**: Camera & Input
-> **Status**: Ready
+> **Status: Complete (2026-07-24 — 355/355 suite green, parent-verified)
 > **Layer**: Foundation
 > **Type**: Logic
 > **Estimate**: 0.5–1 day
