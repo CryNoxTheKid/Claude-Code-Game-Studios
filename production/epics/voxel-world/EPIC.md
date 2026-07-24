@@ -5,7 +5,7 @@
 > **Architecture Module**: Voxel World / Grid Data (the `Vector3i`-addressed cell grid; raw read/write primitives; change-signal emission; procedural terrain; chunked mesher + paged residency storage tier)
 > **Manifest Version**: 2026-07-23
 > **Status**: Ready
-> **Stories**: 17 stories created
+> **Stories**: 18 stories created
 
 ## Stories
 
@@ -28,6 +28,7 @@
 | 015 | Mesh view-window streaming (build + unload budgets) | Integration | Ready | ADR-0014 |
 | 016 | ADR-0015 C1 — async cap + bounded gen cost (TECH DEBT 3) | Config/Data | Ready | ADR-0015 |
 | 017 | ADR-0015 C4 — completion-driven drain (TECH DEBT 3) | Integration | Ready | ADR-0015 |
+| 018 | Live Valley view-window wiring + 60-FPS-with-culling measurement (criterion #12) | Integration | Not Started | ADR-0014 |
 
 ## Overview
 
