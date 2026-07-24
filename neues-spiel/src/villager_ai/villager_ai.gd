@@ -27,7 +27,7 @@
 ## structural-guarantee style `CameraInput`'s raw-delta contract already
 ## established for this codebase).
 ##
-## Story villager-ai-002 (this revision) adds the two shared walkability
+## Story villager-ai-002 (previous revision) adds the two shared walkability
 ## predicates ADR-0007 Decision §1 assigns to Villager AI as its public API:
 ## [method is_standable] and [method is_step_legal]. Both are pure queries
 ## against [member voxel_world]'s cell data plus two registered design
@@ -38,6 +38,22 @@
 ## (story 007), Build Validation's independent BFS, and the Unstuck
 ## Watchdog's rescue-target search (story 014) -- calls these same two
 ## functions; none of them may re-derive an equivalent rule locally.
+##
+## Story villager-ai-003 (this revision) names the **body-column** concept
+## explicitly (GDD Rule 8a/[TR-villager-ai-behavior-098], ADR-0009 slice
+## propagation, Control Manifest Core Layer: "Occupancy is a body-column, not
+## a single cell") and adds it as a second pure-function public API:
+## [method body_column] derives the villager's own 3-cell vertical space
+## (2-cell body + 1 buffer headroom cell) from a single discrete
+## `current_cell`, and [method is_cell_in_body_column] is the occupancy
+## predicate against it. Both reuse [constant VILLAGER_CLEARANCE] unchanged
+## -- no second constant, per this story's explicit scope -- and are
+## interpolation-free by construction (they take a `Vector3i`, never a
+## villager instance or its `_visual_position`). Future consumers -- the
+## Unstuck Watchdog's rescue/trigger checks (stories 014/015) and
+## seal-prevention/walled-in detection (story 016) -- derive/query the
+## column through these two functions rather than re-deriving an equivalent
+## span locally.
 class_name VillagerAi
 extends Node
 
@@ -202,6 +218,59 @@ func is_step_legal(from_cell: Vector3i, to_cell: Vector3i) -> bool:
 		if not is_standable(flanker_a) or not is_standable(flanker_b):
 			return false
 	return true
+
+
+## Body-column derivation (Story villager-ai-003, ADR-0009 slice-propagation
+## Decision §2/Key Interfaces, GDD Rule 8a/[TR-villager-ai-behavior-098],
+## Control Manifest Core Layer: "Occupancy is a body-column, not a single
+## cell"): the villager's own space is a 3-cell vertical span -- the 2-cell
+## body (feet + head) plus one buffer headroom cell -- derived
+## deterministically from a single discrete cell, exactly the same span
+## [method is_standable] already checks for standability clearance
+## ([constant VILLAGER_CLEARANCE] -- no second constant is introduced by
+## this story, per its Implementation Notes). This function only names the
+## concept as a reusable, callable definition so the Unstuck Watchdog
+## (stories 014/015) and seal-prevention/walled-in queries (story 016) share
+## ONE source of truth instead of each re-deriving an equivalent span
+## locally.
+##
+## Interpolation-free by construction: [param cell] is a plain `Vector3i` --
+## there is no villager instance, `current_cell`, or `_visual_position`
+## anywhere in this function's signature or body, so it cannot accidentally
+## read interpolation state. Callers are responsible for always passing the
+## authoritative discrete `current_cell` (ADR-0009 Decision §1), never a
+## visual/interpolated position.
+##
+## Pure query: no mutation, no cached state, identical inputs always yield
+## an identical result (the same purity guarantee as [method is_standable] /
+## [method is_step_legal]).
+func body_column(cell: Vector3i) -> Array[Vector3i]:
+	var column: Array[Vector3i] = []
+	for offset in range(VILLAGER_CLEARANCE):
+		column.append(cell + Vector3i(0, offset, 0))
+	return column
+
+
+## Occupancy predicate against a villager's body-column (ADR-0009
+## slice-propagation Decision §2/§2b, Control Manifest Core Layer: "Seal
+## prevention is a negative-write gate the Building System write path MUST
+## accept" -- this is the shared predicate that gate, and the Watchdog's
+## rescue/trigger checks, read). Returns whether [param query_cell] falls
+## within the body-column occupying [param occupant_cell] -- i.e. whether a
+## villager standing at [param occupant_cell] occupies [param query_cell].
+##
+## Deliberately NOT a feet-only comparison (`query_cell == occupant_cell`):
+## this story's AC requires proving a feet-only check is insufficient -- the
+## body cell directly above the feet, and the buffer headroom cell above
+## that, are also occupied, and a write there must be caught by
+## seal-prevention exactly as a write at the feet cell would be (a check
+## that only ever compares against the feet cell would miss it -- the exact
+## defect the column exists to prevent).
+##
+## Pure query: delegates entirely to [method body_column]; no mutation, no
+## cached state.
+func is_cell_in_body_column(occupant_cell: Vector3i, query_cell: Vector3i) -> bool:
+	return body_column(occupant_cell).has(query_cell)
 
 
 ## Solidity read for [method is_standable]'s "solid below" check -- an

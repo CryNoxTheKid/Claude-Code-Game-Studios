@@ -23,7 +23,7 @@ stories:
     name: "Region-file paged residency — opens the ADR-0015 cluster"
     file: "production/epics/voxel-world/story-010-region-file-paged-residency.md"
     priority: must-have
-    status: complete-for-dev
+    status: complete
     owner: "godot-gdscript-specialist"
     estimate_days: 1.5
     blocker: ""
@@ -59,7 +59,7 @@ stories:
     name: "Body-column occupancy / clearance — first Villager spatial-logic story"
     file: "production/epics/villager-ai-behavior/story-003-body-column-clearance.md"
     priority: must-have
-    status: ready-for-dev
+    status: in-progress
     owner: "ai-programmer"
     estimate_days: 1
     blocker: ""

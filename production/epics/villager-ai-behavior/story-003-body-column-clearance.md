@@ -1,12 +1,12 @@
 # Story 003: Body-column occupancy model (2-block character clearance)
 
 > **Epic**: Villager AI & Behavior
-> **Status**: Ready
+> **Status: Complete (2026-07-24 — 474/474 suite green, parent-verified)
 > **Layer**: Core
 > **Type**: Logic
 > **Estimate**: ~1 agent-day
 > **Manifest Version**: 2026-07-23
-> **Last Updated**: —
+> **Last Updated**: 2026-07-24
 
 ## Context
 
@@ -69,7 +69,7 @@
 **Story Type**: Logic
 **Required evidence**: neues-spiel/`tests/unit/villager_ai/body_column_test.gd` — must exist and pass.
 
-**Status**: [ ] Not yet created
+**Status**: [x] Created — `neues-spiel/tests/unit/villager_ai/body_column_test.gd` (11 test functions), full suite green (474/474, exit 0)
 
 ---
 
