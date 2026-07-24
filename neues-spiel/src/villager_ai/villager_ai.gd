@@ -149,8 +149,47 @@
 ## of [method _current_step_length_cells] (see that method's own doc
 ## comment). Wiring a shared [VillagerNavGraph] instance into this class's
 ## own Traveling state is story 009's scope, untouched here.
+##
+## Story villager-ai-008 (this revision) implements GDD Rule 10b's re-path
+## FILTER ([TR-villager-ai-behavior-012]/036): [method setup] connects this
+## villager directly to [member voxel_world]'s [signal
+## VoxelWorldGrid.cell_changed]/[signal VoxelWorldGrid.cells_changed_batch]
+## (Godot's default, synchronous, NEVER `CONNECT_DEFERRED` flags -- the same
+## race-closure reliance [VillagerNavGraph]'s own story-008 subscription
+## documents). [method evaluate_repath_trigger] is the filter itself,
+## delegating the actual clearance-envelope-intersection decision to the
+## stateless [VillagerRepathFilter] library; [method
+## get_remaining_movement_cells] supplies "the remaining movement's cells"
+## for THIS story's scope as exactly the current single travel step
+## ([member _from_cell], [member _to_cell]) -- the only movement this class
+## tracks today (a full multi-cell remaining-PATH is story 009's Traveling
+## state-machine addition; this story's filter is written generically enough
+## that a future richer path representation only needs to widen [method
+## get_remaining_movement_cells]'s return, not [VillagerRepathFilter] itself
+## or [method evaluate_repath_trigger]'s call site). [method is_moving]
+## reports "moving" purely from the discrete `_from_cell != _to_cell`
+## comparison -- deliberately NOT keyed to [member _state] naming Traveling/
+## Wandering/Breather explicitly, so the SAME check already covers every one
+## of the GDD's 4 named moving cases (Traveling, a Wandering step, a
+## Breather step-away, or a future F4 vacate step) without this class ever
+## needing to enumerate them. A stationary villager (Deciding/Working/
+## Sleeping, or a Breather not yet stepping -- `_from_cell == _to_cell`,
+## true from construction and after every arrival-crediting [method
+## _on_tick] assignment) always reports not-moving, so [signal
+## repath_evaluation_requested] can never fire for it -- matching the rule's
+## own "for any MOVING villager" scope. This story implements the FILTER
+## decision only -- the actual re-path/redirect story 009 wires to this
+## signal is explicitly out of this story's scope.
 class_name VillagerAi
 extends Node
+
+## Fires when [method evaluate_repath_trigger] determines a Voxel World
+## write's changed cell(s) intersect this (currently moving) villager's
+## remaining-movement clearance envelope (GDD Rule 10b, this story's AC18).
+## Carries no arguments -- WHICH write and WHAT to do about it are story
+## 009's concern; this story's own contract is purely "did the filter fire,
+## and exactly how many times" (AC18/AC49's call-count assertions).
+signal repath_evaluation_requested()
 
 ## The six-state agent machine (GDD "States and Transitions" table; ADR-0008
 ## Decision §1 Architecture Diagram). Exactly these six and no others
@@ -396,6 +435,12 @@ func setup() -> void:
 	@warning_ignore("unsafe_property_access")
 	time_tick_system.tick.connect(_on_tick)
 	physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
+	# Story villager-ai-008 (GDD Rule 10b, re-path filter): default,
+	# synchronous connection flags -- NEVER CONNECT_DEFERRED. The whole
+	# race-closure argument (ADR-0009) depends on this filter evaluation
+	# landing in the SAME call stack as the write.
+	voxel_world.cell_changed.connect(_on_voxel_world_cell_changed)
+	voxel_world.cells_changed_batch.connect(_on_voxel_world_cells_changed_batch)
 	request_deciding_pass()
 	_is_set_up = true
 
@@ -890,3 +935,81 @@ func _tick_breather() -> void:
 ## Wandering-state tick body -- stub (story 004 wander/idle micro-behaviours).
 func _tick_wandering() -> void:
 	pass
+
+
+# =============================================================================
+# Story villager-ai-008 -- re-path FILTER (GDD Rule 10b, TR-012/036)
+# =============================================================================
+
+## Whether this villager is currently mid-step (GDD Rule 10b's "any moving
+## villager" scope). A pure, discrete comparison -- `_from_cell != _to_cell`
+## -- never a read of [member _visual_position]/[member _intra_tick_progress]
+## (Control Manifest Core Layer: occupancy/movement queries never reason
+## about interpolation progress). Deliberately NOT keyed to [member _state]
+## naming TRAVELING/WANDERING/BREATHER explicitly: whichever state is
+## driving a 1-cell step (Traveling, a Wandering step, a Breather
+## step-away, or a future F4 vacate step), that step sets
+## [member _from_cell]/[member _to_cell] to two DIFFERENT cells for its
+## duration and back to equal at arrival ([method _on_tick]'s
+## `current_cell = _to_cell` moment coincides with `_from_cell == _to_cell`
+## already being true from the PRIOR step's completion, by this class's own
+## existing invariant) -- so this single check already covers all 4 named
+## cases without enumerating them, and naturally excludes every stationary
+## state (Deciding/Working/Sleeping, and a Breather not yet stepping) since
+## none of them ever drives `_from_cell`/`_to_cell` apart.
+func is_moving() -> bool:
+	return _from_cell != _to_cell
+
+
+## "The remaining movement's cells" (GDD Rule 10b) for this story's scope:
+## exactly the current single travel step's two cells, when moving ([method
+## is_moving] true) -- an empty array otherwise. This class does not yet
+## track a full multi-cell remaining PATH (story 009's Traveling
+## state-machine addition) -- a single in-flight step is the only movement
+## representation that exists today, and it is exactly what [method
+## evaluate_repath_trigger]/[VillagerRepathFilter] need to compute a
+## clearance envelope against.
+func get_remaining_movement_cells() -> Array[Vector3i]:
+	if not is_moving():
+		return []
+	return [_from_cell, _to_cell]
+
+
+## The re-path FILTER itself (GDD Rule 10b, this story's AC18/AC49): given
+## the cell(s) a Voxel World write just changed, fires [signal
+## repath_evaluation_requested] exactly once if -- and only if -- this
+## villager is currently moving ([method is_moving]) AND [param
+## changed_cells] intersects [method get_remaining_movement_cells]'s own
+## clearance envelope (delegated entirely to the stateless
+## [VillagerRepathFilter] library, never a locally re-derived copy of the
+## envelope rule). A write outside that envelope -- or any write while this
+## villager is stationary -- fires nothing (AC49: "re-path evaluation
+## call-count == 0").
+func evaluate_repath_trigger(changed_cells: Array[Vector3i]) -> void:
+	if not is_moving():
+		return
+	if VillagerRepathFilter.changed_cells_intersect_envelope(changed_cells, get_remaining_movement_cells()):
+		repath_evaluation_requested.emit()
+
+
+## [signal VoxelWorldGrid.cell_changed] handler (wired in [method setup] with
+## Godot's DEFAULT, synchronous, NEVER `CONNECT_DEFERRED` connection flags --
+## see this class's own doc comment for why that is load-bearing). Delegates
+## to [method evaluate_repath_trigger] for the single changed cell; [param
+## _before]/[param _after] are unused -- the filter only cares WHICH cell
+## changed, never what it changed FROM/TO.
+func _on_voxel_world_cell_changed(cell: Vector3i, _before: CellContents, _after: CellContents) -> void:
+	evaluate_repath_trigger([cell])
+
+
+## [signal VoxelWorldGrid.cells_changed_batch] handler -- same delegation as
+## [method _on_voxel_world_cell_changed], batched: every changed cell across
+## one bulk write is folded into ONE [method evaluate_repath_trigger] call
+## (so at most one [signal repath_evaluation_requested] emission per batch,
+## never one per record), consistent with [VillagerNavGraph]'s own
+## story-008 batch handler.
+func _on_voxel_world_cells_changed_batch(changes: Array[CellChangeRecord]) -> void:
+	var cells: Array[Vector3i] = []
+	for record: CellChangeRecord in changes:
+		cells.append(record.cell)
+	evaluate_repath_trigger(cells)

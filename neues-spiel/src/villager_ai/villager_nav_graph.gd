@@ -32,6 +32,31 @@
 ## [VoxelWorldGrid] cell contents directly (the one exception is [method
 ## VoxelWorldGrid.cell_to_world], the single source of truth for cell<->world
 ## conversion, reused here rather than a second, locally-duplicated formula).
+##
+## Story villager-ai-008 (this revision) implements ADR-0007 Decision Section
+## 2's "incrementally patched -- not rebuilt -- whenever a Voxel World write
+## changes standability or step-legality" ([TR-villager-ai-behavior-036]):
+## [method subscribe_to_voxel_world] connects this graph to a
+## [VoxelWorldGrid]'s [signal VoxelWorldGrid.cell_changed]/
+## [signal VoxelWorldGrid.cells_changed_batch] with Godot's DEFAULT
+## (synchronous, NEVER `CONNECT_DEFERRED`) connection flags -- the race this
+## story's QA plan names explicitly depends on the patch landing in the SAME
+## call stack as the write (ADR-0009's already-established synchronous-
+## signal race closure). [method patch_cell]/[method patch_cells] recompute
+## standability/step-legality (via [param predicate_source]'s [method
+## VillagerAi.is_standable]/[method VillagerAi.is_step_legal], never a
+## re-derived copy) for ONLY the changed cell(s) plus a bounded clearance/
+## step neighborhood -- add/remove points and connections there, never
+## `_astar.clear()`, never re-running [method build]. A dig/demolition write
+## (solid -> air) patches through the IDENTICAL code path as a build write
+## (air -> solid): neither [method patch_cell] nor [method
+## _on_voxel_world_cell_changed] inspects `before`/`after` at all, only
+## re-queries CURRENT state, which already reflects the write by the time the
+## signal fires ([method VoxelWorldGrid.set_cell] applies the write BEFORE
+## emitting). Idempotent ID reuse (this story's AC: "re-adding a
+## previously-removed cell reuses the same ID") falls out of [method
+## cell_to_astar_id]'s existing pure-function determinism with no extra code
+## -- there is no counter to drift in the first place.
 class_name VillagerNavGraph
 extends RefCounted
 
@@ -298,3 +323,199 @@ static func travel_time_game_seconds(length_cells: float, move_speed: float) -> 
 	if length_cells <= 0.0:
 		return 0.0
 	return length_cells / move_speed
+
+
+# =============================================================================
+# Story villager-ai-008 -- incremental patching on Voxel World writes
+# =============================================================================
+
+## The changed cell's own horizontal column plus its 8 Chebyshev-adjacent
+## horizontal neighbor columns (this story's "clearance/step neighborhood" --
+## ADR-0007 Key Interfaces `_on_voxel_world_cell_changed`'s own wording).
+## Point-membership (standability) can only change within the changed cell's
+## OWN column (`Vector2i(0,0)`) -- [method VillagerAi.is_standable] never
+## reads another column's contents. The other 8 columns are included here
+## because [method VillagerAi.is_step_legal]'s diagonal-flank check reads
+## [method VillagerAi.is_standable] on cells at a DIFFERENT (x, z) than
+## either endpoint of the step it is evaluating -- a write at the changed
+## cell can therefore flip the legality of a diagonal step between two OTHER
+## neighboring columns where the changed cell is the flanker (provably true
+## for any flanker offset [method VillagerAi.is_step_legal] can construct,
+## since a flanker is always exactly one step away, horizontally, from one of
+## the two cells whose step it gates). [method patch_cells] re-derives
+## connections for every point in this 9-column band against its own full
+## 8-direction neighbor set, so a step between two OTHER cells that both
+## happen to lie just outside this band, but adjacent to a band member, is
+## still correctly re-evaluated from that member's own side.
+const PATCH_NEIGHBORHOOD_HORIZONTAL_OFFSETS: Array[Vector2i] = [
+	Vector2i(0, 0),
+	Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1),
+	Vector2i(1, 1), Vector2i(1, -1), Vector2i(-1, 1), Vector2i(-1, -1),
+]
+
+## All 8 horizontal neighbor directions (unlike [constant
+## HORIZONTAL_HALF_OFFSETS], which deliberately covers only half of them --
+## an optimization valid ONLY for [method build]'s "visit every unordered
+## pair exactly once from a full, fresh scan" shape). A patch pass revisits
+## already-existing points from a small subset of cells, so it must consider
+## BOTH directions from each one explicitly -- there is no complementary pass
+## from "the other half" the way [method build]'s two-pass structure
+## guarantees.
+const HORIZONTAL_FULL_OFFSETS: Array[Vector2i] = [
+	Vector2i(1, 0), Vector2i(1, 1), Vector2i(0, 1), Vector2i(-1, 1),
+	Vector2i(-1, 0), Vector2i(-1, -1), Vector2i(0, -1), Vector2i(1, -1),
+]
+
+
+## Subscribes this graph to [param voxel_world]'s write signals so it patches
+## itself incrementally on every future write (this story's AC1/AC2;
+## ADR-0007 Decision Section 2). Connects with Godot's DEFAULT (synchronous,
+## NEVER `CONNECT_DEFERRED`) flags -- see this class's own doc comment for
+## why that is load-bearing, not incidental. Call exactly once per (graph,
+## voxel_world) pair -- this codebase's single-shared-graph architecture
+## (see this class's own doc comment, story villager-ai-007) means there is
+## exactly ONE [VillagerNavGraph] instance for the whole population, so this
+## is a one-time wiring call (a future boot/world-generation story's
+## responsibility, or a test's, per this story's own integration test).
+func subscribe_to_voxel_world(voxel_world: VoxelWorldGrid, predicate_source: VillagerAi) -> void:
+	voxel_world.cell_changed.connect(_on_voxel_world_cell_changed.bind(predicate_source))
+	voxel_world.cells_changed_batch.connect(_on_voxel_world_cells_changed_batch.bind(predicate_source))
+
+
+## [signal VoxelWorldGrid.cell_changed] handler ([param predicate_source] is
+## the bound extra argument appended after the signal's own three, [method
+## Signal.bind] semantics). Delegates to [method patch_cell] -- never
+## inspects [param _before]/[param _after] itself (this story's AC2: a dig/
+## demolition write patches IDENTICALLY to a build write; both are simply "a
+## cell changed," and re-querying CURRENT state via [param predicate_source]
+## is sufficient since [method VoxelWorldGrid.set_cell] already applied the
+## write before emitting this signal).
+func _on_voxel_world_cell_changed(
+	cell: Vector3i, _before: CellContents, _after: CellContents, predicate_source: VillagerAi
+) -> void:
+	patch_cell(predicate_source, cell)
+
+
+## [signal VoxelWorldGrid.cells_changed_batch] handler -- same delegation as
+## [method _on_voxel_world_cell_changed], batched: every changed cell across
+## an entire bulk write (e.g. terrain generation, a large demolition order)
+## is folded into ONE [method patch_cells] call, never one [method
+## patch_cell] call per record.
+func _on_voxel_world_cells_changed_batch(
+	changes: Array[CellChangeRecord], predicate_source: VillagerAi
+) -> void:
+	var cells: Array[Vector3i] = []
+	for record: CellChangeRecord in changes:
+		cells.append(record.cell)
+	patch_cells(predicate_source, cells)
+
+
+## Incremental single-cell patch (this story's AC1: "patch only the affected
+## cell + its clearance/step neighborhood -- never a full rebuild"; ADR-0007
+## Key Interfaces `_on_voxel_world_cell_changed`). Convenience wrapper around
+## [method patch_cells] for exactly one changed cell -- also this story's own
+## directly-testable entry point (no signal wiring required to exercise it).
+func patch_cell(predicate_source: VillagerAi, changed_cell: Vector3i) -> void:
+	patch_cells(predicate_source, [changed_cell])
+
+
+## Incremental multi-cell patch -- the same operation as [method patch_cell],
+## batched over every cell in [param changed_cells] (this story's own
+## `cells_changed_batch` consumer; also directly testable for a
+## multi-cell-write scenario without needing a live signal). A no-op before
+## [method build] has ever run (`_is_built` false) -- nothing to keep
+## consistent yet; the eventual [method build] call starts from Voxel
+## World's then-current state regardless of any writes that happened before
+## it.
+##
+## For every cell in [param changed_cells], expands to its [constant
+## PATCH_NEIGHBORHOOD_HORIZONTAL_OFFSETS] x a `[-VILLAGER_CLEARANCE,
+## +VILLAGER_CLEARANCE]` vertical band (a generous, provably-sufficient
+## superset of the tighter exact bound [method VillagerAi.is_standable]'s own
+## solid-below/clearance-column reads imply -- cheap at this graph's
+## per-write scale, matching the ADR's own measured patch-cost guardrail).
+## Deduplicates the resulting cell set (a plain `Dictionary`-as-set) before
+## re-syncing points then connections -- never a full `_astar.clear()`/
+## [method build] re-run (this story's AC1).
+func patch_cells(predicate_source: VillagerAi, changed_cells: Array[Vector3i]) -> void:
+	if not _is_built:
+		return
+	var affected: Dictionary[Vector3i, bool] = {}
+	var clearance: int = VillagerAi.VILLAGER_CLEARANCE
+	for changed_cell: Vector3i in changed_cells:
+		for offset: Vector2i in PATCH_NEIGHBORHOOD_HORIZONTAL_OFFSETS:
+			for dy in range(-clearance, clearance + 1):
+				affected[changed_cell + Vector3i(offset.x, dy, offset.y)] = true
+	var affected_cells: Array[Vector3i] = affected.keys()
+	_resync_points(predicate_source, affected_cells)
+	_resync_connections(predicate_source, affected_cells)
+
+
+## Point-membership half of a patch pass: for every cell in [param cells],
+## add a point if [param predicate_source] now reports it standable and it
+## wasn't already a point, or remove its point if it no longer is (`AStar3D`'s
+## own `remove_point()` clears every connection that point held -- no
+## separate disconnect pass needed for a removal). Never touches a cell
+## whose standability did not change (an unaffected `add_point`/`remove_point`
+## call is simply never made -- not a no-op call, an OMITTED one), which is
+## what keeps a patch bounded to the affected neighborhood rather than a
+## full rebuild.
+func _resync_points(predicate_source: VillagerAi, cells: Array[Vector3i]) -> void:
+	for cell: Vector3i in cells:
+		var id: int = VillagerNavGraph.cell_to_astar_id(cell)
+		var should_be_point: bool = predicate_source.is_standable(cell)
+		var is_point: bool = _astar.has_point(id)
+		if should_be_point and not is_point:
+			_astar.add_point(id, VoxelWorldGrid.cell_to_world(cell))
+		elif not should_be_point and is_point:
+			_astar.remove_point(id)
+
+
+## Connection half of a patch pass: for every cell in [param cells] that IS
+## (still, or newly) a point, re-evaluates its connection to each of its 8
+## horizontal x [constant VERTICAL_STEP_OFFSETS] neighbor candidates that is
+## ALSO currently a point, via [method _resync_pair]. Unlike [method build]'s
+## two-pass "visit each unordered pair exactly once" optimization (safe only
+## for a full, fresh scan), a patch must use [constant HORIZONTAL_FULL_OFFSETS]
+## (all 8 directions) since it revisits a small, pre-existing subset of
+## points from only one side at a time -- there is no guaranteed
+## complementary pass from "the other half."
+func _resync_connections(predicate_source: VillagerAi, cells: Array[Vector3i]) -> void:
+	for cell: Vector3i in cells:
+		var id: int = VillagerNavGraph.cell_to_astar_id(cell)
+		if not _astar.has_point(id):
+			continue
+		for offset: Vector2i in HORIZONTAL_FULL_OFFSETS:
+			for dy: int in VERTICAL_STEP_OFFSETS:
+				var neighbor: Vector3i = cell + Vector3i(offset.x, dy, offset.y)
+				var neighbor_id: int = VillagerNavGraph.cell_to_astar_id(neighbor)
+				if not _astar.has_point(neighbor_id):
+					continue
+				_resync_pair(predicate_source, cell, id, neighbor, neighbor_id)
+
+
+## Re-evaluates ONE ordered pair's connection in BOTH directions
+## independently (mirroring [method _connect_if_legal]'s own non-symmetric
+## reasoning -- see that method's doc comment), but as an explicit
+## add-or-remove reconciliation against the connection's CURRENT state
+## (unlike [method _connect_if_legal], which only ever runs once against a
+## brand-new pair with no prior connection to remove): if a direction is now
+## legal and isn't yet connected, connect it; if a direction is no longer
+## legal and IS connected, disconnect it. A direction that is already in the
+## correct state is left untouched -- no redundant `connect_points`/
+## `disconnect_points` call.
+func _resync_pair(
+	predicate_source: VillagerAi, from_cell: Vector3i, from_id: int, to_cell: Vector3i, to_id: int
+) -> void:
+	var forward_legal: bool = predicate_source.is_step_legal(from_cell, to_cell)
+	var backward_legal: bool = predicate_source.is_step_legal(to_cell, from_cell)
+	var forward_connected: bool = _astar.are_points_connected(from_id, to_id, false)
+	var backward_connected: bool = _astar.are_points_connected(to_id, from_id, false)
+	if forward_legal and not forward_connected:
+		_astar.connect_points(from_id, to_id, false)
+	elif not forward_legal and forward_connected:
+		_astar.disconnect_points(from_id, to_id, false)
+	if backward_legal and not backward_connected:
+		_astar.connect_points(to_id, from_id, false)
+	elif not backward_legal and backward_connected:
+		_astar.disconnect_points(to_id, from_id, false)

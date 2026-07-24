@@ -69,7 +69,7 @@ stories:
     name: "Incremental AStar3D patching on cell writes"
     file: "production/epics/villager-ai-behavior/story-008-incremental-graph-patching.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete
     owner: "ai-programmer"
     estimate_days: 1.0
     blocker: "depends on villager-ai-007 (in-sprint)"
