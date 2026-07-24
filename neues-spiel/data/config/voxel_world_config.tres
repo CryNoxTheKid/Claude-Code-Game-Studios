@@ -12,3 +12,7 @@ base_height = 4
 amplitude = 3.0
 frequency = 0.05
 terrain_seed = 12345
+region_directory = "user://regions"
+region_size_chunks = 32
+view_radius_chunks = 24
+settlement_radius_chunks = 8

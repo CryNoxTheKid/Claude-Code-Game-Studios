@@ -60,6 +60,30 @@ const AMPLITUDE_MAX: float = 8.0
 const FREQUENCY_MIN: float = 0.01
 const FREQUENCY_MAX: float = 0.2
 
+## Safe range for [member region_size_chunks] (Story vox-010, ADR-0015
+## Decision §2 -- "a spike-tuned knob", not a GDD Tuning Knob; range is this
+## story's own choice, wide enough to cover the spike's validated 32 default
+## while still catching a degenerate 0/negative or absurdly large value).
+const REGION_SIZE_CHUNKS_MIN: int = 4
+const REGION_SIZE_CHUNKS_MAX: int = 128
+
+## Safe range for [member view_radius_chunks] (Story vox-010, ADR-0015
+## Decision §1's "camera-near chunks (ADR-0014 view radius)"; spike default
+## 24 -- see [member view_radius_chunks]'s own doc comment).
+const VIEW_RADIUS_CHUNKS_MIN: int = 2
+const VIEW_RADIUS_CHUNKS_MAX: int = 64
+
+## Safe range for [member settlement_radius_chunks] (Story vox-010, ADR-0015
+## Decision §1's "active-settlement chunks (ADR-0007 nav region)"; spike
+## default 8 -- see [member settlement_radius_chunks]'s own doc comment).
+const SETTLEMENT_RADIUS_CHUNKS_MIN: int = 1
+const SETTLEMENT_RADIUS_CHUNKS_MAX: int = 32
+
+## Fallback used by [method validate] when [member region_directory] is
+## empty (a single-field clamp-to-default, same two-tier policy as every
+## other ranged knob here).
+const REGION_DIRECTORY_DEFAULT: String = "user://regions"
+
 ## Horizontal world extent along X, in cells (GDD default: 2000 -- the
 ## slice-validated baseline, ADR-0014; NOT the 16,000 production target).
 ## [TR-voxel-world-016] [TR-voxel-world-023]
@@ -100,6 +124,38 @@ const FREQUENCY_MAX: float = 0.2
 ## terrain; a different seed produces different terrain (ADR-0015's
 ## deterministic-seeded-regen premise). [TR-voxel-world-039] [TR-voxel-world-023]
 @export var terrain_seed: int = 12345
+
+## Root directory for on-disk region files (Story vox-010, ADR-0015 Decision
+## §2/§4) -- the paged residency tier's storage location. Production default
+## is a `user://` path: region files are user data, `.gitignore`d BY
+## CONSTRUCTION since `user://` resolves to the OS-specific user-data
+## directory, entirely outside this project's git-tracked tree -- never
+## `res://`, which is git-tracked and read-only at runtime once exported.
+## Tests MUST override this to an isolated per-test temp directory and
+## remove it in `after_test` -- never share a region directory across test
+## runs (region-file test-isolation pitfall).
+@export var region_directory: String = REGION_DIRECTORY_DEFAULT
+
+## Region file dimensions, in chunks per axis (ADR-0015 Decision §2's
+## `region_size_chunks` -- "a spike-tuned knob"; spike default 32x32
+## chunks/region, `prototypes/storage-residency-spike/README.md` "Design
+## choices made"). [TR-voxel-world-053]
+@export var region_size_chunks: int = 32
+
+## Camera-near residency window radius, in chunks (ADR-0015 Decision §1's
+## "camera-near chunks (ADR-0014 view radius)"; spike default 24). Camera &
+## Input's own view-window streaming (Story 015) does not exist in
+## production yet -- this knob is residency's own copy of the same concept
+## until that story lands and the two are reconciled. [TR-voxel-world-053]
+@export var view_radius_chunks: int = 24
+
+## Active-settlement residency window radius, in chunks, around an injected
+## settlement anchor (ADR-0015 Decision §1's "active-settlement chunks
+## (ADR-0007 nav region)"; spike default 8 -- "smaller than the 24-chunk
+## camera view radius"). Villager AI's own nav-region wiring (ADR-0007) does
+## not exist in production yet -- this knob stands in for that scale until
+## that story lands. [TR-voxel-world-053]
+@export var settlement_radius_chunks: int = 8
 
 
 ## See [ConfigResource.validate]. Clamps every ranged knob to its
@@ -148,6 +204,29 @@ func validate() -> Array[String]:
 			"frequency out of range [%s, %s], got %s -- clamped" % [FREQUENCY_MIN, FREQUENCY_MAX, frequency]
 		)
 		frequency = clampf(frequency, FREQUENCY_MIN, FREQUENCY_MAX)
+	if region_directory.is_empty():
+		issues.append(
+			"region_directory is empty -- clamped to default '%s'" % REGION_DIRECTORY_DEFAULT
+		)
+		region_directory = REGION_DIRECTORY_DEFAULT
+	if region_size_chunks < REGION_SIZE_CHUNKS_MIN or region_size_chunks > REGION_SIZE_CHUNKS_MAX:
+		issues.append(
+			"region_size_chunks out of range [%s, %s], got %s -- clamped" %
+			[REGION_SIZE_CHUNKS_MIN, REGION_SIZE_CHUNKS_MAX, region_size_chunks]
+		)
+		region_size_chunks = clampi(region_size_chunks, REGION_SIZE_CHUNKS_MIN, REGION_SIZE_CHUNKS_MAX)
+	if view_radius_chunks < VIEW_RADIUS_CHUNKS_MIN or view_radius_chunks > VIEW_RADIUS_CHUNKS_MAX:
+		issues.append(
+			"view_radius_chunks out of range [%s, %s], got %s -- clamped" %
+			[VIEW_RADIUS_CHUNKS_MIN, VIEW_RADIUS_CHUNKS_MAX, view_radius_chunks]
+		)
+		view_radius_chunks = clampi(view_radius_chunks, VIEW_RADIUS_CHUNKS_MIN, VIEW_RADIUS_CHUNKS_MAX)
+	if settlement_radius_chunks < SETTLEMENT_RADIUS_CHUNKS_MIN or settlement_radius_chunks > SETTLEMENT_RADIUS_CHUNKS_MAX:
+		issues.append(
+			"settlement_radius_chunks out of range [%s, %s], got %s -- clamped" %
+			[SETTLEMENT_RADIUS_CHUNKS_MIN, SETTLEMENT_RADIUS_CHUNKS_MAX, settlement_radius_chunks]
+		)
+		settlement_radius_chunks = clampi(settlement_radius_chunks, SETTLEMENT_RADIUS_CHUNKS_MIN, SETTLEMENT_RADIUS_CHUNKS_MAX)
 	if min_y > max_y:
 		issues.append(ConfigResource.format_blocking(
 			"min_y (%s) must be <= max_y (%s)" % [min_y, max_y]

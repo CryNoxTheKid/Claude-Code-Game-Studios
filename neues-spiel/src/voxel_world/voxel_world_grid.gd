@@ -41,6 +41,27 @@
 ## TR-voxel-world-021/048/033) the future Save/Load orchestrator (VS-tier)
 ## will consume; torn-read-free by construction (a plain synchronous scan,
 ## no locks) rather than via any locking mechanism.
+##
+## Story vox-010 (this revision, ADR-0015) adds paged region-file residency
+## -- [method update_residency] computes the resident working set (camera-
+## near [member VoxelWorldConfig.view_radius_chunks] union active-settlement
+## [member VoxelWorldConfig.settlement_radius_chunks], around two injected
+## focus cells) and pages chunks in/out of [member _chunks] against on-disk
+## [VoxelWorldRegionFile]s (TR-voxel-world-053). This is OPT-IN: a grid that
+## never calls [method update_residency] behaves byte-for-byte as before this
+## story (every touched chunk stays resident for the session, zero
+## filesystem touches) -- [member _residency_active] gates the only
+## behavioral change to an existing method ([method get_cell]'s page-in
+## check). Page-in/eviction here are SYNCHRONOUS (this story's own scope);
+## moving them onto a `WorkerThreadPool` is Story 011, the per-frame time
+## budget is Story 012, the in-flight-write read-through cache is Story 013,
+## and load-before-write for a WRITE that targets a non-resident chunk is
+## Story 014 (today, [method _apply_write] still lazily allocates a fresh
+## chunk for such a write, same as before this story -- a known, deliberately
+## deferred gap, not a regression). A pristine chunk (never dirtied, absent
+## from its region file) pages in via deterministic terrain regeneration from
+## the seed ([method _regenerate_chunk_from_seed], ADR-0015 Decision §5),
+## never persisted until an actual write dirties it.
 class_name VoxelWorldGrid
 extends Node
 
@@ -126,14 +147,40 @@ var _is_set_up: bool = false
 ## Decision, ADR-0005 terminal-halt reuse).
 var _boot_blocking_issues: Array[String] = []
 
-## Lazily-allocated per-chunk storage, keyed by chunk coordinate
+## RESIDENT per-chunk storage, keyed by chunk coordinate
 ## (`Vector2i(cell.x / CHUNK_SIZE, cell.z / CHUNK_SIZE)`) -- only chunks
-## touched by at least one [method set_cell]/[method clear_cell] call exist
-## here; an absent key means "still all-empty," matching [method get_cell]'s
-## empty-without-allocating fast path (TR-voxel-world-047 read purity). This
-## story keeps every touched chunk resident for the session's lifetime --
-## paging/eviction is Story 010 (ADR-0015), not this class's concern yet.
+## touched by at least one [method set_cell]/[method clear_cell] call, or
+## paged in by [method update_residency], exist here; an absent key means
+## "still all-empty (or not currently resident)," matching [method get_cell]'s
+## empty/page-in fast path (TR-voxel-world-047 read purity, TR-voxel-world-053
+## residency). A grid that never calls [method update_residency] keeps every
+## touched chunk resident for the session's lifetime, exactly as before Story
+## vox-010 -- this dictionary IS the resident set; [method
+## get_resident_chunk_keys]/[method is_chunk_resident] report it directly.
 var _chunks: Dictionary[Vector2i, _ChunkBuffer] = {}
+
+## Chunks with at least one write since they last became resident (either via
+## [method set_cell]/[method bulk_write], or a Story vox-010 page-in that
+## resulted from a fresh terrain regeneration is deliberately NOT marked
+## dirty here -- see [method _regenerate_chunk_from_seed]'s doc comment).
+## ONLY a dirty chunk is ever flushed to a region file on eviction (ADR-0015
+## Decision §2/§5: "a region that never has a dirty chunk never gets a file
+## on disk at all"). Set by [method _apply_write]; cleared by [method
+## _evict_chunk] on a successful flush.
+var _dirty_chunks: Dictionary[Vector2i, bool] = {}
+
+## Per-region on-disk file handles (Story vox-010, ADR-0015 Decision §2),
+## keyed by region coordinate (`chunk_key / config.region_size_chunks`) --
+## lazily created on first touch and cached for this grid instance's whole
+## lifetime, so a region's header is read/created exactly ONCE (ADR-0015
+## Decision §6's one sanctioned synchronous exception, TR-voxel-world-053).
+var _region_files: Dictionary[Vector2i, VoxelWorldRegionFile] = {}
+
+## True once [method update_residency] has been called at least once --
+## gates [method get_cell]'s region-file page-in check so a grid that never
+## engages residency behaves byte-for-byte as it did before Story vox-010
+## (zero filesystem touches for a chunk that was never written).
+var _residency_active: bool = false
 
 ## Current [enum GridState] -- see [method get_state] and [method
 ## generate_terrain]. Starts UNINITIALIZED for every new instance
@@ -232,11 +279,7 @@ func generate_terrain() -> void:
 			[config.base_height, config.max_y]
 		)
 
-	var noise := FastNoiseLite.new()
-	noise.seed = config.terrain_seed
-	noise.noise_type = FastNoiseLite.TYPE_PERLIN
-	noise.frequency = 1.0
-	noise.fractal_type = FastNoiseLite.FRACTAL_NONE
+	var noise: FastNoiseLite = _make_terrain_noise()
 
 	var changes: Dictionary[Vector3i, CellContents] = {}
 	for x in config.world_width_cells:
@@ -259,6 +302,22 @@ func _terrain_height(x: int, z: int, noise: FastNoiseLite) -> int:
 		float(x) * config.frequency, float(z) * config.frequency
 	)
 	return clampi(roundi(raw), config.min_y, config.max_y)
+
+
+## Shared, fully-parameterized [FastNoiseLite] constructor (Story vox-010
+## extraction -- identical field values [method generate_terrain] always set
+## inline before this story; behavior-preserving refactor, not a semantic
+## change) -- used by both [method generate_terrain]'s eager fill and [method
+## _regenerate_chunk_from_seed]'s lazy per-chunk page-in regen, so both paths
+## derive terrain from the EXACT same deterministic seed setup
+## (TR-voxel-world-039).
+func _make_terrain_noise() -> FastNoiseLite:
+	var noise := FastNoiseLite.new()
+	noise.seed = config.terrain_seed
+	noise.noise_type = FastNoiseLite.TYPE_PERLIN
+	noise.frequency = 1.0
+	noise.fractal_type = FastNoiseLite.FRACTAL_NONE
+	return noise
 
 
 ## Cell->World conversion (GDD Formulas, TR-voxel-world-035): returns the
@@ -468,7 +527,18 @@ func get_cell(cell: Vector3i) -> CellContents:
 		return null
 	var key: Vector2i = _chunk_key(cell)
 	if not _chunks.has(key):
-		return CellContents.empty()
+		# Story vox-010 (TR-voxel-world-041/053): a chunk with real persisted
+		# data (this grid's own past write, now evicted) must page in and
+		# read correctly -- transparent residency. A chunk that was NEVER
+		# touched and has no region-file entry stays untouched here, exactly
+		# as before this story (no allocation, no filesystem I/O at all) --
+		# [member _residency_active] additionally gates this so a caller that
+		# never engages residency ([method update_residency]) sees zero
+		# behavior change.
+		if _residency_active and _region_has_chunk(key):
+			_ensure_resident(key)
+		else:
+			return CellContents.empty()
 	var buffer: _ChunkBuffer = _chunks[key]
 	var offset: int = _local_offset(cell, key)
 	return CellContents.new(buffer.block_type_ids[offset], buffer.material_ids[offset])
@@ -629,6 +699,18 @@ func bulk_write(changes: Dictionary[Vector3i, CellContents]) -> Array[CellChange
 ## helper's). Callers validate [param contents] (packed-byte range,
 ## non-null) BEFORE calling this -- this function assumes that check already
 ## passed.
+##
+## KNOWN GAP, deliberately deferred to Story 014 (ADR-0015 Decision §3,
+## "load-before-write"): if [param cell]'s chunk was previously resident,
+## dirtied, evicted, and flushed to a region file, and is NOT currently
+## resident, this method still lazily allocates a FRESH (empty) chunk here --
+## exactly the same lazy-allocation this method has always done, unchanged by
+## Story vox-010 -- rather than first paging in the persisted region data.
+## That page-in-before-write correctness rule is Story 014's explicit scope
+## (see that story's Dependencies: "Depends on: ... Story 010 (residency)").
+## This is a real, intentional gap today, not a silent regression: it only
+## exists once a caller BOTH engages residency (Story vox-010's [method
+## update_residency] is opt-in) AND writes to an already-evicted chunk.
 func _apply_write(cell: Vector3i, contents: CellContents) -> CellChangeRecord:
 	if not is_in_bounds(cell):
 		return null
@@ -640,6 +722,7 @@ func _apply_write(cell: Vector3i, contents: CellContents) -> CellChangeRecord:
 	var before := CellContents.new(buffer.block_type_ids[offset], buffer.material_ids[offset])
 	buffer.block_type_ids[offset] = contents.block_type_id
 	buffer.material_ids[offset] = contents.material_id
+	_dirty_chunks[key] = true
 	var after := CellContents.new(contents.block_type_id, contents.material_id)
 	return CellChangeRecord.new(cell, before, after)
 
@@ -670,3 +753,255 @@ func _local_offset(cell: Vector3i, key: Vector2i) -> int:
 ## configured Y range.
 func _chunk_height() -> int:
 	return config.max_y - config.min_y + 1
+
+
+# =============================================================================
+# Story vox-010 -- paged region-file residency (ADR-0015)
+# =============================================================================
+
+## Recomputes the resident working set as camera-near
+## [member VoxelWorldConfig.view_radius_chunks] UNION active-settlement
+## [member VoxelWorldConfig.settlement_radius_chunks], around [param
+## camera_focus_cell] and [param settlement_anchor_cell] respectively (ADR-0015
+## Decision §1, TR-voxel-world-053), then pages in every newly-desired chunk
+## ([method _ensure_resident]) and evicts every currently-resident chunk that
+## fell outside the new desired set ([method _evict_chunk]). SYNCHRONOUS --
+## this story's own scope; async dispatch (Story 011) and a per-frame time
+## budget (Story 012) are later stories layered behind this same method's
+## public contract, which does not change.
+##
+## Both focus cells may lie outside the configured world bounds (e.g. a
+## camera just past the world's edge) -- each candidate window chunk is
+## bounds-filtered individually ([method _is_chunk_in_world]) via the same
+## floor-friendly division [method _chunk_key] already uses; an anchor whose
+## OWN raw division is imprecise for a negative cell (integer division
+## truncates toward zero, not floor) only shifts which specific chunks are
+## candidates near that edge, never crashes or corrupts state.
+##
+## Sets [member _residency_active] true on first call -- see that member's
+## doc comment for the opt-in behavior this gates on [method get_cell].
+func update_residency(camera_focus_cell: Vector3i, settlement_anchor_cell: Vector3i) -> void:
+	assert(config != null, "VoxelWorldGrid.update_residency: config not wired")
+	_residency_active = true
+	var desired: Dictionary[Vector2i, bool] = {}
+	_collect_window(desired, _chunk_key(camera_focus_cell), config.view_radius_chunks)
+	_collect_window(desired, _chunk_key(settlement_anchor_cell), config.settlement_radius_chunks)
+	for chunk_key: Vector2i in desired:
+		_ensure_resident(chunk_key)
+	var to_evict: Array[Vector2i] = []
+	for chunk_key: Vector2i in _chunks:
+		if not desired.has(chunk_key):
+			to_evict.append(chunk_key)
+	for chunk_key: Vector2i in to_evict:
+		_evict_chunk(chunk_key)
+
+
+## True if [param chunk_key] is CURRENTLY resident (has an entry in [member
+## _chunks]) -- the ground truth for "is this chunk paged in right now,"
+## independent of whether it's presently desired.
+func is_chunk_resident(chunk_key: Vector2i) -> bool:
+	return _chunks.has(chunk_key)
+
+
+## Every currently-resident chunk coordinate (QA-plan/test introspection --
+## [member _chunks]'s key set, snapshotted into a plain array).
+func get_resident_chunk_keys() -> Array[Vector2i]:
+	var keys: Array[Vector2i] = []
+	for key: Vector2i in _chunks:
+		keys.append(key)
+	return keys
+
+
+## Public wrapper for [method _chunk_key] -- lets a caller (test, or a future
+## Camera & Input integration) compute the exact same chunk coordinate this
+## class uses internally from a cell position, without duplicating
+## [constant CHUNK_SIZE] math.
+func chunk_key_for_cell(cell: Vector3i) -> Vector2i:
+	return _chunk_key(cell)
+
+
+## Test-observable proof of ADR-0015 Decision §6's one sanctioned synchronous
+## exception (TR-voxel-world-053, story QA plan AC-3): returns how many times
+## [param chunk_key]'s region actually performed header I/O ([method
+## VoxelWorldRegionFile._ensure_header] running past its cache guard) -- `0`
+## if that region's file handle was never created at all.
+func get_region_header_load_count(chunk_key: Vector2i) -> int:
+	var region_key: Vector2i = _region_key_for_chunk(chunk_key)
+	if not _region_files.has(region_key):
+		return 0
+	return _region_files[region_key].header_load_count
+
+
+## Pages [param chunk_key] into [member _chunks] if it is not already
+## resident -- reads its persisted region-file payload if one exists
+## ([VoxelWorldRegionFile.has_chunk]), otherwise regenerates it deterministically
+## from the seed ([method _regenerate_chunk_from_seed], ADR-0015 Decision §5,
+## "pristine chunks regenerate from seed"). A no-op if already resident.
+func _ensure_resident(chunk_key: Vector2i) -> void:
+	if _chunks.has(chunk_key):
+		return
+	var region_key: Vector2i = _region_key_for_chunk(chunk_key)
+	var region_file: VoxelWorldRegionFile = _get_or_create_region_file(region_key)
+	var slot: int = _slot_in_region(chunk_key, region_key)
+	if region_file.has_chunk(slot):
+		_chunks[chunk_key] = _deserialize_chunk_buffer(region_file.read_chunk(slot))
+	else:
+		_chunks[chunk_key] = _regenerate_chunk_from_seed(chunk_key)
+
+
+## Evicts [param chunk_key] from [member _chunks] -- if it is currently
+## dirty ([member _dirty_chunks]), flushes its bytes to its region file
+## FIRST ([VoxelWorldRegionFile.write_chunk], ADR-0015 Decision §2) and only
+## then drops it from residency. A flush failure (surfaced via [method
+## VoxelWorldRegionFile.write_chunk]'s `bool` return) `push_error`s and keeps
+## the chunk resident rather than evicting it -- "never applied to disk
+## blind, and never dropped" (ADR-0015 Decision §3's principle, applied here
+## to the eviction-flush case too). A no-op if not currently resident.
+func _evict_chunk(chunk_key: Vector2i) -> void:
+	if not _chunks.has(chunk_key):
+		return
+	if _dirty_chunks.has(chunk_key):
+		var region_key: Vector2i = _region_key_for_chunk(chunk_key)
+		var region_file: VoxelWorldRegionFile = _get_or_create_region_file(region_key)
+		var slot: int = _slot_in_region(chunk_key, region_key)
+		var flushed: bool = region_file.write_chunk(slot, _serialize_chunk_buffer(_chunks[chunk_key]))
+		if not flushed:
+			push_error(
+				"VoxelWorldGrid._evict_chunk: failed to flush dirty chunk %s -- keeping it resident (never drop a write)" % chunk_key
+			)
+			return
+		_dirty_chunks.erase(chunk_key)
+	_chunks.erase(chunk_key)
+
+
+## Deterministic per-chunk terrain regeneration (ADR-0015 Decision §5,
+## TR-voxel-world-039 seeded-regen premise) -- computes exactly the same
+## `procedural_terrain_height` formula [method generate_terrain] uses (via
+## the SAME [method _make_terrain_noise] seed setup), scoped to [param
+## chunk_key]'s own [constant CHUNK_SIZE] x [constant CHUNK_SIZE] columns,
+## and fills a fresh [_ChunkBuffer] DIRECTLY -- bypassing [method
+## _apply_write] entirely, so this never marks the chunk dirty and never
+## emits [signal cell_changed]/[signal cells_changed_batch] (page-in must be
+## silent/transparent to consumers, ADR-0015 Decision §1). A column outside
+## the configured world extent (possible only if `world_width_cells`/
+## `world_depth_cells` isn't an exact multiple of [constant CHUNK_SIZE]) is
+## skipped, staying zero-filled/empty -- the same never-write-out-of-bounds
+## discipline [method iterate_occupied]'s doc comment already establishes.
+func _regenerate_chunk_from_seed(chunk_key: Vector2i) -> _ChunkBuffer:
+	var noise: FastNoiseLite = _make_terrain_noise()
+	var buffer := _ChunkBuffer.new(CHUNK_SIZE * CHUNK_SIZE * _chunk_height())
+	for local_z in CHUNK_SIZE:
+		var global_z: int = chunk_key.y * CHUNK_SIZE + local_z
+		if global_z < 0 or global_z >= config.world_depth_cells:
+			continue
+		for local_x in CHUNK_SIZE:
+			var global_x: int = chunk_key.x * CHUNK_SIZE + local_x
+			if global_x < 0 or global_x >= config.world_width_cells:
+				continue
+			var height: int = _terrain_height(global_x, global_z, noise)
+			for y in range(config.min_y, height + 1):
+				var offset: int = ((y - config.min_y) * CHUNK_SIZE + local_z) * CHUNK_SIZE + local_x
+				buffer.block_type_ids[offset] = TERRAIN_BLOCK_TYPE_ID
+				buffer.material_ids[offset] = TERRAIN_MATERIAL_ID
+	return buffer
+
+
+## True if [param chunk_key]'s region file has a persisted entry for it --
+## used by [method get_cell]'s transparent page-in check so a read never
+## allocates a chunk that has neither resident data nor a region-file entry
+## (preserving the pre-Story-vox-010 "never allocate an untouched chunk on
+## read" contract, TR-voxel-world-047).
+func _region_has_chunk(chunk_key: Vector2i) -> bool:
+	var region_key: Vector2i = _region_key_for_chunk(chunk_key)
+	var region_file: VoxelWorldRegionFile = _get_or_create_region_file(region_key)
+	return region_file.has_chunk(_slot_in_region(chunk_key, region_key))
+
+
+## Adds every chunk within [param radius] (inclusive, square window --
+## matching the reference spike's own window shape) of [param center] to
+## [param desired], skipping any candidate outside the configured world
+## bounds ([method _is_chunk_in_world]).
+func _collect_window(desired: Dictionary[Vector2i, bool], center: Vector2i, radius: int) -> void:
+	for dz in range(-radius, radius + 1):
+		for dx in range(-radius, radius + 1):
+			var candidate := center + Vector2i(dx, dz)
+			if _is_chunk_in_world(candidate):
+				desired[candidate] = true
+
+
+## True if [param chunk_key] has at least one cell inside the configured
+## world bounds -- the chunk-granularity counterpart to [method is_in_bounds]'s
+## cell-granularity check, used by [method _collect_window] to filter
+## residency-window candidates.
+func _is_chunk_in_world(chunk_key: Vector2i) -> bool:
+	return (
+		chunk_key.x >= 0 and chunk_key.x * CHUNK_SIZE < config.world_width_cells
+		and chunk_key.y >= 0 and chunk_key.y * CHUNK_SIZE < config.world_depth_cells
+	)
+
+
+## Region coordinate for [param chunk_key]
+## (`Vector2i(chunk_key.x / config.region_size_chunks, chunk_key.y / config.region_size_chunks)`).
+## Integer division floors correctly here because every caller reaches this
+## only with a [param chunk_key] already known non-negative (Core Rule 1),
+## the same invariant [method _chunk_key] itself documents.
+func _region_key_for_chunk(chunk_key: Vector2i) -> Vector2i:
+	return Vector2i(chunk_key.x / config.region_size_chunks, chunk_key.y / config.region_size_chunks)
+
+
+## Flat local slot index within [param region_key]'s
+## [constant VoxelWorldRegionFile]'s header/body layout.
+func _slot_in_region(chunk_key: Vector2i, region_key: Vector2i) -> int:
+	var local_x: int = chunk_key.x - region_key.x * config.region_size_chunks
+	var local_z: int = chunk_key.y - region_key.y * config.region_size_chunks
+	return local_z * config.region_size_chunks + local_x
+
+
+## Returns [param region_key]'s cached [VoxelWorldRegionFile] handle, creating
+## it (and caching it in [member _region_files] for this grid instance's
+## whole lifetime -- the one-header-load-per-region guarantee, TR-voxel-world-053)
+## on first touch. Constructing a [VoxelWorldRegionFile] does NOT itself
+## touch the filesystem -- that happens lazily inside its own [method
+## VoxelWorldRegionFile.has_chunk]/[method VoxelWorldRegionFile.read_chunk]/
+## [method VoxelWorldRegionFile.write_chunk] calls.
+func _get_or_create_region_file(region_key: Vector2i) -> VoxelWorldRegionFile:
+	if _region_files.has(region_key):
+		return _region_files[region_key]
+	var path: String = config.region_directory.path_join("r_%d_%d.bin" % [region_key.x, region_key.y])
+	var slots: int = config.region_size_chunks * config.region_size_chunks
+	var region_file := VoxelWorldRegionFile.new(path, slots, _chunk_payload_bytes())
+	_region_files[region_key] = region_file
+	return region_file
+
+
+## Fixed serialized byte length of one chunk's region-file payload --
+## constant for this grid's [member config] (depends only on [constant
+## CHUNK_SIZE] and [method _chunk_height], both fixed once [member config] is
+## wired): the concatenation of a [_ChunkBuffer]'s two parallel packed-byte
+## arrays (see [method _serialize_chunk_buffer]).
+func _chunk_payload_bytes() -> int:
+	return 2 * CHUNK_SIZE * CHUNK_SIZE * _chunk_height()
+
+
+## Concatenates [param buffer]'s two parallel packed-byte arrays
+## (`block_type_ids` then `material_ids`) into the single flat
+## [PackedByteArray] a [VoxelWorldRegionFile] payload stores -- the inverse of
+## [method _deserialize_chunk_buffer].
+func _serialize_chunk_buffer(buffer: _ChunkBuffer) -> PackedByteArray:
+	var payload := PackedByteArray()
+	payload.append_array(buffer.block_type_ids)
+	payload.append_array(buffer.material_ids)
+	return payload
+
+
+## Splits a [VoxelWorldRegionFile] payload's flat [PackedByteArray] back into
+## a fresh [_ChunkBuffer]'s two parallel arrays -- the inverse of [method
+## _serialize_chunk_buffer]. [param data] MUST be exactly [method
+## _chunk_payload_bytes] long (guaranteed by construction -- every payload
+## this grid ever writes has that exact length).
+func _deserialize_chunk_buffer(data: PackedByteArray) -> _ChunkBuffer:
+	var cell_count: int = CHUNK_SIZE * CHUNK_SIZE * _chunk_height()
+	var buffer := _ChunkBuffer.new(cell_count)
+	buffer.block_type_ids = data.slice(0, cell_count)
+	buffer.material_ids = data.slice(cell_count, cell_count * 2)
+	return buffer

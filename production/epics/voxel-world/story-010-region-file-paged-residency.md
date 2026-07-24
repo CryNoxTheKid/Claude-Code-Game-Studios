@@ -1,7 +1,7 @@
 # Story 010: Region-file format + paged residency working set
 
 > **Epic**: Voxel World / Grid Data
-> **Status**: Ready
+> **Status: Complete (2026-07-24 — 455/455 suite green, parent-verified)
 > **Layer**: Presentation (world-storage residency tier)
 > **Type**: Integration
 > **Estimate**: 1.5 days
