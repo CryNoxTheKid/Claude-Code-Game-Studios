@@ -1,7 +1,7 @@
 # Story 020: DDA placement pick + surface-aware targeting + picked-block highlight
 
 > **Epic**: Building System
-> **Status**: Ready
+> **Status: Complete (2026-07-24 — 491/491 suite green, parent-verified; highlight screenshot advisory deferred to first rendered integration)
 > **Layer**: Core
 > **Type**: Logic
 > **Estimate**: 1 day
