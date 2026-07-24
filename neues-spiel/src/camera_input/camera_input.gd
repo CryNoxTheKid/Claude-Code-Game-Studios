@@ -70,9 +70,47 @@
 ## held direction key); [constant PAN_ACTIONS] still gets its own boot-time
 ## registration guard, [method _assert_pan_actions_registered].
 ##
-## Out of scope for this class as authored here (later stories extend this
-## same class, not new ones): the mouse world-ray query (story cam-006), and
-## the Active/Suspended state machine (story cam-007).
+## Story cam-006 (ADR-0004 primary, pure-projection-math constraint; ADR-0014
+## secondary, ghost-anchoring contract note) additionally owns the mouse
+## world-ray + ground-plane intersection query (GDD Core Rule 8
+## [TR-camera-input-028] [TR-camera-input-029] [TR-camera-input-038]
+## [TR-camera-input-050]): [method get_world_ray] and
+## [method get_ground_plane_intersection]. Per ADR-0004 this is PURE
+## PROJECTION MATH -- zero physics API calls anywhere (no
+## `PhysicsDirectSpaceState3D`/`intersect_ray`); block picking (ADR-0014's DDA)
+## and villager picking (ADR-0004's `Area3D` query) are downstream consumers'
+## concern -- this system only produces the ray, never calling Voxel World
+## itself [TR-camera-input-036].
+##
+## This class has never held a live [Camera3D] (see `tools/camera_sandbox.gd`
+## -- the real driven Camera3D lives in a SEPARATE node/scene that mirrors
+## [method get_camera_position]/[method get_target] onto its own transform
+## every frame). Rather than introduce one just for this query -- which would
+## create an ordering hazard, since an external Camera3D's transform would
+## need to already be synced to this instance's OWN derived state before every
+## call -- [method get_world_ray] re-derives the identical projection math
+## Godot's `Camera3D.project_ray_origin`/`project_ray_normal` would produce for
+## a camera transform matching [method get_camera_position]/[method get_target]
+## directly from this instance's OWN already-owned spherical state --
+## self-contained, with no external-node synchronization to get wrong.
+##
+## Origin and direction are computed from the SAME sampled [Viewport] mouse
+## position in the SAME call, never cached/recomputed separately
+## [TR-camera-input-038]. Structurally ALWAYS computable -- every value
+## [method get_world_ray] reads is a plain always-valid getter or a plain
+## [Viewport] query, gated on no state flag whatsoever, so it remains valid
+## unchanged once story cam-007's Suspended state freezes this instance's
+## spherical state [TR-camera-input-029]. [method derive_ray_direction],
+## [method derive_ground_plane_intersection], and
+## [method derive_screen_position] are pure/stateless, mirroring [method
+## derive_position]'s established testable-pure-function shape -- [method
+## derive_screen_position] is the inverse projection, existing to PROVE the
+## round-trip guarantee [TR-camera-input-050], not a general-purpose
+## production API.
+##
+## Out of scope for this class as authored here (a later story extends this
+## same class, not a new one): the Active/Suspended state machine (story
+## cam-007).
 class_name CameraInput
 extends Node
 
@@ -461,4 +499,131 @@ static func clamp_target_to_bounds(
 		clampf(target.x, margin, world_width_cells * cell_size - margin),
 		target.y,
 		clampf(target.z, margin, world_depth_cells * cell_size - margin)
+	)
+
+
+# ---------------------------------------------------------------------------
+# Story cam-006 -- mouse world-ray + ground-plane intersection
+# (ADR-0004 primary: pure projection math, no physics API; ADR-0014
+# secondary: this system produces the ray consumed by the DDA pick).
+# See class doc comment for the "why no live Camera3D" rationale.
+# ---------------------------------------------------------------------------
+
+## Fixed pole/parallel-safety epsilon for [method
+## derive_ground_plane_intersection]'s ray/ground-plane-parallel guard --
+## division-by-near-zero on `ray_direction.y`, never a crash. Not a GDD tuning
+## knob (it guards a pure math degeneracy, not a designer-facing value),
+## mirroring [CameraInputConfig]'s own sanity-floor constants' non-tunable
+## precedent.
+const GROUND_PLANE_PARALLEL_EPSILON: float = 0.0001
+
+
+## Returns the current mouse world-ray -- origin (always equal to [method
+## get_camera_position] for this project's perspective-only camera) and
+## direction, both computed from the SAME sampled [Viewport] mouse position
+## in this SAME call [TR-camera-input-038]. ALWAYS computable, in every state
+## including Suspended [TR-camera-input-029] -- see this method group's class
+## doc comment; nothing here branches on any state flag. Never calls Voxel
+## World or any other system [TR-camera-input-036] -- this is the sole
+## producer downstream consumers (Building System's DDA pick, Villager Info
+## UI's `Area3D` pick) forward this ray to.
+func get_world_ray() -> WorldRay:
+	assert(get_viewport() != null, "CameraInput.get_world_ray() called before this node entered the SceneTree")
+	assert(config != null, "CameraInput.config not wired")
+	var viewport: Viewport = get_viewport()
+	var viewport_size: Vector2 = viewport.get_visible_rect().size
+	var mouse_pos: Vector2 = viewport.get_mouse_position()
+	var camera_position: Vector3 = get_camera_position()
+	var camera_target: Vector3 = get_target()
+	return WorldRay.new(
+		camera_position,
+		CameraInput.derive_ray_direction(
+			camera_position, camera_target, config.fov_degrees, viewport_size, mouse_pos
+		)
+	)
+
+
+## Pure world-ray DIRECTION derivation through [param screen_pos], given a
+## look-at basis built from [param camera_position]/[param camera_target]
+## (fixed world-up [constant Vector3.UP], no roll -- matches [method
+## derive_position]'s own spherical derivation) and a standard perspective
+## frustum ([param fov_degrees] vertical FOV, [param viewport_size] aspect
+## ratio). Stateless -- exercisable directly with arbitrary values, without an
+## instance, [method setup], or a live [Viewport]/[Camera3D]
+## [TR-camera-input-028] [TR-camera-input-038].
+##
+## Degenerates only when [param camera_position] sits (near-)directly above/
+## below [param camera_target] -- the SAME pole-degeneracy [method
+## derive_position]'s pitch clamp already prevents in practice for this
+## class's own spherical state [TR-camera-input-037]; no additional guard is
+## needed for that case here.
+static func derive_ray_direction(
+	camera_position: Vector3, camera_target: Vector3, fov_degrees: float,
+	viewport_size: Vector2, screen_pos: Vector2
+) -> Vector3:
+	var forward: Vector3 = (camera_target - camera_position).normalized()
+	var right: Vector3 = forward.cross(Vector3.UP).normalized()
+	var up: Vector3 = right.cross(forward).normalized()
+	var aspect: float = viewport_size.x / viewport_size.y
+	var tan_half_fov: float = tan(deg_to_rad(fov_degrees) * 0.5)
+	var raw_ndc_x: float = 2.0 * screen_pos.x / viewport_size.x - 1.0
+	var raw_ndc_y: float = 1.0 - 2.0 * screen_pos.y / viewport_size.y
+	var offset_x: float = raw_ndc_x * aspect * tan_half_fov
+	var offset_y: float = raw_ndc_y * tan_half_fov
+	return (forward + right * offset_x + up * offset_y).normalized()
+
+
+## Convenience wrapper: [method get_world_ray] intersected with the ground
+## plane (`y = 0.0`, matching [member _target]'s own ground-plane convention
+## -- see the Pan formula) via [method derive_ground_plane_intersection].
+func get_ground_plane_intersection() -> GroundPlaneIntersectionResult:
+	var ray: WorldRay = get_world_ray()
+	return CameraInput.derive_ground_plane_intersection(ray.origin, ray.direction)
+
+
+## Pure ray/ground-plane (`y = ground_y`) intersection, mirroring
+## [RaycastHitResult]'s established "explicit hit flag + payload, never a
+## bare sentinel/null" precedent (`src/voxel_world/raycast_hit_result.gd`).
+## `hit = false` (payload meaningless) when [param ray_direction]'s Y
+## component is within [constant GROUND_PLANE_PARALLEL_EPSILON] of zero (ray
+## parallel to the ground plane -- division-by-near-zero guarded explicitly,
+## never a crash) OR when the computed intersection lies behind [param
+## ray_origin] (`t < 0.0` -- e.g. a skyward mouse position looking away from
+## the ground plane). Stateless, mirroring [method derive_position]'s
+## testable-pure-function shape. [TR-camera-input-050]
+static func derive_ground_plane_intersection(
+	ray_origin: Vector3, ray_direction: Vector3, ground_y: float = 0.0
+) -> GroundPlaneIntersectionResult:
+	if absf(ray_direction.y) < GROUND_PLANE_PARALLEL_EPSILON:
+		return GroundPlaneIntersectionResult.new(false)
+	var t: float = (ground_y - ray_origin.y) / ray_direction.y
+	if t < 0.0:
+		return GroundPlaneIntersectionResult.new(false)
+	return GroundPlaneIntersectionResult.new(true, ray_origin + ray_direction * t)
+
+
+## Pure inverse of [method derive_ray_direction]: re-projects [param
+## world_point] back to [Viewport] screen-pixel coordinates through the SAME
+## look-at basis/perspective-frustum formula. Exists to PROVE
+## [TR-camera-input-050]'s round-trip guarantee (ray -> ground intersection ->
+## re-projected screen point lands within 1px of the original mouse position)
+## against the SAME formula [method derive_ray_direction] uses -- not a
+## general-purpose world-to-screen production API (no consumer needs one
+## yet). Stateless, mirroring every other derivation in this class.
+static func derive_screen_position(
+	world_point: Vector3, camera_position: Vector3, camera_target: Vector3,
+	fov_degrees: float, viewport_size: Vector2
+) -> Vector2:
+	var forward: Vector3 = (camera_target - camera_position).normalized()
+	var right: Vector3 = forward.cross(Vector3.UP).normalized()
+	var up: Vector3 = right.cross(forward).normalized()
+	var relative: Vector3 = world_point - camera_position
+	var depth: float = relative.dot(forward)
+	var aspect: float = viewport_size.x / viewport_size.y
+	var tan_half_fov: float = tan(deg_to_rad(fov_degrees) * 0.5)
+	var raw_ndc_x: float = relative.dot(right) / (depth * aspect * tan_half_fov)
+	var raw_ndc_y: float = relative.dot(up) / (depth * tan_half_fov)
+	return Vector2(
+		(raw_ndc_x + 1.0) * 0.5 * viewport_size.x,
+		(1.0 - raw_ndc_y) * 0.5 * viewport_size.y
 	)

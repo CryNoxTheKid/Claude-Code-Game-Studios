@@ -65,6 +65,16 @@ const CELL_SIZE_MIN: float = 0.01
 ## 0 (the GDD default) is the valid floor. [TR-camera-input-049]
 const PAN_BOUND_MARGIN_MIN: float = 0.0
 
+## Sanity range for [member fov_degrees] -- NOT a GDD-documented tuning knob
+## (camera-input.md's Tuning Knobs table has no fov row yet). Story cam-006's
+## world-ray projection math needs a vertical FOV value from somewhere; per
+## ADR-0002/TR-camera-input-019's "no hardcoded values" rule it is exposed as
+## a config knob rather than a literal in `camera_input.gd`, defaulted to
+## Godot's own `Camera3D` engine default (75.0) -- `[assumption]`, flagged for
+## the GDD to adopt explicitly at its next revision (see [member fov_degrees]).
+const FOV_DEGREES_MIN: float = 1.0
+const FOV_DEGREES_MAX: float = 179.0
+
 ## Starting spherical radius (GDD default: 18.0). [TR-camera-input-021]
 @export var start_distance: float = 18.0
 
@@ -141,6 +151,12 @@ const PAN_BOUND_MARGIN_MIN: float = 0.0
 ## Margin 0 is a valid, fully-supported configuration, not an edge case.
 ## [TR-camera-input-049]
 @export var pan_bound_margin: float = 0.0
+
+## Vertical field-of-view, degrees, for [CameraInput.get_world_ray]'s
+## projection math (story cam-006). `[assumption]` -- Godot's own `Camera3D`
+## engine default (75.0); camera-input.md's Tuning Knobs table does not yet
+## list this knob, see [constant FOV_DEGREES_MIN] doc comment.
+@export var fov_degrees: float = 75.0
 
 
 ## See [ConfigResource.validate]. Clamps every ranged knob to its GDD-stated
@@ -225,4 +241,10 @@ func validate() -> Array[String]:
 			[PAN_BOUND_MARGIN_MIN, pan_bound_margin]
 		)
 		pan_bound_margin = PAN_BOUND_MARGIN_MIN
+	if fov_degrees < FOV_DEGREES_MIN or fov_degrees > FOV_DEGREES_MAX:
+		issues.append(
+			"fov_degrees out of range [%s, %s], got %s -- clamped" %
+			[FOV_DEGREES_MIN, FOV_DEGREES_MAX, fov_degrees]
+		)
+		fov_degrees = clampf(fov_degrees, FOV_DEGREES_MIN, FOV_DEGREES_MAX)
 	return issues

@@ -1,7 +1,7 @@
 # Story 006: Mouse world-ray API + ground-plane intersection (always computable)
 
 > **Epic**: Camera & Input
-> **Status**: Ready
+> **Status: Complete (2026-07-24 — 401/401 suite green, parent-verified)
 > **Layer**: Foundation
 > **Type**: Logic
 > **Estimate**: 1 day
