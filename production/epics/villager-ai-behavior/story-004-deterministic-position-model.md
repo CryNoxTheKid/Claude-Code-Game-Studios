@@ -1,7 +1,7 @@
 # Story 004: Deterministic position model & movement interpolation
 
 > **Epic**: Villager AI & Behavior
-> **Status**: Ready
+> **Status: Complete (2026-07-24 — 524/524 suite green, parent-verified)
 > **Layer**: Core
 > **Type**: Logic
 > **Estimate**: ~1 agent-day

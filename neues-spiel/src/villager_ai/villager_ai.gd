@@ -21,11 +21,17 @@
 ##
 ## Dispatch is driven EXCLUSIVELY by [member time_tick_system]'s `tick`
 ## signal (ADR-0008 Decision §2, Control Manifest Feature Layer: "tick-driven
-## via Time & Tick's signal, never raw delta") -- this class defines no
-## `_process`/`_physics_process` override anywhere, so the "never raw delta"
-## guarantee holds structurally rather than by a conditional bypass (the same
+## via Time & Tick's signal, never raw delta") -- FSM state mutation itself
+## never happens from any raw-delta engine callback (the same
 ## structural-guarantee style `CameraInput`'s raw-delta contract already
-## established for this codebase).
+## established for this codebase). **Amended by story villager-ai-004**: this
+## class now defines exactly ONE narrow, deliberate exception -- [method
+## _process] -- added for ADR-0009's cosmetic-only visual-position recompute;
+## it never reads its own raw `_delta` parameter (named with the conventional
+## unused-parameter underscore prefix) and never touches [member current_cell]
+## or any FSM state, so the tick-signal-only dispatch guarantee above is
+## completely unaffected. This class still defines no `_physics_process`
+## override anywhere.
 ##
 ## Story villager-ai-002 (previous revision) adds the two shared walkability
 ## predicates ADR-0007 Decision §1 assigns to Villager AI as its public API:
@@ -54,6 +60,23 @@
 ## seal-prevention/walled-in detection (story 016) -- derive/query the
 ## column through these two functions rather than re-deriving an equivalent
 ## span locally.
+##
+## Story villager-ai-004 (this revision) implements ADR-0009's two-layer
+## deterministic position model: the discrete, tick-boundary-quantized
+## [member current_cell] -- the sole authoritative occupancy value, exposed
+## via [method get_current_cell] -- versus the continuous, cosmetic-only
+## [member _visual_position] (recomputed every [method _process] frame,
+## never read by any logic query anywhere). [method advance_travel_progress]
+## is the pure, directly-testable movement-update function (this story's
+## AC20/[TR-villager-ai-behavior-093]) that advances
+## [member _intra_tick_progress]; [method _on_tick] performs the ONE
+## sanctioned tick-boundary mutation of [member current_cell] this story
+## owns (the OTHER sanctioned mutation -- a watchdog rescue -- is story
+## 015's, out of scope here). Driving [member _from_cell]/[member _to_cell]
+## to new values as a villager actually paths somewhere -- path selection,
+## re-pathing, and calling [method advance_travel_progress] every frame with
+## a live `game_delta` -- is story 009's Traveling-state-machine scope,
+## explicitly NOT implemented here.
 class_name VillagerAi
 extends Node
 
@@ -124,6 +147,57 @@ var _state: State = State.DECIDING
 ## True once [method setup] has completed at least once.
 var _is_set_up: bool = false
 
+## DISCRETE, tick-boundary-quantized occupancy value -- the SOLE
+## authoritative value for every logic/occupancy query (ADR-0009 Decision
+## §1, Control Manifest Core Layer: "Occupancy authoritative value = discrete
+## `current_cell`"). Mutated at EXACTLY two sanctioned points, both
+## tick-boundary discrete: (a) [method _on_tick]'s arrival crediting below
+## (this story), and (b) a future watchdog rescue (story 015) -- never
+## anywhere else, never derived from [member _visual_position] or
+## [member _intra_tick_progress]. While Traveling, this stays equal to
+## [member _from_cell] for the step's ENTIRE duration (ADR-0009 Decision
+## §1). Read via [method get_current_cell] -- never read directly by an
+## outside consumer.
+var current_cell: Vector3i = Vector3i.ZERO
+
+## The current travel step's origin cell (Story villager-ai-004, ADR-0009
+## Decision §1 Key Interfaces). [member current_cell] equals this for the
+## step's entire duration -- driving it to a NEW value for the next step
+## (path selection, re-pathing) is story 009's Traveling-state-machine
+## concern, out of this story's scope.
+var _from_cell: Vector3i = Vector3i.ZERO
+
+## The current travel step's destination cell (Story villager-ai-004).
+## [member current_cell] becomes this value ONLY via [method _on_tick]'s
+## atomic arrival-crediting assignment, at the tick boundary where
+## [member _intra_tick_progress] has reached `1.0`.
+var _to_cell: Vector3i = Vector3i.ZERO
+
+## CONTINUOUS, cosmetic-ONLY interpolated world position (ADR-0009 Decision
+## §1) -- a rendering input, NEVER read by any occupancy/logic query
+## anywhere (Control Manifest Core/Feature Layer Forbidden: "`_visual_
+## position` is never read outside the movement/rendering path").
+## Recomputed every [method _process] frame from [member _from_cell]/
+## [member _to_cell]/[member _intra_tick_progress] ONLY -- [method _process]
+## never touches [member current_cell] and never integrates the engine's
+## own raw per-frame delta.
+var _visual_position: Vector3 = Vector3.ZERO
+
+## Tick-owned progress through the CURRENT travel step, `[0.0, 1.0]`
+## (ADR-0009 Decision §1 Key Interfaces naming -- despite the name, this is
+## progress through the STEP, not a tick period; a step may take zero, one,
+## or several ticks to complete, GDD F1). Advanced EXCLUSIVELY via
+## [method advance_travel_progress], using [TimeTickSystem]'s `game_delta`
+## -- never the engine's raw per-frame delta (Control Manifest Core Layer:
+## "`_intra_tick_progress` advances via `game_delta` ticks only -- frozen
+## during pause, no glide"). Calling [method advance_travel_progress] every
+## frame with a live `game_delta` is story 009's Traveling-state-machine
+## wiring responsibility (Out of Scope here) -- this story supplies only
+## the pure, directly-testable advance function itself (this story's
+## AC20/[TR-villager-ai-behavior-093]: "drivable directly with injected
+## `game_delta` values, no real engine frames").
+var _intra_tick_progress: float = 0.0
+
 
 ## Explicitly callable wiring/validation entry point (ADR-0001). Asserts
 ## [member config], [member voxel_world], and a
@@ -131,7 +205,14 @@ var _is_set_up: bool = false
 ## ADR-0002's clamp+warn `validate()` policy, then connects this module's
 ## tick dispatch to the SOLE global tick broadcast (`TimeTickSystem.tick`,
 ## per that Autoload's own doc comment) -- never a per-villager `Timer` or
-## raw-delta poll.
+## raw-delta poll. Also explicitly sets `physics_interpolation_mode = OFF`
+## on this node (Story villager-ai-004, ADR-0009 Engine Notes/Risks:
+## defends against a project-wide physics-interpolation setting ever being
+## flipped elsewhere and stacking with this class's own hand-rolled
+## [member _visual_position] lerp, double-interpolation jitter) -- applied
+## here since this class IS the villager's own node; a later
+## presentation-layer story's dedicated visual child, if one is ever added,
+## must carry this forward too.
 func setup() -> void:
 	assert(config != null, "VillagerAi.config not wired")
 	assert(voxel_world != null, "VillagerAi.voxel_world not wired")
@@ -148,6 +229,7 @@ func setup() -> void:
 			push_warning(issue)
 	@warning_ignore("unsafe_property_access")
 	time_tick_system.tick.connect(_on_tick)
+	physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 	_is_set_up = true
 
 
@@ -159,6 +241,51 @@ func is_set_up() -> bool:
 ## Returns the current agent state (read-only observability/test seam).
 func get_state() -> State:
 	return _state
+
+
+## Public occupancy query (ADR-0009 Decision §1 Key Interfaces
+## `get_current_cell(villager_id)` -- this codebase's actual architecture is
+## one [VillagerAi] instance PER villager, established stories 001-003 and
+## mirrored by [method get_state]'s own no-id signature, so no `villager_id`
+## parameter exists here; a hypothetical multi-villager manager class is not
+## this project's shape). ALWAYS returns the discrete [member current_cell]
+## -- never [member _to_cell], never a value derived from
+## [member _visual_position] or [member _intra_tick_progress] (this story's
+## AC: "returns from_cell for a mid-transit villager... never an
+## interpolation-derived value"). Because [member current_cell] only ever
+## changes via [method _on_tick]'s atomic arrival-crediting assignment, a
+## mid-transit call (any [member _intra_tick_progress] strictly between
+## `0.0` and `1.0`, and even exactly `1.0` before the next tick boundary
+## runs) always still returns [member _from_cell]'s value here, by
+## construction -- no branching logic needed in this function itself.
+func get_current_cell() -> Vector3i:
+	return current_cell
+
+
+## Cosmetic-only visual-position recompute (ADR-0009 Decision §1 Key
+## Interfaces, Control Manifest Core Layer Required Pattern: "Visual lerp...
+## each frame"). This is [VillagerAi]'s ONE deliberate, narrowly-scoped
+## exception to story villager-ai-001's "no raw-delta hook" structural
+## guarantee -- [param _delta] (the engine's own per-frame value) is named
+## with its conventional unused-parameter underscore prefix and is NEVER
+## read: this function recomputes [member _visual_position] from
+## [member _from_cell]/[member _to_cell]/[member _intra_tick_progress] ONLY,
+## using [method VoxelWorldGrid.cell_to_world] for the single source of
+## truth on cell<->world conversion (never a second, locally-duplicated
+## formula). It never touches [member current_cell], never advances
+## [member _intra_tick_progress] itself (that is [method
+## advance_travel_progress]'s job, called elsewhere with [TimeTickSystem]'s
+## `game_delta` -- story 009's wiring), and never mutates FSM state --
+## [method _tick_state]'s tick-signal-only dispatch is completely unaffected
+## by this function's existence. When paused, [member _intra_tick_progress]
+## simply never changes between calls (nothing advances it), so this
+## recompute keeps yielding the identical [member _visual_position] every
+## frame -- villagers do NOT glide while paused (this story's AC21), with no
+## pause-aware branch needed here.
+func _process(_delta: float) -> void:
+	_visual_position = VoxelWorldGrid.cell_to_world(_from_cell).lerp(
+		VoxelWorldGrid.cell_to_world(_to_cell), _intra_tick_progress
+	)
 
 
 ## Standability predicate (ADR-0007 Decision §1, GDD Rule 8/[TR-villager-ai-
@@ -273,6 +400,63 @@ func is_cell_in_body_column(occupant_cell: Vector3i, query_cell: Vector3i) -> bo
 	return body_column(occupant_cell).has(query_cell)
 
 
+## Pure movement-update function (Story villager-ai-004 AC20,
+## [TR-villager-ai-behavior-093]): advances [member _intra_tick_progress] by
+## `(config.move_speed * game_delta) / step_length_cells`, clamped to
+## `[0.0, 1.0]` -- never overshoots past arrival even if [param game_delta]
+## is unusually large (a stall, or several skipped frames). [param
+## game_delta] is injected directly by the caller ([TimeTickSystem]'s own
+## `get_game_delta()` in production, story 009's wiring) -- this function
+## itself has ZERO dependency on [TimeTickSystem] or any engine callback,
+## which is exactly what lets a test drive it with hand-picked
+## [param game_delta] samples, "no real engine frames" (this story's AC20
+## wording). Touches [member _intra_tick_progress] ONLY -- never
+## [member current_cell] (the tick-boundary-only mutation discipline this
+## story's AC13 depends on: reaching `1.0` progress here does NOT itself
+## credit arrival; only [method _on_tick] does that, separately).
+##
+## Step length follows GDD F1's classification -- orthogonal = `1.0`,
+## diagonal = `1.4` -- derived from [member _from_cell]/[member _to_cell]
+## via [method _current_step_length_cells]; a zero-length step (the
+## `from == to` case F1 documents as "target is the current/adjacent cell...
+## immediate arrival") snaps progress straight to `1.0` with no division.
+func advance_travel_progress(game_delta: float) -> void:
+	assert(config != null, "VillagerAi.config not wired")
+	var step_length: float = _current_step_length_cells()
+	if step_length <= 0.0:
+		_intra_tick_progress = 1.0
+		return
+	var progress_delta: float = (config.move_speed * game_delta) / step_length
+	_intra_tick_progress = clampf(_intra_tick_progress + progress_delta, 0.0, 1.0)
+
+
+## GDD F1's step-length classification for the CURRENT travel step
+## ([member _from_cell] -> [member _to_cell]): orthogonal steps (differing
+## on at most one horizontal axis) are `1.0`; a true diagonal (differing on
+## BOTH the X and Z axes -- the same diagonal test [method is_step_legal]
+## already uses, reused here rather than re-derived) is `1.4`. Height
+## difference (Y) never affects step length, per F1. Returns `0.0` when
+## [member _from_cell] equals [member _to_cell] -- F1's documented
+## zero-length/immediate-arrival case.
+func _current_step_length_cells() -> float:
+	if _from_cell == _to_cell:
+		return 0.0
+	var dx: int = _to_cell.x - _from_cell.x
+	var dz: int = _to_cell.z - _from_cell.z
+	return 1.4 if (dx != 0 and dz != 0) else 1.0
+
+
+## Tick-boundary arrival predicate (ADR-0009 Decision §1 Key Interfaces
+## `_travel_complete()`): true once [member _intra_tick_progress] has
+## reached `1.0` -- the CURRENT travel step's target has been reached.
+## Reports only on the current step; it says nothing about whether the
+## villager has reached its ultimate destination, should transition out of
+## Traveling, or should release a job claim -- those remain story 009/other
+## stories' concerns entirely.
+func _travel_complete() -> bool:
+	return _intra_tick_progress >= 1.0
+
+
 ## Solidity read for [method is_standable]'s "solid below" check -- an
 ## out-of-bounds cell ([method VoxelWorldGrid.get_cell] returns `null`) is
 ## never solid (there is nothing to stand ON there).
@@ -290,13 +474,23 @@ func _is_passable(cell: Vector3i) -> bool:
 
 
 ## [signal TimeTickSystem.tick] handler -- the sole entry point that ever
-## advances this agent's state machine (ADR-0008 Decision §2). Delegates
-## immediately to [method _tick_state]; kept as a separate method (rather
-## than connecting [method _tick_state] directly) so a later story's
-## Deciding-pass staggering budget (ADR-0008's `max_deciding_per_tick` FIFO
-## queue, story 005) has an obvious, single seam to insert into without
-## touching the signal-wiring line in [method setup].
+## advances this agent's state machine (ADR-0008 Decision §2). Also performs
+## tick-boundary travel-arrival crediting (ADR-0009 Decision §1 Key
+## Interfaces `_on_tick()`; GDD F1 [TR-villager-ai-behavior-029]'s
+## tick-boundary-only crediting, extended to occupancy by that ADR): the
+## atomic `current_cell = _to_cell` assignment is one of the exactly two
+## sanctioned points [member current_cell] is ever mutated (the other is a
+## future watchdog rescue, story 015). Idempotent once credited --
+## [member current_cell] already equals [member _to_cell], a harmless no-op
+## -- until a NEW travel step's [member _from_cell]/[member _to_cell] begin
+## (story 009). Delegates the FSM dispatch itself to [method _tick_state];
+## kept as a separate method (rather than connecting [method _tick_state]
+## directly) so a later story's Deciding-pass staggering budget (ADR-0008's
+## `max_deciding_per_tick` FIFO queue, story 005) has an obvious, single seam
+## to insert into without touching the signal-wiring line in [method setup].
 func _on_tick() -> void:
+	if _travel_complete():
+		current_cell = _to_cell
 	_tick_state()
 
 

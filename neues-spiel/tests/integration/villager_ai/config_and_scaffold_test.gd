@@ -20,8 +20,15 @@
 ##    no others; per-villager state starts at `DECIDING` (GDD state table
 ##    entry point) and is dispatched via `match` on the injected
 ##    `TimeTickSystem`-shaped double's `tick` signal -- never a raw-delta
-##    poll (`VillagerAi` defines no `_process`/`_physics_process` at all,
-##    verified structurally below).
+##    poll. `VillagerAi` still defines no `_physics_process` at all
+##    (verified structurally below). **Amended by story villager-ai-004**:
+##    `VillagerAi` now defines exactly one `_process(_delta)` override, added
+##    for ADR-0009's cosmetic-only visual-position recompute -- its `_delta`
+##    parameter is named with the conventional unused-parameter underscore
+##    prefix and is never read; FSM dispatch itself remains exclusively
+##    tick-signal-driven, unaffected by this addition (see
+##    `tests/unit/villager_ai/deterministic_position_test.gd` for that
+##    story's own coverage).
 ## 5. Control Manifest Feature Layer guardrails, established from this
 ##    epic's first commit onward (grep-verifiable, comment-stripped source
 ##    scan -- this codebase's established precedent, see
@@ -342,15 +349,20 @@ func test_tick_state_dispatches_without_error_for_every_state() -> void:
 		assert_int(villager.get_state()).is_equal(state)
 
 
-func test_villager_ai_defines_no_process_or_physics_process_raw_delta_hook() -> void:
+func test_villager_ai_defines_no_physics_process_and_process_is_visual_only() -> void:
 	# Structural check for "never raw delta" (Control Manifest Feature
-	# Layer): this module dispatches exclusively via the injected tick
-	# signal -- it must not ALSO define a `_process`/`_physics_process`
-	# override that could read raw engine delta as an alternate path.
+	# Layer): FSM dispatch happens exclusively via the injected tick signal
+	# -- this module must never define a `_physics_process` override (no
+	# alternate raw-delta path exists, ever). Amended by story
+	# villager-ai-004 (ADR-0009): exactly one `_process(_delta)` override IS
+	# now permitted -- the cosmetic-only visual-position recompute -- but
+	# its parameter must still be the conventional unused-parameter
+	# underscore-prefixed `_delta`, never read, proving it cannot be an
+	# alternate raw-delta state-mutation path either.
 	var source: String = _read_all_gd_source("res://src/villager_ai")
 
-	assert_bool(source.contains("func _process(")).is_false()
 	assert_bool(source.contains("func _physics_process(")).is_false()
+	assert_bool(source.contains("func _process(_delta")).is_true()
 
 
 # ---------------------------------------------------------------------------
