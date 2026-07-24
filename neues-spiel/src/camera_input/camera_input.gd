@@ -108,11 +108,75 @@
 ## round-trip guarantee [TR-camera-input-050], not a general-purpose
 ## production API.
 ##
-## Out of scope for this class as authored here (a later story extends this
-## same class, not a new one): the Active/Suspended state machine (story
-## cam-007).
+## Story cam-007 (ADR-0010 primary, cross-system input arbitration; ADR-0013
+## secondary, the transition-signal contract surface) additionally owns the
+## Active/Suspended state machine (GDD States and Transitions table
+## [TR-camera-input-034] [TR-camera-input-033] [TR-camera-input-035]
+## [TR-camera-input-042] [TR-camera-input-041] [TR-camera-input-031]):
+## [enum State], [member game_world] (an OPTIONAL injected-tier dependency,
+## ADR-0001 -- wired via a scene file's Inspector in production; nullable so
+## every pre-existing cam-001..006 test/wiring that never sets it continues
+## to construct/[method setup] a bare instance unaffected, mirroring
+## [GameWorld]'s own `valley_scene` "deliberately optional" precedent), and
+## [method setup]'s new [method _connect_transition_signals] call. THIS class
+## is the consumer that connects itself to `game_world.transition_begun`/
+## `transition_ended` -- [GameWorld] never calls into any consumer directly,
+## by construction (its own class doc comment, TR-scene-world-management-049).
+## A single connection call handles both end outcomes: `transition_ended`
+## already covers transition-complete (`success=true`) AND transition-abort
+## (`success=false`) in one signal, so there is no separate abort signal to
+## forget -- the "never complete alone" guarantee [TR-camera-input-033] holds
+## by construction of [GameWorld]'s own contract surface, not by anything
+## extra this class does.
+##
+## Suspension freezes camera state WITHOUT a separate snapshot/restore copy
+## of yaw/pitch/distance/target: every mutation path ([method
+## _apply_qe_rotation], [method _apply_mouse_drag_rotation], [method
+## _apply_zoom], [method _apply_pan]) is itself gated on [constant
+## State.ACTIVE] (directly, or via [method _unhandled_input]'s single
+## early-return gate), so none of them can touch [member _yaw]/[member
+## _pitch]/[member _distance]/[member _target] while Suspended -- the "exact
+## same value, no snap" restore guarantee [TR-camera-input-042] holds
+## structurally, mirroring this class's already-established preference for
+## structural guarantees over redundant tracked state (see [method
+## get_world_ray]'s "always computable, no state-guard branch" precedent).
+## [method _unhandled_input]'s Suspended check is a STATE gate, not a
+## per-action branch, so [TR-camera-input-027]'s "no branch on action
+## identity" guarantee (cam-002) is unaffected -- it governs branching on
+## WHICH action fired, not whether dispatch happens at all this frame.
+## [method Node.set_process]/[method Node.set_process_unhandled_input] are
+## ALSO toggled false/true on suspend/resume -- the idiomatic Godot
+## "disable when idle" engine opt-out -- kept alongside the body-level state
+## checks: the checks are what make Suspended exercisable via this class's
+## established direct-method-call test convention (a toggled-off engine
+## callback is invisible to a test that calls the method directly, the same
+## reasoning [WasdPanTest]'s doc comment already documents for headless
+## `Input` polling).
+##
+## Edge case (GDD Edge Cases table [TR-camera-input-041]): a middle-mouse
+## rotate drag already in progress when suspension begins is DROPPED, not
+## merely paused. [method _on_transition_begun] reads [member
+## _middle_button_held] -- tracked purely from InputEvents [method
+## _apply_mouse_drag_rotation] already observes (an [InputEventMouseMotion]'s
+## own `button_mask`, or an explicit [InputEventMouseButton] press/release),
+## NEVER `Input` global-state polling, which this project's headless CLI test
+## harness cannot reliably simulate (the same accumulated pitfall
+## `wasd_pan_test.gd` documents for `Input.get_vector`/`action_press`) -- and,
+## if the button was held at that moment, arms [member _rotate_drag_locked].
+## The lock is independent of [enum State] itself: it survives the resume
+## back to Active and is cleared ONLY by an explicit
+## [InputEventMouseButton] release for `MOUSE_BUTTON_MIDDLE` reaching [method
+## _apply_mouse_drag_rotation] -- requiring a genuine release-then-fresh-press
+## before rotation resumes, per the GDD's "ignored until released and
+## re-pressed."
 class_name CameraInput
 extends Node
+
+## Active/Suspended state machine (story cam-007). [constant State.SUSPENDED]
+## is EXCLUSIVELY the scene-transition state (GDD Core Rule 10,
+## [TR-camera-input-031]) -- never reused for game pause (Story 009's
+## separate, later contract).
+enum State { ACTIVE, SUSPENDED }
 
 ## Opaque InputMap action passthrough (ADR-0010 Decision "New-click ownership
 ## is structural"; architecture.md API Boundaries:
@@ -181,6 +245,19 @@ const PAN_ACTIONS: Array[StringName] = [
 ## `_ready()` -- see [method setup].
 @export var config: CameraInputConfig
 
+## Optional injected-tier dependency (ADR-0001, story cam-007) on the World
+## Root's transition-signal contract surface (ADR-0013's
+## `transition_begun`/`transition_ended`, scene-world-management story 003).
+## Wired via a scene file's Inspector in production, or assigned directly in
+## a headless test; [method setup] connects to both signals when this is
+## non-null (see [method _connect_transition_signals]). Deliberately
+## nullable -- no scene-assembly story has wired a live [CameraInput] node
+## into `GameWorld.tscn` yet, and every pre-existing cam-001..006 test never
+## sets this field, so a null value MUST remain a no-op (mirrors
+## [GameWorld]'s own `valley_scene` "deliberately optional" precedent) rather
+## than an assertion failure.
+@export var game_world: GameWorld = null
+
 ## Orbit target point (ground-plane look-at). Mutated by [method _apply_pan]
 ## (story cam-005); starts at the world origin. [TR-camera-input-021]
 var _target: Vector3 = Vector3.ZERO
@@ -201,6 +278,24 @@ var _pitch: float = 0.0
 ## True once [method setup] has completed at least once.
 var _is_set_up: bool = false
 
+## Active/Suspended state (story cam-007). See [enum State].
+var _state: State = State.ACTIVE
+
+## Last-known held/released state of the middle-mouse rotate button, tracked
+## purely from InputEvents [method _apply_mouse_drag_rotation] already
+## observes -- never `Input` global-state polling (untestable headless, see
+## that method's doc comment). Consulted by [method _on_transition_begun] to
+## decide whether a drag was in progress at the moment suspension begins.
+var _middle_button_held: bool = false
+
+## True once a Suspended entry found the rotate button already held
+## [TR-camera-input-041]; while true, [method _apply_mouse_drag_rotation]
+## ignores drag motion entirely. Cleared ONLY by an explicit
+## [InputEventMouseButton] release for `MOUSE_BUTTON_MIDDLE` -- requiring a
+## genuine release-then-fresh-press before rotation resumes. Independent of
+## [enum State] itself: survives the Suspended -> Active transition.
+var _rotate_drag_locked: bool = false
+
 
 ## Explicitly callable wiring/validation entry point (ADR-0001). Asserts
 ## [member config] was wired, applies ADR-0002's clamp+warn `validate()`
@@ -217,6 +312,7 @@ func setup() -> void:
 	_pitch = clampf(config.start_pitch, config.pitch_min, config.pitch_max)
 	_assert_owned_actions_registered()
 	_assert_pan_actions_registered()
+	_connect_transition_signals()
 	_is_set_up = true
 
 
@@ -246,6 +342,57 @@ func _assert_pan_actions_registered() -> void:
 ## Returns whether [method setup] has completed.
 func is_set_up() -> bool:
 	return _is_set_up
+
+
+## Connects this instance to [member game_world]'s transition-signal contract
+## surface (story cam-007, ADR-0001 injected-tier wiring). A no-op when
+## [member game_world] is null (see that member's doc comment) -- every
+## pre-existing test/wiring that never sets it continues unaffected. Guards
+## each connection with [method Signal.is_connected] so a repeated [method
+## setup] call (e.g. a test re-running setup on the same instance) never
+## double-connects.
+func _connect_transition_signals() -> void:
+	if game_world == null:
+		return
+	if not game_world.transition_begun.is_connected(_on_transition_begun):
+		game_world.transition_begun.connect(_on_transition_begun)
+	if not game_world.transition_ended.is_connected(_on_transition_ended):
+		game_world.transition_ended.connect(_on_transition_ended)
+
+
+## Handles [signal GameWorld.transition_begun]: enters Suspended
+## [TR-camera-input-034], arms [member _rotate_drag_locked] if [member
+## _middle_button_held] shows the rotate button already down
+## [TR-camera-input-041], and disables this node's own per-frame/input engine
+## callbacks ([method Node.set_process] / [method
+## Node.set_process_unhandled_input]) -- the idiomatic Godot "disable when
+## idle" opt-out, kept alongside this class's body-level state checks (see
+## class doc comment).
+func _on_transition_begun() -> void:
+	_rotate_drag_locked = _middle_button_held
+	_state = State.SUSPENDED
+	set_process(false)
+	set_process_unhandled_input(false)
+
+
+## Handles [signal GameWorld.transition_ended]: re-enters Active regardless of
+## [param success] -- transition-complete (`true`) and transition-abort
+## (`false`) release Suspended identically [TR-camera-input-033], never
+## complete alone (an abort must never strand this system in Suspended).
+## Re-enables [method Node.set_process] / [method
+## Node.set_process_unhandled_input]. Deliberately does NOT touch [member
+## _rotate_drag_locked] -- a drag held across the boundary stays ignored
+## until an explicit release + fresh press [TR-camera-input-041], independent
+## of this resume.
+func _on_transition_ended(_success: bool) -> void:
+	_state = State.ACTIVE
+	set_process(true)
+	set_process_unhandled_input(true)
+
+
+## Returns the current Active/Suspended state (story cam-007).
+func get_state() -> State:
+	return _state
 
 
 ## Returns the camera's world position, recomputed fresh from current state
@@ -340,7 +487,17 @@ func get_target() -> Vector3:
 ## [method _apply_zoom], for this system's own mouse-wheel zoom -- same
 ## reasoning: the branch lives inside that method, on the wheel event's own
 ## button index, never here on [constant OWNED_ACTIONS] identity.
+##
+## Story cam-007 prepends exactly ONE early-return guard: while [constant
+## State.SUSPENDED], this method does nothing at all -- no [signal
+## action_fired] emission, no rotation, no zoom [TR-camera-input-034]. This is
+## a STATE gate, not a per-action branch: it does not distinguish WHICH action
+## fired, only WHETHER any dispatch happens this call, so
+## [TR-camera-input-027]'s "no branch on action identity" guarantee (verified
+## by this suite's own grep check) is unaffected -- see class doc comment.
 func _unhandled_input(event: InputEvent) -> void:
+	if _state == State.SUSPENDED:
+		return
 	var fired: Array[StringName] = OWNED_ACTIONS.filter(
 		func(action_name: StringName) -> bool: return event.is_action_pressed(action_name)
 	)
@@ -407,8 +564,29 @@ func _apply_qe_rotation(event: InputEvent) -> void:
 ## Control under ADR-0010's routing), because no state survives between
 ## events. Never sets `Input.mouse_mode = MOUSE_MODE_CAPTURED` -- the cursor
 ## stays visible and free, per the GDD/manifest.
+##
+## Story cam-007 adds the ONE piece of cross-event state this method now
+## tracks: [member _middle_button_held] (updated below from every event this
+## method sees that carries evidence of the button's physical state -- an
+## explicit [InputEventMouseButton] press/release, or a motion event's own
+## `button_mask`), consulted by [method _on_transition_begun] to decide
+## whether a drag was in progress at the moment suspension begins. When
+## [member _rotate_drag_locked] is armed (a drag was dropped at suspension,
+## [TR-camera-input-041]), this method ignores ALL drag motion until it
+## observes an explicit [InputEventMouseButton] release for
+## `MOUSE_BUTTON_MIDDLE` -- a genuine release, not merely a motion event
+## showing the button no longer in `button_mask` -- so the same
+## "release-then-fresh-press" contract holds even if a release happened
+## invisibly during Suspended (see class doc comment's Edge case paragraph).
 func _apply_mouse_drag_rotation(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_MIDDLE:
+		_middle_button_held = event.pressed
+	if _rotate_drag_locked:
+		if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_MIDDLE and not event.pressed:
+			_rotate_drag_locked = false
+		return
 	if event is InputEventMouseMotion and event.button_mask & MOUSE_BUTTON_MASK_MIDDLE:
+		_middle_button_held = true
 		_yaw += event.relative.x * config.mouse_drag_sensitivity
 		set_pitch(_pitch + event.relative.y * config.mouse_drag_sensitivity)
 
@@ -460,7 +638,17 @@ func _process(delta: float) -> void:
 ## [TR-camera-input-049]. Input still registers at a bound; it simply
 ## produces zero further movement in that axis, never a blocked/ignored
 ## event.
+##
+## Story cam-007: gated on [constant State.ACTIVE] -- while [constant
+## State.SUSPENDED] this is a no-op, freezing [member _target]
+## [TR-camera-input-034]. Checked here (not only via [method
+## Node.set_process]'s engine-level opt-out on [method _process]) so this
+## guarantee holds for a direct call too, matching this class's established
+## direct-method-call test convention (`wasd_pan_test.gd` exercises this
+## method directly, never through `_process`).
 func _apply_pan(delta: float, input_dir: Vector3) -> void:
+	if _state == State.SUSPENDED:
+		return
 	var clamped_delta: float = clampf(delta, 0.0, config.max_delta_time)
 	var pan_delta: Vector3 = CameraInput.derive_pan_delta(
 		input_dir, _yaw, _distance, clamped_delta, config.pan_speed_factor

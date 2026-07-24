@@ -1,7 +1,7 @@
 # Story 007: Active/Suspended state machine (scene-transition suspend, exact-state restore)
 
 > **Epic**: Camera & Input
-> **Status**: Ready
+> **Status: Complete (2026-07-24 — 421/421 suite green, parent-verified)
 > **Layer**: Foundation
 > **Type**: Integration
 > **Estimate**: 1 day

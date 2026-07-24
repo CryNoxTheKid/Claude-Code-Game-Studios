@@ -181,19 +181,29 @@ func test_unhandled_input_release_event_does_not_emit_action_fired() -> void:
 
 func test_unhandled_input_body_never_branches_on_action_identity() -> void:
 	# Arrange — a source-level regression guard for the story's "verify by
-	# code review + grep" instruction: no `if`/`match` keyword appears inside
-	# _unhandled_input's body (the ONLY conditional there is the uniform
-	# is_action_pressed check inside the filter() lambda, which applies
-	# identically to every action — not a per-action branch).
+	# code review + grep" instruction. Updated by story cam-007: the uniform
+	# is_action_pressed check inside the filter() lambda still applies
+	# identically to every action (not a per-action branch), and story
+	# cam-007 additionally prepends exactly ONE early-return guard — a
+	# Suspended STATE gate (`if _state == State.SUSPENDED: return`), which
+	# governs WHETHER dispatch happens at all this call, never WHICH action
+	# fired. The assertion below narrows from "no `if` at all" to "the
+	# exactly-one permitted `if` is the Suspended-state guard, never a branch
+	# that reads an action name/identity."
 	var source: String = FileAccess.get_file_as_string(CAMERA_INPUT_SOURCE_PATH)
 	var start: int = source.find("func _unhandled_input")
 	var next_func: int = source.find("\nfunc ", start + 1)
 	var body: String = source.substr(start, next_func - start) if next_func != -1 else source.substr(start)
 
-	# Act + Assert
+	# Act + Assert -- indentation in this file is tabs, not spaces, so the
+	# permitted-count check greps "if " (no leading-space assumption) rather
+	# than " if " (cam-002's original space-indented assumption, stale now).
 	assert_int(start).is_greater(-1)
-	assert_bool(body.contains(" if ")).is_false()
 	assert_bool(body.contains("match ")).is_false()
+	assert_int(body.count("if ")).is_equal(1)
+	assert_bool(body.contains("if _state == State.SUSPENDED")).is_true()
+	assert_bool(body.contains("action_name ==")).is_false()
+	assert_bool(body.contains("action_name.")).is_false()
 
 
 # ---------------------------------------------------------------------------
