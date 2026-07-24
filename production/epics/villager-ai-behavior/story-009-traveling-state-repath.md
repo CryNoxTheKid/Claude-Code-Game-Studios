@@ -1,7 +1,7 @@
 # Story 009: Traveling state — path following & mid-travel re-path
 
 > **Epic**: Villager AI & Behavior
-> **Status**: Ready
+> **Status: Complete (2026-07-24 — 598/598 suite green, parent-verified)
 > **Layer**: Core
 > **Type**: Integration
 > **Estimate**: ~1 agent-day

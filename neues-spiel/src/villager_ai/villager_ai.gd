@@ -180,6 +180,71 @@
 ## own "for any MOVING villager" scope. This story implements the FILTER
 ## decision only -- the actual re-path/redirect story 009 wires to this
 ## signal is explicitly out of this story's scope.
+##
+## Story villager-ai-009 (this revision) implements the Traveling state
+## machine itself (GDD "States and Transitions": "Follows the computed path
+## cell-by-cell; re-paths if a Voxel World write blocks the path"). [method
+## start_traveling] is the generic entry point a future story's own
+## target-selection logic calls (Story 010's F2 job site, Story 018's bed
+## cell) -- it acquires a path from [member nav_graph] (a new shared
+## [VillagerNavGraph] dependency, mirroring [member scheduler]'s own
+## "population-wide, non-`@export`, not setup()-asserted" precedent exactly
+## -- earlier stories' tests never wire it and this story does not widen
+## [method setup]'s boot-gate assertion retroactively) from
+## [member current_cell] toward a caller-supplied `target_cell`, storing the
+## FULL REMAINING path ([member _travel_remaining_path]), not merely the
+## current single step -- exactly the widening this story's own predecessor
+## doc comment (above) already reserved: [method get_remaining_movement_cells]
+## now returns the whole upcoming route, so [VillagerRepathFilter]'s
+## clearance envelope (unchanged, zero lines touched) now also covers writes
+## further down the path, not only the in-flight step.
+##
+## [method _tick_traveling] performs the tick-boundary-only step advance
+## ("request next step at tick boundaries") -- called from [method
+## _tick_state] AFTER [method _on_tick]'s own arrival-crediting assignment
+## already ran this tick, so [member current_cell] already reflects a
+## just-completed step by the time it runs: it pops the just-arrived cell
+## off [member _travel_remaining_path] and either begins the next step or
+## completes arrival ([method _complete_travel_arrival], transitioning to
+## the caller-supplied `arrival_state` -- Working/Sleeping/etc, real
+## per-state behaviour still owned by stories 012/018).
+##
+## [signal repath_evaluation_requested] (story 008's own FILTER signal) is
+## now consumed INTERNALLY, connected in [method setup] with default
+## synchronous flags: [method _on_repath_evaluation_requested] recomputes a
+## path from [member current_cell] toward the SAME [member
+## _travel_target_cell] -- the actual REDIRECT this story's race-closure AC
+## requires, landing in the SAME synchronous call stack as the write that
+## triggered it, before the next [method _process] frame could ever advance
+## [member _visual_position] further toward now-solid geometry. An empty
+## recompute result (no viable detour) fires [method _abandon_travel] (this
+## story's AC19 -- "exits to Deciding and re-selects... never keeps
+## traveling toward a dead target"), dispatched by [member _pursued_activity]
+## per GDD Edge Case 1's per-target fallback: `WORK` releases the held claim
+## via the already-existing [method _release_job_claim]; `NEED`'s
+## ground-sleep fallback and `NONE`'s wander-reselection are Story 018/019's
+## own scope (neither system exists in this codebase yet) -- this story's
+## safe default for both is simply "abandon and re-decide."
+##
+## **Wiring-order requirement** (load-bearing, not incidental): whoever
+## assembles a population must call [method
+## VillagerNavGraph.subscribe_to_voxel_world] BEFORE this villager's own
+## [method setup] -- Godot fires synchronous signal connections in
+## CONNECTION order (Control Manifest Global Rules), so the shared graph
+## must patch a blocking write before this villager's own repath recompute
+## reads it, or the recompute would run against a stale graph that still
+## thinks the just-blocked cell is standable.
+##
+## [method _process] now ALSO drives [member _intra_tick_progress] forward
+## every frame -- story villager-ai-004's own explicitly-deferred wiring
+## ("calling advance_travel_progress every frame with a live game_delta is
+## story 009's... responsibility") -- by querying [member time_tick_system]'s
+## OWN `get_game_delta()` (a value that system already computed this frame;
+## never this function's own raw `_delta` parameter, still unread) whenever
+## [method is_moving] is true. Guarded by `time_tick_system != null` so
+## every earlier story's own position-model unit tests (which call [method
+## _process] directly without ever wiring [member time_tick_system]) keep
+## passing unchanged.
 class_name VillagerAi
 extends Node
 
@@ -259,8 +324,10 @@ const MAX_STEP_HEIGHT: int = 1
 ## `/root/TimeTickSystem` (the real Autoload, registered project-wide); a
 ## headless test assigns a `tick`-signal-shaped test double directly before
 ## calling [method setup], with zero scene tree and zero manual Autoload
-## registration of its own. Duck-typed against exactly one member this class
-## depends on: `signal tick()`.
+## registration of its own. Duck-typed against two members this class
+## depends on: `signal tick()` and, since story villager-ai-009,
+## `func get_game_delta() -> float` ([method _process]'s live
+## travel-progress wiring).
 var time_tick_system: Object = null
 
 ## Deciding-pass scheduler dependency (Story villager-ai-005, ADR-0008
@@ -305,6 +372,30 @@ var needs_provider: Object = null
 ## as [member _pursued_activity] == `PursuedActivity.WORK`; Story 011
 ## introduces the real claim record this stands in for.
 var job_queue: Object = null
+
+## Shared travel-pathfinding graph dependency (Story villager-ai-009,
+## ADR-0007 Decision Section 2) -- the SAME single, population-wide
+## [VillagerNavGraph] instance that class's own doc comment establishes (one
+## instance for the whole population, never one per villager). Deliberately
+## a plain, non-`@export`ed [RefCounted] reference -- mirrors [member
+## scheduler]'s own precedent exactly (no Inspector-authoring need, a
+## shared-not-duplicated architecture). Assigned by whichever code
+## assembles the villager population BEFORE [method start_traveling] is
+## ever called -- asserted THERE (and in [method
+## _recompute_path_from_current_cell]), deliberately NOT inside [method
+## setup] (unlike [member config]/[member voxel_world]/[member scheduler]):
+## every earlier story's own test already calls [method setup] without ever
+## wiring this new dependency, and this story does not widen that boot-gate
+## assertion retroactively -- mirrors [member needs_provider]/
+## [member job_queue]'s own "nil-safe, not setup()-asserted" precedent
+## (Story villager-ai-006's doc comment) exactly.
+##
+## **Wiring-order requirement** (load-bearing, not incidental): see this
+## class's own doc comment's "Wiring-order requirement" paragraph -- the
+## population assembler must call [method
+## VillagerNavGraph.subscribe_to_voxel_world] on this SAME instance BEFORE
+## this villager's own [method setup] runs.
+var nav_graph: VillagerNavGraph = null
 
 ## This villager's stable identity/processing-order index (GDD Edge Case 3 /
 ## F2 tie-break convention: "stable villager processing order (villager
@@ -393,6 +484,35 @@ var _visual_position: Vector3 = Vector3.ZERO
 ## `game_delta` values, no real engine frames").
 var _intra_tick_progress: float = 0.0
 
+## The villager's ultimate Traveling destination (Story villager-ai-009) --
+## distinct from [member _to_cell] (the CURRENT single step's destination
+## only). A mid-travel recompute ([method _recompute_path_from_current_cell])
+## always paths TOWARD this same value; it never changes mid-travel itself
+## (a target change mid-travel would be a preemption/abandon, not a
+## redirect -- out of this story's scope). Meaningless while not actually
+## traveling -- no sentinel is defined for "no target," since [member
+## _travel_remaining_path] being empty is the authoritative "not traveling"
+## signal this class already checks everywhere.
+var _travel_target_cell: Vector3i = Vector3i.ZERO
+
+## Which [enum State] this villager transitions into on arrival at
+## [member _travel_target_cell] (Story villager-ai-009's AC: "arrival on
+## site transitions to the next state (Working/Sleeping/etc.)") -- supplied
+## by [method start_traveling]'s caller (future stories 010's job-site
+## target / 018's bed target), never decided by this class itself.
+var _travel_arrival_state: State = State.DECIDING
+
+## The full remaining AStar3D path (Story villager-ai-009), EXCLUDING the
+## cell the villager currently occupies -- `_travel_remaining_path[0]` is
+## always kept equal to [member _to_cell] (the in-flight step's
+## destination); later entries are cells not yet stepped onto. Empty
+## whenever not traveling (mirrors [member _from_cell] == [member _to_cell]
+## as the "stationary" signal). Widens [method get_remaining_movement_cells]
+## per story villager-ai-008's own doc comment reservation -- neither
+## [VillagerRepathFilter] nor [method evaluate_repath_trigger]'s call site
+## needed a single line changed by this story.
+var _travel_remaining_path: Array[Vector3i] = []
+
 
 ## Explicitly callable wiring/validation entry point (ADR-0001). Asserts
 ## [member config], [member voxel_world], and a
@@ -441,6 +561,11 @@ func setup() -> void:
 	# landing in the SAME call stack as the write.
 	voxel_world.cell_changed.connect(_on_voxel_world_cell_changed)
 	voxel_world.cells_changed_batch.connect(_on_voxel_world_cells_changed_batch)
+	# Story villager-ai-009: consumes story 008's own FILTER signal
+	# internally -- default, synchronous connection flags (never
+	# CONNECT_DEFERRED), same race-closure reliance as the two connections
+	# directly above.
+	repath_evaluation_requested.connect(_on_repath_evaluation_requested)
 	request_deciding_pass()
 	_is_set_up = true
 
@@ -525,7 +650,27 @@ func get_current_cell() -> Vector3i:
 ## recompute keeps yielding the identical [member _visual_position] every
 ## frame -- villagers do NOT glide while paused (this story's AC21), with no
 ## pause-aware branch needed here.
+##
+## Story villager-ai-009 (this revision) additionally drives
+## [member _intra_tick_progress] forward every frame -- the "wire live
+## game_delta into travel" wiring story villager-ai-004 explicitly deferred
+## to this story (that story's own doc comment above: "calling
+## advance_travel_progress every frame with a live game_delta is story 009's
+## Traveling state-machine wiring responsibility"), matching GDD Core Rule
+## 1's "visible movement interpolates continuously using game delta".
+## Queries [member time_tick_system]'s OWN `get_game_delta()` -- a value
+## that system already computed this frame from ITS OWN raw-delta clamp/
+## warp/pause formula -- never this function's own [param _delta] parameter
+## (still unread, still named with its conventional unused-parameter
+## underscore prefix). Guarded by `time_tick_system != null` AND
+## [method is_moving] so this call is a harmless no-op whenever either is
+## false -- every earlier story's own position-model unit tests call
+## [method _process] directly without ever wiring [member time_tick_system],
+## and this guard keeps every one of them passing unchanged.
 func _process(_delta: float) -> void:
+	if is_moving() and time_tick_system != null:
+		@warning_ignore("unsafe_method_access")
+		advance_travel_progress(time_tick_system.get_game_delta())
 	_visual_position = VoxelWorldGrid.cell_to_world(_from_cell).lerp(
 		VoxelWorldGrid.cell_to_world(_to_cell), _intra_tick_progress
 	)
@@ -911,10 +1056,148 @@ func _release_job_claim() -> void:
 	job_queue.release_claim(villager_id)
 
 
-## Traveling-state tick body -- stub (story 002 walkability, later movement
-## stories).
+## Begins Traveling toward [param target_cell], entering `State.TRAVELING`
+## and transitioning to [param arrival_state] once [param target_cell] is
+## reached (Story villager-ai-009; GDD "Traveling" state-table entry:
+## "Activity chosen with a distant target"). The caller -- a future story's
+## own target-selection logic (010's F2 job site, 018's bed cell) -- decides
+## BOTH the target and what state arrival transitions into; this method
+## itself never reasons about job/bed/wander semantics -- only [member
+## _pursued_activity] (already set by whichever Deciding-pass tier committed
+## to this activity, story 006) does, later, if travel must abandon (see
+## [method _abandon_travel]).
+##
+## Acquires the path via [member nav_graph]'s shared [method
+## VillagerNavGraph.find_path] from [member current_cell] -- NEVER from
+## [member _visual_position]/[member _intra_tick_progress] (Control
+## Manifest: occupancy/logic queries always read the discrete cell). Three
+## outcomes, per [method VillagerNavGraph.find_path]'s own documented return
+## shape:
+## - Empty path (unreachable, or [member current_cell] itself isn't
+##   currently a graph point) -- [method _abandon_travel] fires immediately;
+##   this villager never enters `State.TRAVELING` at all. Returns `false`.
+## - A single-cell path ([param target_cell] == [member current_cell]
+##   already, GDD F1's "0 is valid... immediate arrival") --
+##   [method _complete_travel_arrival] fires immediately, same call, no tick
+##   needed. Returns `true`.
+## - A multi-cell path -- stores the path (minus the already-occupied first
+##   cell) as [member _travel_remaining_path], begins the first step
+##   ([member _from_cell]/[member _to_cell]), resets
+##   [member _intra_tick_progress], and enters `State.TRAVELING`. Returns
+##   `true`.
+func start_traveling(target_cell: Vector3i, arrival_state: State) -> bool:
+	assert(nav_graph != null, "VillagerAi.nav_graph not wired -- required before start_traveling()")
+	var path: Array[Vector3i] = nav_graph.find_path(current_cell, target_cell)
+	if path.is_empty():
+		_abandon_travel()
+		return false
+	if path.size() == 1:
+		_complete_travel_arrival(arrival_state)
+		return true
+	_travel_target_cell = target_cell
+	_travel_arrival_state = arrival_state
+	var remaining: Array[Vector3i] = path.slice(1)
+	_travel_remaining_path = remaining
+	_from_cell = current_cell
+	_to_cell = _travel_remaining_path[0]
+	_intra_tick_progress = 0.0
+	_state = State.TRAVELING
+	return true
+
+
+## Traveling-state tick body (Story villager-ai-009; GDD "request next step
+## at tick boundaries"). Called from [method _tick_state], which itself
+## runs AFTER [method _on_tick]'s own arrival-crediting assignment
+## (`current_cell = _to_cell` when [method _travel_complete] was true) THIS
+## SAME tick -- so by the time this runs, [member current_cell] already
+## reflects a just-completed step, if one completed this tick.
+##
+## A no-op while still mid-step ([member current_cell] still equals
+## [member _from_cell], not yet [member _to_cell]) -- nothing to advance
+## yet; [method _process]/[method advance_travel_progress] handle continuous
+## progress every frame, independently of this tick-boundary function.
+##
+## On arrival at the current step's destination: pops the just-arrived cell
+## off [member _travel_remaining_path] (its front always equals
+## [member _to_cell] by construction, see that field's own doc comment). An
+## empty remainder means the FINAL destination was just reached -- [method
+## _complete_travel_arrival] fires. Otherwise begins the next step from the
+## newly-arrived [member current_cell] toward the new front of
+## [member _travel_remaining_path], resetting [member _intra_tick_progress]
+## to `0.0`.
+##
+## Defensive branch: reachable only if `State.TRAVELING` was entered without
+## going through [method start_traveling] (e.g. a hand-constructed test
+## fixture, or a freshly-constructed villager whose [member current_cell]/
+## [member _to_cell] both default to `Vector3i.ZERO` and therefore compare
+## equal trivially -- `config_and_scaffold_test.gd`'s own dispatch-structure
+## test does exactly this) -- [member _travel_remaining_path] already empty
+## at entry means there was never a real step to credit arrival for, so this
+## is a harmless, state-PRESERVING no-op, never a `pop_front()` against an
+## empty array and never a call into [method _complete_travel_arrival] (a
+## genuine arrival is ONLY ever detected after popping the just-arrived cell
+## below, never before).
 func _tick_traveling() -> void:
-	pass
+	if current_cell != _to_cell:
+		return
+	if _travel_remaining_path.is_empty():
+		return
+	_travel_remaining_path.pop_front()
+	if _travel_remaining_path.is_empty():
+		_complete_travel_arrival(_travel_arrival_state)
+		return
+	_from_cell = current_cell
+	_to_cell = _travel_remaining_path[0]
+	_intra_tick_progress = 0.0
+
+
+## Successful-arrival completion (Story villager-ai-009; GDD "arrival on
+## site transitions to the next state (Working/Sleeping/etc.)"): clears all
+## travel bookkeeping ([method _clear_travel_state]) and transitions
+## [member _state] to [param arrival_state] -- the actual per-state
+## behaviour (work-progress accrual, sleep recovery) remains stories
+## 012/018's own stub bodies, untouched here.
+func _complete_travel_arrival(arrival_state: State) -> void:
+	_clear_travel_state()
+	_state = arrival_state
+
+
+## Graceful travel abandonment (Story villager-ai-009, this story's AC19 --
+## "exits to Deciding and re-selects... never keeps traveling toward a dead
+## target"). Dispatches GDD Edge Case 1's per-target fallback by [member
+## _pursued_activity] -- the ONLY case this codebase can act on today is
+## `WORK` (releases the held claim via the already-existing [method
+## _release_job_claim], GDD Rule 6's "releases the claim, and tries the
+## next-nearest job"); `NEED`'s ground-sleep fallback and `NONE`'s
+## wander-reselection are Story 018/019's own scope (neither system exists
+## in this codebase yet) -- this story's minimal, safe default for both is
+## simply "abandon and re-decide," which this story's own test proves does
+## NOT erroneously call [method _release_job_claim] for a non-WORK target.
+## Always resets [member _pursued_activity] to `NONE` before re-entering
+## Deciding -- otherwise WORK's own claim-stickiness check ([method
+## _tick_deciding]'s tier 2) would wrongly treat the just-abandoned claim as
+## still held and skip job re-selection entirely.
+func _abandon_travel() -> void:
+	if _pursued_activity == PursuedActivity.WORK:
+		_release_job_claim()
+	_pursued_activity = PursuedActivity.NONE
+	_clear_travel_state()
+	_state = State.DECIDING
+	request_deciding_pass()
+
+
+## Shared travel-bookkeeping reset (Story villager-ai-009) -- used by both
+## [method _complete_travel_arrival] (successful arrival) and [method
+## _abandon_travel] (graceful abandonment). Empties [member
+## _travel_remaining_path] and collapses [member _from_cell]/
+## [member _to_cell] back to [member current_cell] (so [method is_moving]
+## reports `false`, matching every other stationary state's own invariant),
+## resetting [member _intra_tick_progress] to `0.0`.
+func _clear_travel_state() -> void:
+	_travel_remaining_path = []
+	_from_cell = current_cell
+	_to_cell = current_cell
+	_intra_tick_progress = 0.0
 
 
 ## Working-state tick body -- stub (later work-progress story).
@@ -961,18 +1244,83 @@ func is_moving() -> bool:
 	return _from_cell != _to_cell
 
 
-## "The remaining movement's cells" (GDD Rule 10b) for this story's scope:
-## exactly the current single travel step's two cells, when moving ([method
-## is_moving] true) -- an empty array otherwise. This class does not yet
-## track a full multi-cell remaining PATH (story 009's Traveling
-## state-machine addition) -- a single in-flight step is the only movement
-## representation that exists today, and it is exactly what [method
-## evaluate_repath_trigger]/[VillagerRepathFilter] need to compute a
-## clearance envelope against.
+## "The remaining movement's cells" (GDD Rule 10b) -- widened by story
+## villager-ai-009 (exactly the widening this method's own predecessor doc
+## comment reserved) to cover the villager's ENTIRE remaining route once
+## [method start_traveling] is driving travel, not merely its single
+## in-flight step: [member _from_cell] (the current step's origin) plus
+## every cell still in [member _travel_remaining_path] (which always begins
+## with [member _to_cell], the in-flight step's own destination). Falls
+## back to the ORIGINAL single-step pair, `[_from_cell, _to_cell]`, when
+## [member _travel_remaining_path] is empty despite [method is_moving] being
+## `true` -- the case a hand-constructed test fixture produces by setting
+## [member _from_cell]/[member _to_cell] apart directly without ever calling
+## [method start_traveling] (story 008's own `graph_patching_test.gd`
+## fixtures do exactly this; this fallback keeps them passing unchanged). An
+## empty array when stationary ([method is_moving] `false`), unchanged from
+## story 008.
 func get_remaining_movement_cells() -> Array[Vector3i]:
 	if not is_moving():
 		return []
-	return [_from_cell, _to_cell]
+	if _travel_remaining_path.is_empty():
+		return [_from_cell, _to_cell]
+	var cells: Array[Vector3i] = [_from_cell]
+	cells.append_array(_travel_remaining_path)
+	return cells
+
+
+## Mid-travel re-path recompute (Story villager-ai-009, this story's AC18 --
+## "the villager re-paths from its current cell"). Called ONLY from [method
+## _on_repath_evaluation_requested]'s `State.TRAVELING` guard. Re-queries
+## [member nav_graph] -- already patched against the SAME write, by
+## construction, per [member nav_graph]'s own wiring-order doc comment --
+## for a fresh path from [member current_cell] toward the SAME
+## [member _travel_target_cell] (a redirect never changes the ultimate
+## target itself, only the route). An empty result means no viable detour
+## exists -- [method _abandon_travel] fires (this story's AC19, dispatched
+## via the SAME per-target fallback [method start_traveling]'s own
+## unreachable case uses). A single-cell result (rare: [member current_cell]
+## itself is now the target) still completes arrival correctly via
+## [method _complete_travel_arrival]. A genuine multi-cell detour replaces
+## [member _travel_remaining_path] outright and resets
+## [member _intra_tick_progress] -- the redirected step begins from `0.0`
+## progress, never from wherever the abandoned step's progress happened to
+## be (a fresh step, not a resumed one).
+func _recompute_path_from_current_cell() -> void:
+	assert(nav_graph != null, "VillagerAi.nav_graph not wired -- required once Traveling")
+	var new_path: Array[Vector3i] = nav_graph.find_path(current_cell, _travel_target_cell)
+	if new_path.is_empty():
+		_abandon_travel()
+		return
+	if new_path.size() == 1:
+		_complete_travel_arrival(_travel_arrival_state)
+		return
+	var remaining: Array[Vector3i] = new_path.slice(1)
+	_travel_remaining_path = remaining
+	_from_cell = current_cell
+	_to_cell = _travel_remaining_path[0]
+	_intra_tick_progress = 0.0
+
+
+## [signal repath_evaluation_requested] handler (Story villager-ai-009),
+## connected in [method setup] with Godot's DEFAULT synchronous flags
+## (never `CONNECT_DEFERRED`) -- the actual REDIRECT this story's
+## race-closure AC requires happens here, in the SAME synchronous call
+## stack as the Voxel World write that triggered [signal
+## repath_evaluation_requested] (story 008's own filter, unchanged), well
+## before the next frame's [method _process] call could ever advance
+## [member _visual_position] further toward now-solid geometry. Guarded to
+## `State.TRAVELING` only: [method evaluate_repath_trigger] can fire for any
+## moving villager regardless of [member _state] (nothing in that check
+## depends on it, story 008), but a villager whose [member _from_cell]/
+## [member _to_cell] were set apart by some OTHER means (e.g. a
+## hand-constructed test fixture never touching [member _state]) has no
+## [member _travel_target_cell]/[member nav_graph] to recompute against --
+## a harmless no-op for every state but Traveling.
+func _on_repath_evaluation_requested() -> void:
+	if _state != State.TRAVELING:
+		return
+	_recompute_path_from_current_cell()
 
 
 ## The re-path FILTER itself (GDD Rule 10b, this story's AC18/AC49): given

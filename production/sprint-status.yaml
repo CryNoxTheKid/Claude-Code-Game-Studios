@@ -78,7 +78,7 @@ stories:
     name: "Traveling state — path following + mid-travel re-path"
     file: "production/epics/villager-ai-behavior/story-009-traveling-state-repath.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete
     owner: "ai-programmer"
     estimate_days: 1.0
     blocker: "depends on villager-ai-008, villager-ai-006 (in-sprint)"
