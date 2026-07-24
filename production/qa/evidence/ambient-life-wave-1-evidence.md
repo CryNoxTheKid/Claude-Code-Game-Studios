@@ -147,3 +147,101 @@ screenshots above are the input to that review.
 
 **Lead**: (awaiting art-director/creative-director review — evidence prepared for
 that pass, not yet countersigned)
+
+---
+
+## Creative Director sign-off pass (2026-07-24)
+
+**CD-AMBIENT-W1 sign-off: APPROVED WITH ADVISORIES (2026-07-24)**
+
+### Verdict rationale
+
+I protected this story into Production specifically because it is the first
+direct answer to the slice debrief's #1 finding — *"direction right, MOOD
+lacking, the world lacks life."* Judging the four delivered components on
+**direction and quality of the standalone deliverable** (not the deferred Valley
+wiring, per scope):
+
+- **All four components are on-model.** Nothing here contradicts the Art Bible.
+  The occupied/lit smoke gate is the exact readable-absence signal §6.5 +
+  Principle 1 ask for; the "nobody home" tell reads correctly in the frame.
+  Foliage sway is the sanctioned soft-shape motion (§3.2). Static clutter is the
+  cheapest-life-win class (§6.5). Torch flicker is the beacon read (§2.4).
+- **The engineering discipline is exactly what a HIGH-risk presentation story
+  needed.** Sub-3Hz (A5) is a *proven numeric property* via zero-crossing
+  analysis on both default and worst-case-clamped configs — not eyeballed. The
+  committed-block-materials-untouched invariant is guarded by a shader-scanning
+  test. Both are the two hardest guardrails on this story and both hold.
+- **Does it move the mood needle?** Partially, and honestly so. The torch-flicker
+  frame is the one that genuinely reads warm — a golden glow pool that swings
+  ~20% — and that is the clearest on-target Warmth-as-Reward / beacon moment in
+  the set. Smoke adds a real "lived-in" tell. Foliage and clutter, at placeholder
+  hue/scale, register as *motion/detail present* more than *mood delivered* — but
+  that is expected: the shader and the placer are the deliverables this wave, the
+  art that makes them read as warmth is downstream.
+
+I am signing **APPROVED WITH ADVISORIES** rather than a clean APPROVE for one
+reason: this story is the mood-gap fix, and **Sub-scope A alone does NOT close the
+"world lacks life" finding.** It lays the ambient-motion *bed*. The advisories
+below are the concrete carry-forward so the backlog stays honest about that. None
+of them require rework of the delivered code — the components as built are
+correct and accepted.
+
+### What later waves MUST carry (for the backlog — concrete)
+
+1. **Do NOT mark the debrief's #1 "world lacks life" finding closed on this
+   story.** Per §6.5 the *highest mood-value-per-cost* item is **villager idle
+   behaviors (Sub-scope B, gated on villager-ai-019)** — that is the population-
+   life payload. Sub-scope A is the environmental bed under it. The finding stays
+   OPEN until at least Sub-scope B lands.
+
+2. **Integration-in-Valley story owns the warmth read.** Every frame here sits in
+   a cold flat-blue test scene with no WorldEnvironment / golden-hour lighting.
+   Principle 1 and the One-Line Rule only resolve in the *composed, warmly-lit
+   settlement frame* — the smoke wisp currently reads grey-on-blue, not as
+   reinforcement of "the warmest pixel cluster." The integration story must place
+   these components in the §2.1 golden-hour environment and re-shoot; that is
+   where the mood is actually validated, not here.
+
+3. **Foliage placeholder is off-hue and must be replaced before it reads as
+   life.** The blades render near-black and scan as debris/holes, not vegetation.
+   Real vegetation art must land in Material-family greens/browns (§4.4 / §8.4
+   deviation bands) and must be validated for (a) the "soft alive" read (§3.2),
+   (b) sway amplitude that is *perceptible but calm* — §2.1 is explicitly "no
+   flicker, low-mid steady energy," so tune the wind so it never crosses into
+   distracting, and (c) the **Horizon Test** (Principle 4): does the sway still
+   read, and stay calm, through the fog band at ~380m expedition distance?
+
+4. **Lock the torch light COLOR to the warm palette at integration.** The
+   flicker energy math is done and correct; the stand-in light is white and the
+   glow is a neutral warm. Production must key the emitted color to the Hearth
+   Gold family (§4.1) so it reinforces the §2.4 beacon / Warmth-as-Reward read,
+   and must verify it never drifts toward State Orange (the §4.6 warm-warm
+   confusion pair). This is a data/tuning call, not a code change.
+
+5. **Interior clutter needs the §6.3 warm-detail treatment, and props need
+   palette + hero/supporting split.** Placeholder boxes barely separate from the
+   room surface. Real prop art must carry Material-family hue, read as
+   "recently used" warm clutter (settlement-core high-density, §6.3), and route
+   any Function fixtures to Hearth Gold with the §3.3 hero-shape investment.
+
+6. **Wave 2 air-motion layers are still owed for the full "air is alive" read.**
+   Leaf/pollen drift, distant birds, water shimmer, and horizon-fog drift (§6.5,
+   deliberately out of scope here) are the remaining cheap layers that complete
+   the ambient bed. The bed is intentionally partial until they join it.
+
+7. **Run the Dusk Test (§7.1) and Horizon Test (Principle 4) at integration.**
+   Neither has been exercised — these are neutral-scene component tests. The
+   composed story must confirm smoke + torch read correctly under golden-hour
+   dusk (the warmest guaranteed lighting, closest to the State-Orange confusion
+   zone) and at expedition distance through fog.
+
+**Validation criteria — we'll know this sign-off was right if:** the Valley-
+integration re-shoot, in golden-hour lighting with Hearth-Gold-keyed torches and
+Material-family foliage, produces a settlement frame where the built/lit cluster
+demonstrably reads warmer and more alive than its surroundings (the One-Line
+Rule) — and Sub-scope B's idle behaviors then carry that frame from "lived-in bed"
+to "populated." If the integration frame still reads cold, the gap is scene
+lighting/composition, not these components — which this pass has already isolated.
+
+— creative-director
