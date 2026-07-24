@@ -43,10 +43,10 @@ stories:
     name: "Per-tick re-tune — tick-budget half (max_ticks_per_frame 10→12) (criterion #4)"
     file: "production/epics/time-tick-system/story-007-per-tick-retune-pass.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete
     owner: "godot-gdscript-specialist"
     estimate_days: 1.0
-    blocker: "PENDING USER RATIFICATION of the decided values (design/quick-specs/tick-rate-retune-2026-07-25.md); coordinated ONE change with villager-ai-022"
+    blocker: "Values ratified per delegation (design/quick-specs/tick-rate-retune-2026-07-25.md); coordinated ONE change with villager-ai-022 (run separately)"
     completed: ""
   - id: "villager-ai-022"
     name: "Per-tick re-tune — Deciding half (max_deciding_per_tick 1→5) + decision_interval 2→4 (scope home here) + story-025 stress re-run (criterion #4)"

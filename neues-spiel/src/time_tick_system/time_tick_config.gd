@@ -29,8 +29,13 @@ const MAX_RAW_DELTA_MAX: float = 0.2
 ## (story tick-002, out of scope here).
 @export var ticks_per_second: float = 4.0
 
-## Upper bound on ticks fired in one frame after a stall (GDD default: 10).
-@export var max_ticks_per_frame: int = 10
+## Upper bound on ticks fired in one frame after a stall (GDD default: 12 --
+## re-tuned 10->12, Sprint 8 coordinated re-tune,
+## `design/quick-specs/tick-rate-retune-2026-07-25.md`: ~50% margin over the
+## 8 ticks strictly needed to keep a `max_raw_delta`-clamped frame "honest"
+## under the debug 20x warp gear, still mid-range in the GDD's documented
+## 5-30 safe band; story tick-007).
+@export var max_ticks_per_frame: int = 12
 
 ## Clamp ceiling applied to raw engine delta before any use (GDD default:
 ## 0.1s).

@@ -273,10 +273,15 @@ constants:
       - design/gdd/building-system.md        # F3 burst rule
       - design/gdd/needs-mood-system.md      # signal-ordering burst rule
       - design/gdd/villager-ai-behavior.md   # per-villager burst handling
-    value: 10
+    value: 12
     unit: ticks
+    # Sprint 8 coordinated re-tune (10->12), story tick-007:
+    # design/quick-specs/tick-rate-retune-2026-07-25.md — ~50% margin over
+    # the 8 ticks strictly needed to keep a max_raw_delta-clamped frame
+    # "honest" under the debug 20x warp gear (vs ~25% margin at the old
+    # value of 10), still mid-range in the GDD's documented 5-30 safe band.
     added: 2026-07-09
-    revised: ""
+    revised: "2026-07-25"
 
   - name: villager_clearance
     status: active

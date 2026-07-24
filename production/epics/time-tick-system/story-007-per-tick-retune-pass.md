@@ -1,12 +1,12 @@
 # Story 007: Per-tick re-tuning pass (tick-budget / base-rate half) + per-frame cost measurement
 
 > **Epic**: Time & Tick System
-> **Status**: Ready
+> **Status: Complete (2026-07-25 — 848/848 suite green, parent-verified; tick half of criterion #4)
 > **Layer**: Foundation
 > **Type**: Config/Data
 > **Estimate**: 1 day
 > **Manifest Version**: 2026-07-23
-> **Last Updated**: (set by /dev-story when implementation begins)
+> **Last Updated**: 2026-07-25
 
 > ⚠️ **NEEDS-DECISION + CROSS-EPIC COORDINATION** — this story records a deliberate
 > re-tune of config values against production load. The re-tuned numbers are a

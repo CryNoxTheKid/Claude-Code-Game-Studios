@@ -179,12 +179,13 @@ the cap is discarded, not deferred [TR-time-tick-system-035]
 
 | Variable | Symbol | Type | Range | Description |
 |----------|--------|------|-------|-------------|
-| max_ticks_per_frame | `max_ticks_per_frame` | int (constant) | **10** | Upper bound on ticks fired in one frame |
+| max_ticks_per_frame | `max_ticks_per_frame` | int (constant) | **12** *(Sprint 8 re-tune 2026-07-25, `design/quick-specs/tick-rate-retune-2026-07-25.md` — raised from 10)* | Upper bound on ticks fired in one frame |
 
-**Example** *(recomputed at `ticks_per_second=4.0`, Slice revision
-2026-07-23, tick-rate/furniture resolution)*: an alt-tab stall →
+**Example** *(recomputed at `ticks_per_second=4.0` / `max_ticks_per_frame=12`,
+Sprint 8 re-tune 2026-07-25,
+`design/quick-specs/tick-rate-retune-2026-07-25.md`)*: an alt-tab stall →
 accumulator = 12.3s → `raw_ticks=49` (`tick_interval=0.25`) → capped to
-10, the remaining 9.8s silently discarded (instead of causing a cascade of
+12, the remaining 9.3s silently discarded (instead of causing a cascade of
 catch-up ticks the following frame too).
 
 **Consumer caveat (2026-07-10 review)**: any downstream invariant phrased
@@ -205,7 +206,7 @@ project's dependency-injection-over-singleton preference.)*
 | Scenario | Expected Behavior | Rationale |
 |----------|-------------------|-----------|
 | Raw delta-time itself is unusually large (e.g. after an alt-tab stall, several seconds) | `raw_delta` is clamped to `max_raw_delta` BEFORE `game_delta` is computed | Prevents huge one-frame jumps for continuous consumers (build progress, movement) — not just the tick accumulator [TR-time-tick-system-031] |
-| The tick catch-up cap (10) is repeatedly hit across consecutive frames | No special handling in this system — this is a performance signal that the simulation is too slow for the current warp/tick rate, must be fixed via profiling | This system can only bound overload, not fix it [TR-time-tick-system-037] |
+| The tick catch-up cap (12) is repeatedly hit across consecutive frames | No special handling in this system — this is a performance signal that the simulation is too slow for the current warp/tick rate, must be fixed via profiling | This system can only bound overload, not fix it [TR-time-tick-system-037] |
 | Game boot (Scene/World Management's Booting state) | Defaults to `paused = false`, `time_warp = 1` | Matches the "learn by doing" onboarding approach — no reason to start paused [TR-time-tick-system-038] |
 | Player toggles Pause and time-warp rapidly in succession | Each toggle is processed immediately and independently, no debounce needed | Discrete, simple toggles — no accumulation problem expected [TR-time-tick-system-039] |
 | Time-warp speed is changed while paused | The change is accepted and stored, but has no effect until resumed (since `game_delta` is 0 while paused) | Consistent with Core Rule 3 — pause and time-warp speed are independent [TR-time-tick-system-040] |
@@ -232,7 +233,7 @@ project's dependency-injection-over-singleton preference.)*
 |-----------|---------------|------------|---------------------|---------------------|
 | `time_warp_options` | {1, 2, 3} | fixed (see Open Questions for more steps) | — | — |
 | `ticks_per_second` | 4.0 *(Slice revision 2026-07-23, tick-rate/furniture resolution — raised from 2.0; slice-validated pace, user decision "villagers should work more")* | 1.0–5.0 | Faster AI/needs checks, more compute cost | Cheaper but more "sluggish"-feeling simulation |
-| `max_ticks_per_frame` | 10 | 5–30 | More catch-up capacity after stalls, but more peak load in one frame | More time discarded after stalls, but smoother per-frame load |
+| `max_ticks_per_frame` | 12 *(Sprint 8 re-tune 2026-07-25, `design/quick-specs/tick-rate-retune-2026-07-25.md` — raised from 10; ~50% margin over the 8 ticks strictly needed to keep a `max_raw_delta`-clamped frame "honest" under the debug 20x warp gear)* | 5–30 | More catch-up capacity after stalls, but more peak load in one frame | More time discarded after stalls, but smoother per-frame load |
 | `max_raw_delta` | 0.1s | 0.05–0.2s | Larger possible simulation jumps after a stall | Simulation visibly "lags" instead of jumping |
 
 ## Visual/Audio Requirements

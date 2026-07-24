@@ -181,12 +181,14 @@ func test_time_tick_system_setup_without_preassigned_config_loads_from_config_pa
 	system.setup()
 
 	# Assert — loaded config matches the GDD-authoritative defaults
-	# (time-tick-system.md Tuning Knobs, amended 2026-07-23: 4.0 ticks/sec).
+	# (time-tick-system.md Tuning Knobs, amended 2026-07-23: 4.0 ticks/sec;
+	# amended 2026-07-25, Sprint 8 re-tune: max_ticks_per_frame 10->12,
+	# `design/quick-specs/tick-rate-retune-2026-07-25.md`, story tick-007).
 	@warning_ignore("unsafe_property_access")
 	var loaded_config: TimeTickConfig = system.config
 	assert_object(loaded_config).is_not_null()
 	assert_float(loaded_config.ticks_per_second).is_equal(4.0)
-	assert_int(loaded_config.max_ticks_per_frame).is_equal(10)
+	assert_int(loaded_config.max_ticks_per_frame).is_equal(12)
 	assert_float(loaded_config.max_raw_delta).is_equal(0.1)
 	assert_array(loaded_config.time_warp_options).is_equal([1, 2, 3])
 
