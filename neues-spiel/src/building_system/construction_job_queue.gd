@@ -85,6 +85,17 @@
 ##    subsequent successful [method claim_job] on the SAME cell clears the
 ##    flag and emits [signal job_became_reachable] ("on re-claim the ghost
 ##    returns to normal Planned").
+## 7. **Worker attribution recording** (Rule 12/14f, ADR-0016 Decision
+##    Sec.4, [TR-building-system-109], AC58; Story building-005): a
+##    successful [method claim_job] resolves which tracked [BuildProject]
+##    owns the claimed cell ([method _find_owning_project]) and calls
+##    [method BuildProject.on_job_claimed] on it -- the villager id is
+##    recorded against the cell and rolled into the project's [member
+##    BuildProject.worker_ids] aggregate as that SAME claim's own side
+##    effect, never a separate control decision. Attribution never gates or
+##    influences this class's own claim/scheduling behavior (Control
+##    Manifest Forbidden rule) -- no method here ever reads [member
+##    BuildProject.worker_ids].
 ##
 ## **Explicitly out of scope** (this story's own Out of Scope section, and
 ## the neighbouring stories/epics that own it):
@@ -96,8 +107,11 @@
 ##   villager-ai-011) -- [method claim_job] enforces "one job per villager"
 ##   and "no double-claim on one cell" (via [member tick_loop]'s own guard),
 ##   which together already give a deterministic single winner when called
-##   in stable villager order; recording `worker_ids` attribution
-##   (ADR-0016 Decision Sec.4, Story building-005) is NOT implemented here.
+##   in stable villager order. Recording `worker_ids` attribution (ADR-0016
+##   Decision Sec.4, Story building-005) IS implemented here (see class doc
+##   comment point 7 below) -- as the successful claim's own side effect,
+##   the SAME call site that already resolves both the villager id and the
+##   claimed cell.
 ## - The claim/travel/arrival/abandon MECHANICS themselves (pathing,
 ##   redirect, watchdog rescue) -- Villager AI epic entirely; this class only
 ##   exposes the queue those mechanics call into.
@@ -214,6 +228,14 @@ func claim_job(cell: Vector3i, villager_id: int) -> bool:
 	if blueprint_cell.is_unreachable:
 		blueprint_cell.is_unreachable = false
 		job_became_reachable.emit(cell)
+	# Story building-005 (ADR-0016 Decision Sec.4, AC58): record worker
+	# attribution as this claim's own side effect -- see class doc comment
+	# point 7 and [BuildProject.on_job_claimed]'s own doc comment for why
+	# this call site, not Villager AI, is the recording contract's real
+	# caller.
+	var owning_project: BuildProject = _find_owning_project(cell)
+	if owning_project != null:
+		owning_project.on_job_claimed(cell, villager_id)
 	return true
 
 
@@ -305,4 +327,20 @@ func _find_eligible_cell(cell: Vector3i) -> BlueprintCell:
 		for blueprint_cell: BlueprintCell in project.get_building_eligible_cells():
 			if blueprint_cell.cell == cell:
 				return blueprint_cell
+	return null
+
+
+## Shared lookup for [method claim_job]'s attribution wiring (class doc
+## comment point 7, Story building-005) -- the tracked [BuildProject] that
+## currently has [param cell] among its own [member BuildProject.cells].
+## Only ever called AFTER [method _find_eligible_cell] has already confirmed
+## [param cell] is a real, currently-eligible cell of exactly one tracked
+## project (Story building-003's future reverse index is the whole-world
+## uniqueness guarantee this method itself does not enforce). Returns `null`
+## if no tracked project currently tracks [param cell] -- defensive only,
+## never hit from [method claim_job]'s own call site.
+func _find_owning_project(cell: Vector3i) -> BuildProject:
+	for project: BuildProject in _projects:
+		if project.has_cell(cell):
+			return project
 	return null

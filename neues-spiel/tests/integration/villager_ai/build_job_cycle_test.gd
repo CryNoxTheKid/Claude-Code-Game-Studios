@@ -38,12 +38,14 @@
 ##   abandon genuinely re-offered by the REAL queue; completion reported
 ##   exactly once under a multi-tick burst.
 ##
-## building-005's `worker_ids` attribution field has NOT landed in this
-## codebase as of this story (grep-verified: no `worker_ids` field exists
-## anywhere under `src/building_system/`) — per Sprint 7 QA plan Call-out 3,
-## this is noted explicitly rather than silently omitted; the recommended
-## extra assertion is not added here since there is nothing yet to assert
-## against.
+## building-005's `worker_ids` attribution field has now landed
+## (`BuildProject.on_job_claimed`/`BuildProject.worker_ids`) — per Sprint 7
+## QA plan Call-out 3's recommendation, [method
+## test_ac40_full_claim_travel_build_report_cycle_real_components] asserts
+## the claiming villager's id appears in the real project's `worker_ids`
+## after the real claim, closing building-005's PROVISIONAL tag alongside
+## AC40 at negligible extra cost (dedicated coverage otherwise lives in
+## `tests/integration/building_system/worker_attribution_test.gd`).
 class_name BuildJobCycleTest
 extends GdUnitTestSuite
 
@@ -298,6 +300,12 @@ func test_ac40_full_claim_travel_build_report_cycle_real_components() -> void:
 	assert_bool(env.queue.has_claim(1)).is_true()
 	assert_int(project.cells[target].state).is_equal(BlueprintCell.MicroState.UNDER_CONSTRUCTION)
 	assert_int(villager.get_state()).is_equal(VillagerAi.State.TRAVELING)
+	# building-005 (Sprint 7 QA plan Call-out 3): the real claim above already
+	# recorded worker attribution as its own side effect -- closes
+	# building-005's PROVISIONAL tag against a REAL claim, not just the
+	# mocked-claim proof in worker_attribution_test.gd.
+	assert_bool(project.worker_ids.has(1)).is_true()
+	assert_int(project.cells[target].claimed_by_villager_id).is_equal(1)
 
 	# Stage 2 -- travel: real AStar3D path (007), cell-by-cell (008/009), to
 	# `current_cell` arrival.

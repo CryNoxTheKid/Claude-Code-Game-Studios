@@ -37,11 +37,15 @@
 ##   never moves a project out of PAUSED on its own (Rule 14g: pausing/
 ##   resuming never happens as a side effect of a cell-state change) -- only
 ##   a future pause()/resume() action (not implemented here) transitions it.
-## - `restore_value` (Rule 14l floor-excavation), `worker_ids` (attribution,
-##   Rule 12/ADR-0016 Decision Sec.4), and pending change-order batches (Rule
-##   14h) -- all future additions to this same class per the ADR's own data
-##   shape (`{ id, kind, state, cells, restore_value, worker_ids, pending
-##   orders }`); this story carries none of them.
+## - `restore_value` (Rule 14l floor-excavation) and pending change-order
+##   batches (Rule 14h) -- future additions to this same class per the ADR's
+##   own data shape (`{ id, kind, state, cells, restore_value, worker_ids,
+##   pending orders }`); this story carries neither. `worker_ids` itself
+##   (attribution, Rule 12/ADR-0016 Decision Sec.4) IS this class's own
+##   Story building-005 addition (see [method on_job_claimed] and the
+##   [member worker_ids] doc comment below) -- landed after this story
+##   (building-002), documented here only to keep this historical note
+##   accurate about what building-002 itself did NOT yet carry.
 ##
 ## **The rollup** (TR-108, this story's core contract): [member state] is
 ## DERIVED from [member cells]' own [enum BlueprintCell.MicroState] values,
@@ -122,6 +126,18 @@ var state: ProjectState = ProjectState.DRAFT
 ## add_cell] is called in commit order by its future caller) -- no separate
 ## ordering/timestamp field needed.
 var cells: Dictionary[Vector3i, BlueprintCell] = {}
+
+## Rolled-up worker attribution (Story building-005, ADR-0016 Decision
+## Sec.4, GDD Rule 12/14f, [TR-building-system-109], AC58) -- de-duplicated
+## aggregate of every villager id [method on_job_claimed] has ever recorded
+## against one of this project's cells, in first-claim order. Read/display +
+## save-state only (`design/ux/projects-panel.md` Data Requirements:
+## "`worker_ids`... Read... Names resolved via Villager AI lookup") -- NEVER
+## a control channel: no method on this class or [ConstructionJobQueue]
+## branches scheduling, claiming, or lifecycle transitions on this array's
+## contents (Control Manifest Forbidden rule; this story's own QA Test Cases,
+## "Attribution is not a control channel").
+var worker_ids: Array[int] = []
 
 
 func _init(p_id: int, p_kind: Kind = Kind.BUILD) -> void:
@@ -235,6 +251,69 @@ func release() -> bool:
 		return false
 	state = ProjectState.BUILDING
 	return true
+
+
+## Records worker attribution for a successful job claim (Story
+## building-005, ADR-0016 Decision Sec.4, GDD Rule 12/14f,
+## [TR-building-system-109], AC58) -- the ADR's own Key Interfaces name this
+## `on_job_claimed(project_id: int, villager_id: int) -> void` at the future
+## REGISTRY level (Story building-003, not yet landed); this method is the
+## per-instance seam that registry will call into once it exists (`self` is
+## already the resolved project -- no id lookup needed here), mirroring
+## [method release]'s own established "registry-level signature loses its
+## id param at the per-instance level" precedent.
+##
+## Records [param villager_id] against [param cell]'s own [member
+## BlueprintCell.claimed_by_villager_id] (AC58: "the villager's id is
+## recorded on that cell") and, if not already present, appends it to
+## [member worker_ids] (de-duplicated aggregate) -- the same villager
+## claiming a second cell of this project later is a no-op against [member
+## worker_ids] (still appears exactly once) even though the second cell's own
+## [member BlueprintCell.claimed_by_villager_id] is written independently.
+##
+## The claim mechanic (path -> arrive -> claim) is Villager AI's; this
+## method's real caller is [method ConstructionJobQueue.claim_job] -- the
+## SAME Building-System code that already performs the claim itself --
+## attribution is recorded as that claim's own side effect, never a separate
+## control decision: this method never reads or writes [member
+## BlueprintCell.state] and never rejects/blocks anything. A `false` return
+## means only "this project does not currently track [param cell]," never
+## "the claim was refused."
+##
+## Returns `false` (no-op against both [member cells] and [member
+## worker_ids]) if [param cell] is not currently tracked by this project --
+## defensive only; [method ConstructionJobQueue.claim_job] never calls this
+## for a cell it has not already resolved to this exact project.
+func on_job_claimed(cell: Vector3i, villager_id: int) -> bool:
+	var blueprint_cell: BlueprintCell = cells.get(cell)
+	if blueprint_cell == null:
+		return false
+	blueprint_cell.claimed_by_villager_id = villager_id
+	if not worker_ids.has(villager_id):
+		worker_ids.append(villager_id)
+	return true
+
+
+## Contract-shape-only serialization seam (Story building-005's own AC2:
+## "`worker_ids` is... included in `serialize()` (contract shape only --
+## full save flow is VS-tier)"; ADR-0016 Decision Sec.7, ADR-0012 per-system
+## contract). Returns a plain [Dictionary] (ADR-0012's own
+## `FileAccess.store_var()/get_var()` shape, never a custom [Resource])
+## carrying this class's own fields as they exist TODAY -- [member id]/
+## [member kind]/[member state]/[member worker_ids]. [member restore_value]
+## (Rule 14l, floor-excavation), a full [member cells] round-trip, and
+## pending change/demolition orders (Rule 14h) are explicitly future
+## stories' additions to this same Dictionary shape (this class's own doc
+## comment precedent for "field/section lands now, a later story extends
+## it") -- no `deserialize()` counterpart exists yet either, matching this
+## story's own Out of Scope: "Full save/load round-trip -- VS-tier."
+func serialize() -> Dictionary:
+	return {
+		"id": id,
+		"kind": kind,
+		"state": state,
+		"worker_ids": worker_ids.duplicate(),
+	}
 
 
 ## `true` once [member cells] has become empty -- per Rule 14i/AC61, "A

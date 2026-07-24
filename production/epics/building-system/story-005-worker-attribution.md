@@ -1,7 +1,7 @@
 # Story 005: Worker attribution on job claim
 
 > **Epic**: Building System
-> **Status**: Ready
+> **Status: Complete (2026-07-24 — 766/766 suite green, parent-verified)
 > **Layer**: Core
 > **Type**: Integration
 > **Estimate**: 1 day

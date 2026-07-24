@@ -49,6 +49,16 @@
 ## claim_job] clears it) -- no ghost-rendering consumer exists yet in this
 ## codebase to read it, mirroring [member category]/[member contents]' own
 ## "field lands now, the real consumer wires in a later story" precedent.
+##
+## Story building-005 (this revision) adds [member claimed_by_villager_id] --
+## GDD Rule 12/14f, ADR-0016 Decision Sec.4, [TR-building-system-109], AC58:
+## "`claim_job` records the claiming villager against the cell." A plain
+## per-cell attribution fact, display/save state only -- [method
+## BuildProject.on_job_claimed] is the sole writer, and no code anywhere
+## reads it to gate scheduling/claiming/lifecycle transitions (Control
+## Manifest Forbidden rule; this is never a fifth [enum MicroState] value,
+## mirroring [member is_unreachable]'s own "rendering/bookkeeping annotation,
+## not a state" precedent).
 class_name BlueprintCell
 extends RefCounted
 
@@ -95,6 +105,16 @@ var contents: CellContents
 ## never unreachable until [method ConstructionJobQueue.report_unreachable]
 ## says otherwise.
 var is_unreachable: bool = false
+
+## See class doc comment (Story building-005 addition, AC58). `-1` means "no
+## villager has ever claimed this cell" (same sentinel convention ADR-0016's
+## own Key Interfaces use for `project_at_cell(cell) -> int`, "-1 = none") --
+## a freshly-created cell always starts unclaimed. [method
+## BuildProject.on_job_claimed] is the sole writer; a later claim on the SAME
+## cell (e.g. after a release + re-claim by a different villager) simply
+## overwrites the previous id, mirroring [member is_unreachable]'s own
+## "latest write wins, no history kept" precedent.
+var claimed_by_villager_id: int = -1
 
 
 func _init(
