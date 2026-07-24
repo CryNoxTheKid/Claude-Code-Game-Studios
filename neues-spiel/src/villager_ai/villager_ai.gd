@@ -104,6 +104,31 @@
 ## call behind [method VillagerDecidingScheduler.is_runnable_this_tick] --
 ## the actual priority-list logic inside a Deciding pass remains story 006's
 ## scope, untouched here.
+##
+## Story villager-ai-006 (this revision) implements that priority-list logic
+## (GDD Rule 2, ADR-0008 Decision §1's "strict, discrete priority order
+## (Urgent need > Work > Idle/Wander)"): [method _tick_deciding] is no longer
+## a stub. Two duck-typed, nil-safe, mocked-boundary dependencies --
+## [member needs_provider] (tier 1) and [member job_queue] (tier 2) -- mirror
+## [member time_tick_system]'s pattern exactly, since neither the Needs &
+## Mood System nor the Building System's real job queue exist anywhere in
+## this codebase yet (both are named MOCKED boundaries in this story's own
+## Engine Notes/Implementation Notes). [enum PursuedActivity] and
+## [member _pursued_activity] track WHICH tier a villager is currently
+## committed to, independent of [member _state] -- the thing claim-stickiness
+## (AC41/[TR-villager-ai-behavior-052]) and Edge Case 3b's same-need no-op
+## actually key off, since [member _state] alone changes again once Stories
+## 009/012/018 add real Traveling->Working/Sleeping sub-transitions while
+## still pursuing the SAME committed tier. [method _on_tick]'s new
+## `was_deciding` guard is what lets a villager already mid-activity
+## (Working, Wandering, ...) get preempted by this same priority check on a
+## periodic `decision_interval` re-check WITHOUT double-invoking
+## [method _tick_deciding] for a villager that started the tick already in
+## `State.DECIDING` ([method _tick_state]'s own pre-existing gate, story 005,
+## already handles that case) -- see that method's own doc comment for the
+## full ordering rationale (GDD Rule 3's graceful preemption: the CURRENT
+## tick's activity body always runs first, only then does a runnable
+## Deciding pass reassign [member _state]).
 class_name VillagerAi
 extends Node
 
@@ -119,6 +144,19 @@ enum State {
 	SLEEPING,
 	BREATHER,
 	WANDERING,
+}
+
+## Which GDD Rule 2 priority-list tier this villager is currently COMMITTED
+## to pursuing (Story villager-ai-006) -- independent of [member _state],
+## and the value [method _tick_deciding]'s claim-stickiness (AC41) and Edge
+## Case 3b's same-need no-op actually key off of. [member _state] alone
+## moves TRAVELING -> WORKING (Story 012) or TRAVELING -> SLEEPING (Story
+## 018) while still pursuing the SAME tier the whole time, so this value is
+## what stays constant across that sub-transition.
+enum PursuedActivity {
+	NONE,  ## Pursuing neither a need nor a job (Wandering/idle, Rule 2 tier 3).
+	NEED,  ## Committed to satisfying the current urgent need (tier 1).
+	WORK,  ## Committed to (holding a claim on) a construction job (tier 2).
 }
 
 ## Vertical clearance a standable cell requires: the cell itself plus the
@@ -181,6 +219,34 @@ var time_tick_system: Object = null
 ## one object across instances does not reintroduce a manager architecture.
 var scheduler: VillagerDecidingScheduler = null
 
+## Needs & Mood dependency (Story villager-ai-006, mocked boundary -- this
+## story's own Engine Notes: "Needs & Mood values are mocked at the
+## need-is-urgent boundary"). The Needs & Mood System is an MVP-sibling GDD
+## not yet implemented anywhere in this codebase; its own future epic owns
+## real production wiring. Duck-typed like [member time_tick_system] --
+## exposes exactly one member this class depends on:
+## `func has_urgent_need(villager_id: int) -> bool`. Deliberately nil-safe
+## (see [method _has_urgent_need]) rather than asserted in [method setup]:
+## a not-yet-wired villager always reads "no urgent need," never crashes --
+## unlike [member time_tick_system], this dependency has no boot-gate this
+## story enforces.
+var needs_provider: Object = null
+
+## Building System construction-job-queue dependency (Story villager-ai-006,
+## mocked boundary -- Story 010 owns real F2 nearest-reachable selection,
+## Story 011 owns real atomic claim/attribution; this story needs only the
+## "available construction job" boolean gate the GDD Implementation Notes
+## assign priority-list tier 2: "available construction job (queue
+## non-empty)"). Duck-typed, nil-safe default (see [method
+## _has_available_job]/[method _release_job_claim]) -- exposes exactly two
+## members: `func has_available_job() -> bool` and
+## `func release_claim(villager_id: int) -> void` (called only on graceful
+## preemption, GDD Rule 3/[TR-villager-ai-behavior-050] -- never when
+## nothing was actually claimed). This story models "holds a claim" purely
+## as [member _pursued_activity] == `PursuedActivity.WORK`; Story 011
+## introduces the real claim record this stands in for.
+var job_queue: Object = null
+
 ## This villager's stable identity/processing-order index (GDD Edge Case 3 /
 ## F2 tie-break convention: "stable villager processing order (villager
 ## index)"). Explicitly assigned by whichever code assembles the population
@@ -199,6 +265,10 @@ var scheduler: VillagerDecidingScheduler = null
 ## agent's loop-start entry). Read-only from outside this class -- see
 ## [method get_state].
 var _state: State = State.DECIDING
+
+## See [enum PursuedActivity] (Story villager-ai-006). Starts at `NONE` -- a
+## fresh villager pursues nothing until its first Deciding pass runs.
+var _pursued_activity: PursuedActivity = PursuedActivity.NONE
 
 ## True once [method setup] has completed at least once.
 var _is_set_up: bool = false
@@ -318,6 +388,15 @@ func is_set_up() -> bool:
 ## Returns the current agent state (read-only observability/test seam).
 func get_state() -> State:
 	return _state
+
+
+## Returns which GDD Rule 2 priority-list tier this villager is currently
+## committed to (read-only observability/test seam, mirrors [method
+## get_state]; Story villager-ai-006) -- Story villager-ai-009's Traveling
+## state needs this to know WHY it is traveling (bed vs. job site) once it
+## lands.
+func get_pursued_activity() -> PursuedActivity:
+	return _pursued_activity
 
 
 ## Returns this villager's stable identity/processing-order index (see
@@ -594,11 +673,32 @@ func _is_passable(cell: Vector3i) -> bool:
 ## that rule) -- [method _tick_state]'s own `State.DECIDING` branch is what
 ## actually gates the (still-stub) Deciding pass body behind [member
 ## scheduler]'s budget.
+##
+## Story villager-ai-006 completes this seam. [method _tick_state]'s own
+## `State.DECIDING` branch (unchanged since story 005) already re-evaluates
+## the priority list for a villager that STARTS this tick already Deciding.
+## For every OTHER state (Traveling/Working/Sleeping/Breather/Wandering),
+## THIS method checks [member scheduler]'s budget itself, AFTER [method
+## _tick_state] has already run that state's own body -- so the CURRENT
+## tick's in-progress activity (e.g. a claimed job's work-progress credit,
+## Story 012) always completes first, and only THEN, if runnable, does
+## [method _tick_deciding] run and possibly reassign [member _state] --
+## exactly GDD Rule 3's graceful-preemption ordering
+## ([TR-villager-ai-behavior-050]: "finishes the current cell's in-progress
+## tick, then releases its job claim... and pursues the need"). The
+## `was_deciding` guard captures [member _state] BEFORE [method _tick_state]
+## runs so a villager that started the tick already `DECIDING` -- whose
+## Deciding pass [method _tick_state]'s own branch already ran -- is never
+## double-invoked here; each villager's Deciding pass still runs at most
+## once per tick (AC5).
 func _on_tick() -> void:
 	if _travel_complete():
 		current_cell = _to_cell
 	_check_decision_interval_trigger()
+	var was_deciding: bool = _state == State.DECIDING
 	_tick_state()
+	if not was_deciding and scheduler.is_runnable_this_tick(villager_id):
+		_tick_deciding()
 
 
 ## GDD Rule 2's periodic re-check trigger ("re-evaluated... periodically
@@ -648,13 +748,88 @@ func _tick_state() -> void:
 			_tick_wandering()
 
 
-## Deciding-state tick BODY -- stub (story 006's priority decision logic).
-## Story villager-ai-005 owns everything that decides WHETHER this gets
-## called on a given tick (the queue/budget gate in [method _tick_state]);
-## this function itself remains untouched, still an empty stub, per that
-## story's explicit Out of Scope boundary.
+## The Deciding-pass priority-list evaluation (Story villager-ai-006; GDD
+## Rule 2, ADR-0008 Decision §1: "strict, discrete priority order (Urgent
+## need > Work > Idle/Wander)" -- plain early-return `if` checks in exactly
+## that order, never scored). Called only when [member scheduler] has
+## already marked this villager runnable this tick -- either by [method
+## _tick_state]'s own `State.DECIDING` branch (a villager that started this
+## tick already Deciding, story 005) or by [method _on_tick]'s
+## `was_deciding`-guarded post-check (a villager preempted mid-activity,
+## this story) -- so this function itself never re-checks that gate.
+##
+## Tier 1 -- urgent need ([member needs_provider], mocked boundary). Edge
+## Case 3b: already committed to pursuing a need
+## ([member _pursued_activity] == `NEED`) is a documented no-op -- the
+## villager continues, nothing reassigned, no claim ever released (there is
+## none to release while already pursuing a need). Otherwise, a held job
+## claim ([member _pursued_activity] == `WORK`) is released first ([method
+## _release_job_claim], GDD Rule 3's graceful abandon) before committing to
+## the need (target selection is Story 018's).
+##
+## Tier 2 -- an available construction job ([member job_queue], mocked
+## boundary). Claim stickiness (AC41/[TR-villager-ai-behavior-052]):
+## already committed to work ([member _pursued_activity] == `WORK`) is ALSO
+## a no-op -- the periodic `decision_interval` re-check must never re-run
+## job selection against a held claim, so [member job_queue] is not even
+## consulted in this branch. Otherwise, an available job commits the
+## villager to work (target selection is Story 010's F2).
+##
+## Tier 3 -- idle/wander, the floor (GDD Edge Case 12's MVP degenerate
+## case): reached only when neither tier above committed -- no urgent need,
+## and either no available job or already sticky-committed to one (handled
+## by tier 2's own early return above, so this line only ever sees "no job"
+## in this story's own scope).
 func _tick_deciding() -> void:
-	pass
+	if _has_urgent_need():
+		if _pursued_activity == PursuedActivity.NEED:
+			return
+		if _pursued_activity == PursuedActivity.WORK:
+			_release_job_claim()
+		_pursued_activity = PursuedActivity.NEED
+		_state = State.TRAVELING
+		return
+	if _pursued_activity == PursuedActivity.WORK:
+		return
+	if _has_available_job():
+		_pursued_activity = PursuedActivity.WORK
+		_state = State.TRAVELING
+		return
+	_pursued_activity = PursuedActivity.NONE
+	_state = State.WANDERING
+
+
+## Tier-1 gate read ([member needs_provider], mocked boundary). Nil-safe: a
+## not-yet-wired villager (or any test that never assigns this) always reads
+## "no urgent need" -- never crashes, no hard [method setup] assertion, since
+## Needs & Mood has no boot-gate dependency this story enforces.
+func _has_urgent_need() -> bool:
+	if needs_provider == null:
+		return false
+	@warning_ignore("unsafe_method_access")
+	return needs_provider.has_urgent_need(villager_id)
+
+
+## Tier-2 gate read ([member job_queue], mocked boundary). Nil-safe, same
+## rationale as [method _has_urgent_need].
+func _has_available_job() -> bool:
+	if job_queue == null:
+		return false
+	@warning_ignore("unsafe_method_access")
+	return job_queue.has_available_job()
+
+
+## Graceful-preemption claim release (GDD Rule 3/[TR-villager-ai-behavior-050]
+## "releases its job claim back to the queue"). Only ever called from
+## [method _tick_deciding]'s tier-1 branch when [member _pursued_activity]
+## was `WORK` -- i.e. only when a claim could plausibly be held. A no-op
+## when [member job_queue] was never wired (mocked-boundary nil-safety, same
+## as [method _has_urgent_need]/[method _has_available_job]).
+func _release_job_claim() -> void:
+	if job_queue == null:
+		return
+	@warning_ignore("unsafe_method_access")
+	job_queue.release_claim(villager_id)
 
 
 ## Traveling-state tick body -- stub (story 002 walkability, later movement

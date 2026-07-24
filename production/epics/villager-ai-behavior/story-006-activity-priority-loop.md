@@ -1,7 +1,7 @@
 # Story 006: Activity priority decision loop
 
 > **Epic**: Villager AI & Behavior
-> **Status**: Ready
+> **Status: Complete (2026-07-24 — 546/546 suite green, parent-verified)
 > **Layer**: Core
 > **Type**: Logic
 > **Estimate**: ~1 agent-day
