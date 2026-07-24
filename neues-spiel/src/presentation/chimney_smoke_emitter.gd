@@ -41,17 +41,24 @@ var _particles: GPUParticles3D = GPUParticles3D.new()
 var _is_set_up: bool = false
 
 
-func _ready() -> void:
-	add_child(_particles)
-
-
-## Explicitly-callable wiring entry point (ADR-0001). Asserts [member config]
-## is wired, then builds the particle system's process material/draw pass
-## from its tuning knobs. [member GPUParticles3D.emitting] starts `false` --
-## "nobody home" is the default until a caller (the eventual occupied/lit
-## data source) calls [method set_occupied_lit].
+## Explicitly-callable wiring entry point (ADR-0001). Parents [member
+## _particles] immediately here -- NEVER deferred to `_ready()` (which only
+## fires once THIS node itself enters a live [SceneTree], and this
+## codebase's established headless-test convention, ADR-0001, instantiates
+## via `Node.new()` + `auto_free()` without ever adding the instance to a
+## tree -- `_ready()` would simply never run, leaking [member _particles] as
+## an unparented orphan node with nothing left to free it. Mirrors
+## [VoxelWorldMesher]'s identical "add_child from the explicit method call,
+## independent of the owner's own tree membership" precedent
+## ([method VoxelWorldMesher._get_or_create_chunk_node]).) Asserts [member
+## config] is wired, then builds the particle system's process material/draw
+## pass from its tuning knobs. [member GPUParticles3D.emitting] starts
+## `false` -- "nobody home" is the default until a caller (the eventual
+## occupied/lit data source) calls [method set_occupied_lit].
 func setup() -> void:
 	assert(config != null, "ChimneySmokeEmitter.config not wired")
+	if _particles.get_parent() == null:
+		add_child(_particles)
 	_particles.amount = config.chimney_smoke_particle_amount
 	_particles.lifetime = config.chimney_smoke_lifetime_seconds
 	_particles.process_material = _build_process_material()
