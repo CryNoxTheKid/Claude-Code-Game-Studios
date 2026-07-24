@@ -23,7 +23,7 @@ stories:
     name: "Region-file paged residency — opens the ADR-0015 cluster"
     file: "production/epics/voxel-world/story-010-region-file-paged-residency.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete-for-dev
     owner: "godot-gdscript-specialist"
     estimate_days: 1.5
     blocker: ""

@@ -1,7 +1,7 @@
 # Story 019: Tool state machine (Idle / ToolArmed / Dragging / Suspended)
 
 > **Epic**: Building System
-> **Status**: Ready
+> **Status: Complete (2026-07-24 — 446/446 suite green, parent-verified; Building epic OPENED)
 > **Layer**: Core
 > **Type**: Logic
 > **Estimate**: 1 day
