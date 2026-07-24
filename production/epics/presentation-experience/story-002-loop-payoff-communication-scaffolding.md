@@ -1,7 +1,7 @@
 # Story 002: Loop-payoff communication scaffolding — event/signal surface
 
 > **Epic**: Presentation Experience
-> **Status**: Ready
+> **Status: Complete (2026-07-24 — 507/507 suite green, parent-verified; CD SIGN-OFF APPROVED — advisory for M02: wire clear_payoff as the moment-resolved return-to-ambient hook)
 > **Layer**: Presentation
 > **Type**: Integration
 > **Estimate**: ~0.5–1 day (scaffolding-only: the surface, not the mechanic)
