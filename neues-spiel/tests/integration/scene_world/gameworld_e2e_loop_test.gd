@@ -66,16 +66,42 @@ const GameWorldScene: PackedScene = preload("res://src/scene_world_management/ga
 
 ## Minimal Building-System-job-queue-shaped test double (mocked boundary,
 ## mirrors `traveling_repath_test.gd`'s own `MockJobQueue` precedent) — lets
-## a real Deciding pass commit to `PursuedActivity.WORK` without Story 010's
-## real job-site selection existing yet.
+## a real Deciding pass commit to `PursuedActivity.WORK` and, since Story
+## villager-ai-011 wired the real F2-select + atomic-claim + travel handshake
+## into tier 2, now also supplies `get_available_jobs`/`claim_job`/
+## `report_unreachable` so that real handshake has something to select and
+## claim (this test's own AC-VILLAGER-WALKS still seeds the actual travel
+## TARGET directly in Act 2, per its own established Implementation Notes —
+## Story 010's real job-SITE selection is a separate concern from this
+## story's claim mechanics, both mocked/seeded here alike; the extension to
+## a fully real, unmocked queue is Story villager-ai-012's own smoke-item
+## scope, Sprint 7 QA plan Call-out 5).
 class _MockJobQueue:
 	var available: bool = false
+	var jobs: Array[BlueprintCell] = []
+	var _claimed_by: Dictionary[Vector3i, int] = {}
 
 	func has_available_job() -> bool:
 		return available
 
+	func get_available_jobs() -> Array[BlueprintCell]:
+		var result: Array[BlueprintCell] = []
+		for job: BlueprintCell in jobs:
+			if not _claimed_by.has(job.cell):
+				result.append(job)
+		return result
+
+	func claim_job(cell: Vector3i, villager_id: int) -> bool:
+		if _claimed_by.has(cell):
+			return false
+		_claimed_by[cell] = villager_id
+		return true
+
 	func release_claim(_villager_id: int) -> void:
 		pass
+
+	func report_unreachable(_cell: Vector3i) -> bool:
+		return true
 
 
 # ---------------------------------------------------------------------------
@@ -303,6 +329,12 @@ func test_ac_villager_walks_decides_paths_and_follows_cell_by_cell_to_arrival() 
 	nav_graph.subscribe_to_voxel_world(grid, villager)
 	var jobs := _MockJobQueue.new()
 	jobs.available = true
+	# One step away from the villager's own starting cell -- enough for a
+	# real multi-step path (never the immediate-arrival `path.size() == 1`
+	# branch), so the real Deciding pass below lands in TRAVELING exactly as
+	# this test already asserted before Story villager-ai-011 wired the real
+	# claim/travel handshake into tier 2.
+	jobs.jobs = [BlueprintCell.new(Vector3i(1, 1, 0))]
 	villager.job_queue = jobs
 	villager.setup()
 

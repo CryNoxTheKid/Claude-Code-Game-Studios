@@ -41,12 +41,16 @@ extends GdUnitTestSuite
 
 ## Minimal Building-System-job-queue-shaped test double (mocked boundary,
 ## mirrors `priority_decision_loop_test.gd`'s own `MockJobQueue` exactly) --
-## counts `release_claim` calls so the per-target-fallback tests can assert
-## call-count precisely, not just "state didn't change."
+## counts `release_claim`/`report_unreachable` calls so the per-target-
+## fallback tests can assert call-count precisely, not just "state didn't
+## change." `report_unreachable` added by Story villager-ai-011 (Rule 6/AC9 --
+## [method VillagerAi._abandon_travel]'s WORK branch now calls it).
 class MockJobQueue:
 	var available: bool = false
 	var release_claim_call_count: int = 0
 	var last_released_villager_id: int = -1
+	var report_unreachable_call_count: int = 0
+	var last_reported_unreachable_cell: Vector3i = Vector3i.ZERO
 
 	func has_available_job() -> bool:
 		return available
@@ -54,6 +58,11 @@ class MockJobQueue:
 	func release_claim(villager_id: int) -> void:
 		release_claim_call_count += 1
 		last_released_villager_id = villager_id
+
+	func report_unreachable(cell: Vector3i) -> bool:
+		report_unreachable_call_count += 1
+		last_reported_unreachable_cell = cell
+		return true
 
 
 # ---------------------------------------------------------------------------
@@ -259,6 +268,10 @@ func test_start_traveling_unreachable_target_abandons_and_releases_work_claim() 
 	assert_int(villager.get_pursued_activity()).is_equal(VillagerAi.PursuedActivity.NONE)
 	assert_int(jobs.release_claim_call_count).is_equal(1)
 	assert_int(jobs.last_released_villager_id).is_equal(villager.villager_id)
+	# Story villager-ai-011 (Rule 6/AC9): the unreachable job is also
+	# reported to the Building System.
+	assert_int(jobs.report_unreachable_call_count).is_equal(1)
+	assert_vector(Vector3(jobs.last_reported_unreachable_cell)).is_equal(Vector3(Vector3i(4, 1, 4)))
 
 
 func test_start_traveling_unreachable_target_abandons_without_releasing_claim_when_pursuing_need() -> void:
@@ -398,6 +411,11 @@ func test_write_severs_only_route_mid_travel_triggers_abandon_to_deciding() -> v
 	assert_int(villager.get_state()).is_equal(VillagerAi.State.DECIDING)
 	assert_int(villager.get_pursued_activity()).is_equal(VillagerAi.PursuedActivity.NONE)
 	assert_int(jobs.release_claim_call_count).is_equal(1)
+	# Story villager-ai-011 (Rule 6/AC9): the mid-travel redirect failure is
+	# ALSO reported -- the SAME [method VillagerAi._abandon_travel] WORK
+	# branch, regardless of which caller (direct or mid-travel recompute)
+	# triggered it.
+	assert_int(jobs.report_unreachable_call_count).is_equal(1)
 
 
 # ---------------------------------------------------------------------------

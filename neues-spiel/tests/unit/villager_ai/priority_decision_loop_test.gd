@@ -46,24 +46,44 @@ class MockNeedsProvider:
 
 
 ## Minimal Building-System-job-queue-shaped test double (mocked boundary --
-## Story 010/011 own the real queue). Implements exactly the two members
-## [VillagerAi._has_available_job]/[VillagerAi._release_job_claim] depend
-## on, and counts calls so a test can assert AC41's "never even re-runs job
+## Story 010/011 own the real queue). Implements the full duck-typed
+## contract [VillagerAi]'s job_queue depends on as of Story villager-ai-011
+## (`has_available_job`/`release_claim`, story 006, plus
+## `get_available_jobs`/`claim_job`/`report_unreachable`, story 011) --
+## counts calls so a test can assert AC41's "never even re-runs job
 ## selection against a held claim" precisely (call-count zero), not just
 ## "state didn't change."
 class MockJobQueue:
 	var available: bool = false
+	var jobs: Array[BlueprintCell] = []
 	var has_available_job_call_count: int = 0
 	var release_claim_call_count: int = 0
 	var last_released_villager_id: int = -1
+	var _claimed_by: Dictionary[Vector3i, int] = {}
 
 	func has_available_job() -> bool:
 		has_available_job_call_count += 1
 		return available
 
+	func get_available_jobs() -> Array[BlueprintCell]:
+		var result: Array[BlueprintCell] = []
+		for job: BlueprintCell in jobs:
+			if not _claimed_by.has(job.cell):
+				result.append(job)
+		return result
+
+	func claim_job(cell: Vector3i, villager_id: int) -> bool:
+		if _claimed_by.has(cell):
+			return false
+		_claimed_by[cell] = villager_id
+		return true
+
 	func release_claim(villager_id: int) -> void:
 		release_claim_call_count += 1
 		last_released_villager_id = villager_id
+
+	func report_unreachable(_cell: Vector3i) -> bool:
+		return true
 
 
 ## Spy subclass recording whether/when [method VillagerAi._tick_working]
@@ -90,6 +110,42 @@ func _make_villager_ai() -> VillagerAi:
 	var villager_ai: VillagerAi = auto_free(VillagerAi.new())
 	villager_ai.config = VillagerAIConfig.new()
 	villager_ai.scheduler = VillagerDecidingScheduler.new()
+	return villager_ai
+
+
+func _make_flat_grid(size: int) -> VoxelWorldGrid:
+	var grid: VoxelWorldGrid = auto_free(VoxelWorldGrid.new())
+	grid.config = VoxelWorldConfig.new()
+	for x in range(size):
+		for z in range(size):
+			grid.set_cell(Vector3i(x, 0, z), CellContents.new(1, 0))
+	return grid
+
+
+## A villager capable of actually committing to and traveling toward a job
+## site (Story villager-ai-011's own wiring of [VillagerJobSelector.
+## select_job] + [method VillagerAi.start_traveling] into tier 2) -- a flat,
+## fully-connected 3x3 platform + a shared [VillagerNavGraph], mirroring
+## `traveling_repath_test.gd`'s own established fixture shape. Placed at
+## (0, 1, 0); every job candidate this file's own tests offer sits 2+ cells
+## away so a real multi-step path is acquired (never the immediate-arrival,
+## `path.size() == 1` branch) -- keeping this file's pre-existing
+## TRAVELING/WORK assertions (story 006) unchanged by story 011's real
+## wiring.
+func _make_travel_capable_villager_ai() -> VillagerAi:
+	var grid: VoxelWorldGrid = _make_flat_grid(3)
+	var predicate_source: VillagerAi = auto_free(VillagerAi.new())
+	predicate_source.voxel_world = grid
+	var graph := VillagerNavGraph.new()
+	graph.build(grid, predicate_source, Vector3i(1, 1, 1), 3)
+	var villager_ai: VillagerAi = auto_free(VillagerAi.new())
+	villager_ai.config = VillagerAIConfig.new()
+	villager_ai.voxel_world = grid
+	villager_ai.scheduler = VillagerDecidingScheduler.new()
+	villager_ai.nav_graph = graph
+	villager_ai.current_cell = Vector3i(0, 1, 0)
+	villager_ai._from_cell = villager_ai.current_cell
+	villager_ai._to_cell = villager_ai.current_cell
 	return villager_ai
 
 
@@ -133,11 +189,12 @@ func test_urgent_need_and_available_job_chooses_need() -> void:
 # ---------------------------------------------------------------------------
 
 func test_available_job_no_urgent_need_chooses_job_over_wandering() -> void:
-	var villager_ai: VillagerAi = _make_villager_ai()
+	var villager_ai: VillagerAi = _make_travel_capable_villager_ai()
 	var needs: MockNeedsProvider = MockNeedsProvider.new()
 	needs.urgent = false
 	var jobs: MockJobQueue = MockJobQueue.new()
 	jobs.available = true
+	jobs.jobs = [BlueprintCell.new(Vector3i(2, 1, 0))]
 	villager_ai.needs_provider = needs
 	villager_ai.job_queue = jobs
 
@@ -149,9 +206,10 @@ func test_available_job_no_urgent_need_chooses_job_over_wandering() -> void:
 
 func test_needs_provider_unwired_is_treated_as_no_urgent_need() -> void:
 	# Nil-safety: only job_queue is wired -- needs_provider is left null.
-	var villager_ai: VillagerAi = _make_villager_ai()
+	var villager_ai: VillagerAi = _make_travel_capable_villager_ai()
 	var jobs: MockJobQueue = MockJobQueue.new()
 	jobs.available = true
+	jobs.jobs = [BlueprintCell.new(Vector3i(2, 1, 0))]
 	villager_ai.job_queue = jobs
 
 	villager_ai._tick_deciding()
@@ -233,14 +291,24 @@ func test_working_villager_no_urgent_need_stays_working_with_no_reselection() ->
 # ---------------------------------------------------------------------------
 
 func test_decide_assigns_next_state_within_the_same_tick_no_extra_tick_needed() -> void:
+	var grid: VoxelWorldGrid = _make_flat_grid(3)
+	var predicate_source: VillagerAi = auto_free(VillagerAi.new())
+	predicate_source.voxel_world = grid
+	var graph := VillagerNavGraph.new()
+	graph.build(grid, predicate_source, Vector3i(1, 1, 1), 3)
 	var villager_ai: VillagerAi = auto_free(VillagerAi.new())
 	villager_ai.config = VillagerAIConfig.new()
-	villager_ai.voxel_world = auto_free(VoxelWorldGrid.new())
+	villager_ai.voxel_world = grid
 	villager_ai.scheduler = VillagerDecidingScheduler.new()
+	villager_ai.nav_graph = graph
+	villager_ai.current_cell = Vector3i(0, 1, 0)
+	villager_ai._from_cell = villager_ai.current_cell
+	villager_ai._to_cell = villager_ai.current_cell
 	var mock_tick: MockTimeTickSystem = auto_free(MockTimeTickSystem.new())
 	villager_ai.time_tick_system = mock_tick
 	var jobs: MockJobQueue = MockJobQueue.new()
 	jobs.available = true
+	jobs.jobs = [BlueprintCell.new(Vector3i(2, 1, 0))]
 	villager_ai.job_queue = jobs
 	villager_ai.setup()
 	assert_int(villager_ai.get_state()).is_equal(VillagerAi.State.DECIDING)

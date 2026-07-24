@@ -1,12 +1,12 @@
 # Story 011: Job claim/release pipeline with worker attribution
 
 > **Epic**: Villager AI & Behavior
-> **Status**: Ready
+> **Status: Complete (2026-07-24 — 749/749 suite green, parent-verified)
 > **Layer**: Core
 > **Type**: Integration
 > **Estimate**: ~1 agent-day
 > **Manifest Version**: 2026-07-23
-> **Last Updated**: —
+> **Last Updated**: 2026-07-24
 
 ## Context
 

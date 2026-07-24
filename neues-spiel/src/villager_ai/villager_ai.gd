@@ -513,6 +513,37 @@ var _travel_arrival_state: State = State.DECIDING
 ## needed a single line changed by this story.
 var _travel_remaining_path: Array[Vector3i] = []
 
+## Monotonic per-villager tick counter (Story villager-ai-011) -- incremented
+## once per [method _on_tick] call, never reset (unlike [member
+## _ticks_since_last_decision]). The sole clock [member
+## _unreachable_retry_after_tick]'s cooldown windows are measured against --
+## this villager's own local notion of "how many ticks have I processed,"
+## independent of [TimeTickSystem]'s own global tick count (this class only
+## ever observes that indirectly, via the `tick` signal itself).
+var _tick_count: int = 0
+
+## This villager's OWN per-cell retry-cooldown memory (Story villager-ai-011,
+## GDD Rule 6/AC10, [TR-villager-ai-behavior-055]): cell -> the
+## [member _tick_count] value at or after which this villager may
+## true-path-check that cell again via F2 selection. Populated by [method
+## _abandon_travel]'s WORK branch whenever [method start_traveling] (or a
+## mid-travel redirect) fails to find a path to a job this villager had just
+## claimed (Rule 6's "pathing to a job fails" case) -- NOT populated by F2's
+## own internal pre-claim reachability filter ([VillagerJobSelector.
+## select_job] already silently skips an unreachable candidate without ever
+## claiming or reporting it, so there is nothing to throttle there). A
+## per-villager Dictionary, deliberately NOT shared/global -- Rule 6's
+## "reports... to the Building System" already shares the ghost-tint fact
+## globally via [signal ConstructionJobQueue.job_reported_unreachable]; this
+## Dictionary is purely this villager's own retry-pacing memory, distinct
+## from that shared visual state. [method _attempt_claim_and_travel_to_job]
+## consults it via [method _is_job_cooling_down] to exclude a still-cooling
+## cell from this pass's candidate set (AC10's suppress-before-the-window
+## guarantee); once [member _tick_count] reaches the stored value, the SAME
+## cell is eligible again on the very next Deciding pass (AC10's "a retry
+## attempt occurs").
+var _unreachable_retry_after_tick: Dictionary[Vector3i, int] = {}
+
 
 ## Explicitly callable wiring/validation entry point (ADR-0001). Asserts
 ## [member config], [member voxel_world], and a
@@ -916,6 +947,7 @@ func _is_passable(cell: Vector3i) -> bool:
 ## double-invoked here; each villager's Deciding pass still runs at most
 ## once per tick (AC5).
 func _on_tick() -> void:
+	_tick_count += 1
 	if _travel_complete():
 		current_cell = _to_cell
 	_check_decision_interval_trigger()
@@ -1015,9 +1047,7 @@ func _tick_deciding() -> void:
 		return
 	if _pursued_activity == PursuedActivity.WORK:
 		return
-	if _has_available_job():
-		_pursued_activity = PursuedActivity.WORK
-		_state = State.TRAVELING
+	if _has_available_job() and _attempt_claim_and_travel_to_job():
 		return
 	_pursued_activity = PursuedActivity.NONE
 	_state = State.WANDERING
@@ -1056,6 +1086,142 @@ func _release_job_claim() -> void:
 	job_queue.release_claim(villager_id)
 
 
+## Tier-2 candidate-list read ([member job_queue], mocked boundary; Story
+## villager-ai-011). Nil-safe, same rationale as [method _has_available_job]
+## -- though by construction this is only ever called from [method
+## _attempt_claim_and_travel_to_job], itself only reached after [method
+## _has_available_job] already confirmed [member job_queue] is wired.
+## [member ConstructionJobQueue.get_available_jobs]'s exact duck-typed
+## signature/contract: every currently BUILDING-eligible [BlueprintCell]
+## across every tracked project, commit-time ordered.
+func _get_available_jobs() -> Array[BlueprintCell]:
+	if job_queue == null:
+		return []
+	@warning_ignore("unsafe_method_access")
+	return job_queue.get_available_jobs()
+
+
+## Tier-2 atomic-claim attempt ([member job_queue], mocked boundary; Story
+## villager-ai-011, GDD Rule 4/AC8/Edge Case 3, [TR-villager-ai-behavior-051]/
+## [TR-villager-ai-behavior-081]). Nil-safe, same rationale as [method
+## _has_available_job]. Delegates entirely to [member
+## ConstructionJobQueue.claim_job]'s exact duck-typed signature/contract --
+## this class performs no claim bookkeeping of its own; a `true` return means
+## [param cell] is now locked to this villager (one job per villager, no
+## other villager may claim it until released), a `false` return means
+## either this villager already holds a different claim, or [param cell] lost
+## its claim race to another villager's same-pass call (or is no longer
+## eligible for any other Building-System-owned reason) -- this method
+## cannot distinguish those cases, by design; the caller ([method
+## _attempt_claim_and_travel_to_job]) simply tries the next candidate either
+## way.
+func _claim_job(cell: Vector3i) -> bool:
+	if job_queue == null:
+		return false
+	@warning_ignore("unsafe_method_access")
+	return job_queue.claim_job(cell, villager_id)
+
+
+## Unreachable-job report ([member job_queue], mocked boundary; Story
+## villager-ai-011, GDD Rule 6/AC9, [TR-villager-ai-behavior-055]). Nil-safe,
+## same rationale as [method _has_available_job]. Delegates entirely to
+## [member ConstructionJobQueue.report_unreachable] -- this class owns no
+## ghost-tint/visual state of its own; only [method _abandon_travel]'s WORK
+## branch ever calls this, and only for a job THIS villager had just claimed
+## and then failed to path to (never for F2's own silent pre-claim
+## reachability skip, which never claims or reports anything).
+func _report_job_unreachable(cell: Vector3i) -> void:
+	if job_queue == null:
+		return
+	@warning_ignore("unsafe_method_access")
+	job_queue.report_unreachable(cell)
+
+
+## AC10's per-cell retry throttle read (see [member
+## _unreachable_retry_after_tick]'s own doc comment for the full rationale) --
+## `true` iff [param cell] was reported unreachable by THIS villager recently
+## enough that [member config]'s `unreachable_retry_ticks` have not yet
+## elapsed since. A cell never reported unreachable by this villager (absent
+## from the map) is never cooling down.
+func _is_job_cooling_down(cell: Vector3i) -> bool:
+	return _unreachable_retry_after_tick.has(cell) and _tick_count < _unreachable_retry_after_tick[cell]
+
+
+## Rule 4/F2 claim-and-travel commit loop (Story villager-ai-011; GDD Rule 4
+## "claiming locks the job"; [VillagerJobSelector]'s own doc comment
+## explicitly deferred "WHICH job ends up actually claimed/traveled-to" to
+## this story). Called ONLY from [method _tick_deciding]'s tier-2 branch,
+## after [method _has_available_job] has already confirmed [member job_queue]
+## is non-null and the queue is non-empty (Rule 2's cheap existence gate) --
+## this method performs the more expensive part: select a candidate (F2 via
+## [VillagerJobSelector.select_job]), attempt to atomically claim it, and if
+## the claim is LOST to another villager's same-pass claim (AC8/Edge Case 3),
+## try the NEXT F2 candidate within this SAME Deciding pass -- "the loser
+## selects its next candidate," never a second, deferred Deciding pass for a
+## lost claim RACE specifically (unlike Rule 6's post-claim PATHING failure,
+## which DOES defer to a future pass via [method _abandon_travel]'s existing
+## [method request_deciding_pass] re-queue, unchanged by this story).
+## [member nav_graph] absent (null) short-circuits to `false` immediately --
+## mirrors [member needs_provider]/[member job_queue]'s own nil-safe
+## precedent; a villager with no shared graph wired yet simply has no work
+## available this pass, exactly as if the queue were empty.
+##
+## Each iteration re-reads [method _get_available_jobs] fresh (the queue is
+## the sole source of truth on which cells are still claimable -- a real
+## [ConstructionJobQueue] naturally excludes an already-claimed cell from its
+## own next [method ConstructionJobQueue.get_available_jobs] call), filtered
+## by two local exclusions: `attempted_cells` (cells THIS pass already tried
+## and lost the claim race for -- guarantees loop termination even against a
+## queue double that never shrinks its own list: `attempted_cells` strictly
+## grows by exactly one distinct cell per failed-claim iteration, bounded by
+## the pass's own original candidate count) and [method _is_job_cooling_down]
+## (AC10's per-cell throttle).
+##
+## Returns `false` when no candidate could be claimed at all this pass --
+## every remaining candidate was cooling down, F2's own true-path cap found
+## nothing reachable ([JobSelectionResult.has_selection] `false`), or every
+## reachable candidate lost its claim race -- [method _tick_deciding]'s own
+## caller then falls through to its existing tier-3 Wandering floor (AC11:
+## "never stuck in Deciding").
+##
+## Returns `true` once a claim succeeds and [method start_traveling] has been
+## invoked -- regardless of whether that travel call itself immediately
+## succeeds: an immediate pathing failure is Rule 6/AC9's own post-claim
+## flow, handled entirely by [method start_traveling]'s existing call into
+## [method _abandon_travel] (this story only adds the unreachable-report +
+## retry-cooldown side effects there, see that method's own doc comment) --
+## this loop itself never retries after a successful claim.
+func _attempt_claim_and_travel_to_job() -> bool:
+	if nav_graph == null:
+		return false
+	var attempted_cells: Array[Vector3i] = []
+	while true:
+		var candidates: Array[BlueprintCell] = []
+		for candidate: BlueprintCell in _get_available_jobs():
+			if attempted_cells.has(candidate.cell):
+				continue
+			if _is_job_cooling_down(candidate.cell):
+				continue
+			candidates.append(candidate)
+		if candidates.is_empty():
+			return false
+		var result: JobSelectionResult = VillagerJobSelector.select_job(
+			candidates, current_cell, nav_graph, config.job_candidate_count, config.max_selection_candidates
+		)
+		if not result.has_selection():
+			return false
+		if _claim_job(result.chosen.cell):
+			_pursued_activity = PursuedActivity.WORK
+			start_traveling(result.chosen.cell, State.WORKING)
+			return true
+		attempted_cells.append(result.chosen.cell)
+	# Unreachable -- `while true` only exits via an explicit `return` above;
+	# this satisfies GDScript's static "not all code paths return a value"
+	# analyzer, which does not treat an unconditional `while true:` as
+	# provably infinite/always-returning on its own.
+	return false
+
+
 ## Begins Traveling toward [param target_cell], entering `State.TRAVELING`
 ## and transitioning to [param arrival_state] once [param target_cell] is
 ## reached (Story villager-ai-009; GDD "Traveling" state-table entry:
@@ -1089,6 +1255,13 @@ func start_traveling(target_cell: Vector3i, arrival_state: State) -> bool:
 	assert(nav_graph != null, "VillagerAi.nav_graph not wired -- required before start_traveling()")
 	var path: Array[Vector3i] = nav_graph.find_path(current_cell, target_cell)
 	if path.is_empty():
+		# Story villager-ai-011: [member _travel_target_cell] must be set
+		# BEFORE [method _abandon_travel] fires here -- that method's WORK
+		# branch reports/cooldowns against it (Rule 6/AC9/AC10), and this is
+		# the one call site where it would otherwise still hold a stale
+		# leftover value (the normal multi-cell assignment below never runs
+		# on this early-return path).
+		_travel_target_cell = target_cell
 		_abandon_travel()
 		return false
 	if path.size() == 1:
@@ -1179,7 +1352,18 @@ func _complete_travel_arrival(arrival_state: State) -> void:
 ## still held and skip job re-selection entirely.
 func _abandon_travel() -> void:
 	if _pursued_activity == PursuedActivity.WORK:
+		# Story villager-ai-011 (Rule 6/AC9): release BEFORE report -- a real
+		# [ConstructionJobQueue.report_unreachable] only finds [param cell]
+		# via its own eligibility scan, which requires PLANNED state;
+		# releasing first (UNDER_CONSTRUCTION -> PLANNED) is what makes the
+		# SAME cell eligible again for that scan to find and flag. Reversing
+		# this order would make [method _report_job_unreachable] a silent
+		# no-op against the real queue. AC10's per-cell retry cooldown is
+		# recorded here too -- this is the ONE place a WORK-pursuing
+		# villager's own pathing failure to a claimed job is detected.
 		_release_job_claim()
+		_report_job_unreachable(_travel_target_cell)
+		_unreachable_retry_after_tick[_travel_target_cell] = _tick_count + config.unreachable_retry_ticks
 	_pursued_activity = PursuedActivity.NONE
 	_clear_travel_state()
 	_state = State.DECIDING
