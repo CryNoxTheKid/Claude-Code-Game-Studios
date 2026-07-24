@@ -105,7 +105,7 @@ stories:
     name: "Read-through in-flight-write cache — closes an ADR-0015 invariant"
     file: "production/epics/voxel-world/story-013-read-through-inflight-write-cache.md"
     priority: should-have
-    status: backlog
+    status: in_progress
     owner: "godot-gdscript-specialist"
     estimate_days: 1.0
     blocker: "depends on vox-011 (DONE)"

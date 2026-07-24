@@ -1,12 +1,12 @@
 # Story 013: Read-through in-flight-write cache
 
 > **Epic**: Voxel World / Grid Data
-> **Status**: Ready
+> **Status: Complete (2026-07-24 — 655/655 suite green, parent-verified)
 > **Layer**: Presentation (world-storage residency tier)
 > **Type**: Integration
 > **Estimate**: 1 day
 > **Manifest Version**: 2026-07-23
-> **Last Updated**: (set by /dev-story)
+> **Last Updated**: 2026-07-24
 
 ## Context
 
@@ -29,7 +29,7 @@
 
 ## Acceptance Criteria
 
-- [ ] When a dirty chunk is evicted, its flush runs asynchronously; if the chunk is re-needed before the flush completes, the read is served from the in-memory in-flight bytes, never re-read from the region file. [TR-voxel-world-053]
+- [x] When a dirty chunk is evicted, its flush runs asynchronously; if the chunk is re-needed before the flush completes, the read is served from the in-memory in-flight bytes, never re-read from the region file. [TR-voxel-world-053]
 
 ---
 
@@ -67,7 +67,7 @@
 
 **Story Type**: Integration
 **Required evidence**: `tests/integration/voxel_world/read_through_inflight_cache_test.gd` OR documented playtest — must exist and pass
-**Status**: [ ] Not yet created
+**Status**: [x] Created — 4 test functions, full suite green (655/655, 0 failures)
 
 ---
 

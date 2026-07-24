@@ -75,11 +75,12 @@
 ## code, not the task's data -- an engine fact the spike's own bug surfaced)
 ## is never used as data anywhere in this file. The read-through in-flight-
 ## write cache that lets a re-needed evicting chunk skip a racy region-file
-## re-read is Story 013's scope (a corresponding known gap is documented at
-## [method _request_resident]); the completion-DRIVEN (vs. poll-based) drain
-## is Story 017's scope. [method wait_for_async_residency_idle] is a bounded,
-## blocking helper for tests and other explicit non-per-frame sync points
-## ONLY -- never call it from a per-frame path.
+## re-read was Story vox-013's scope (a corresponding known gap was documented
+## at [method _request_resident] -- since resolved, see that story's own
+## paragraph below); the completion-DRIVEN (vs. poll-based) drain is Story
+## 017's scope. [method wait_for_async_residency_idle] is a bounded, blocking
+## helper for tests and other explicit non-per-frame sync points ONLY --
+## never call it from a per-frame path.
 ##
 ## Story vox-012 (this revision, ADR-0015 Decision §1) adds the per-frame TIME
 ## BUDGET Story vox-011 explicitly left as future scope: [method
@@ -111,6 +112,24 @@
 ## [method drain_pending_async_reads] remain deliberately UNBOUNDED (pass no
 ## budget) -- they are explicit test/non-per-frame sync points that must fully
 ## settle, never partially drain.
+##
+## Story vox-013 (this revision, ADR-0015 Decision §3) closes the read-
+## through-in-flight-write gap Story vox-011 documented at [method
+## _request_resident]: [method _request_resident] now checks [member
+## _write_in_flight_data] ([method _try_serve_from_in_flight_write]) BEFORE
+## either integrating an already-finished background read or dispatching a
+## fresh one -- a chunk whose eviction flush is currently in flight is
+## re-hydrated directly from its own not-yet-durable bytes, with NO
+## region-file read of any kind while that flush is outstanding. The
+## background flush itself is entirely unaffected by this -- it keeps
+## running to completion and [method _reap_finished_async_writes] still
+## clears [member _write_in_flight_data] only once (and exactly once) that
+## flush is confirmed durable via the mutex-guarded [member _write_results];
+## reads resume from the region file transparently afterward, exactly as
+## before this story. This is a READ-side-only fix: a WRITE arriving at an
+## already-evicting chunk while its flush is still in flight remains Story
+## 014's explicit scope (that story's own load-before-write rule, which this
+## in-flight cache composes with rather than duplicates).
 class_name VoxelWorldGrid
 extends Node
 
@@ -265,10 +284,10 @@ var _write_results: Dictionary[Vector2i, bool] = {}
 ## instant the resident copy is dropped from [member _chunks] (the bytes must
 ## live SOMEWHERE while the background write runs), cleared by [method
 ## _reap_finished_async_writes] once that write is durable. Story vox-013
-## wires the READ-THROUGH consumption of this (a chunk re-needed before its
-## own flush lands must be served from here, never from the region file,
-## which may be mid-write) -- this story only populates it; see [method
-## _request_resident]'s documented known gap.
+## (ADR-0015 Decision §3) wires the READ-THROUGH consumption of this -- see
+## [method _request_resident]/[method _try_serve_from_in_flight_write]: a
+## chunk re-needed before its own flush lands is served from here directly,
+## never racing a region-file read against the still-in-flight write.
 var _write_in_flight_data: Dictionary[Vector2i, PackedByteArray] = {}
 
 ## Guards every read/write of [member _read_results] and [member
@@ -1115,32 +1134,63 @@ func get_in_flight_async_task_count() -> int:
 
 
 ## Best-effort page-in request for [param chunk_key] (Story vox-011, ADR-0015
-## Decision §6) -- returns TRUE the instant the chunk is already resident,
-## has a just-finished background result integrated into [member _chunks]
-## right now ([method _try_integrate_read], non-blocking), or was freshly
-## dispatched onto the [WorkerThreadPool] this call ([method
-## _try_dispatch_read]). Returns FALSE only when the chunk still has no
-## finished result AND could not be dispatched because [member
+## Decision §6) -- returns TRUE the instant the chunk is already resident, is
+## currently mid-eviction-flush and gets served straight from its own
+## not-yet-durable bytes ([method _try_serve_from_in_flight_write], Story
+## vox-013, ADR-0015 Decision §3 -- checked FIRST, before either read path, so
+## an in-flight chunk NEVER races a genuine region-file read against its own
+## still-in-flight write), has a just-finished background result integrated
+## into [member _chunks] right now ([method _try_integrate_read],
+## non-blocking), or was freshly dispatched onto the [WorkerThreadPool] this
+## call ([method _try_dispatch_read]). Returns FALSE only when the chunk still
+## has no finished result AND could not be dispatched because [member
 ## VoxelWorldConfig.max_concurrent_async_tasks] is already saturated -- the
 ## caller ([method update_residency]/[method get_cell]) simply leaves [param
 ## chunk_key] queued and retries on a later call (ADR-0015 Decision §6:
 ## cap-miss stays queued, never a synchronous read/regen fallback).
-##
-## KNOWN GAP, deliberately deferred to Story 013 (ADR-0015 Decision §3's
-## read-through in-flight-write cache -- the same "known, deliberately
-## deferred gap" pattern Story vox-010 documented for load-before-write): if
-## [param chunk_key] is currently mid-eviction-flush ([member
-## _write_in_flight_data] holds its not-yet-durable bytes), this method does
-## not yet serve those in-memory bytes directly -- it may dispatch a genuine
-## region-file read that races the still-in-flight write. Wiring that
-## read-through short-circuit is Story 013's explicit scope (see that
-## story's Dependencies: "Depends on: Story 011").
 func _request_resident(chunk_key: Vector2i) -> bool:
 	if _chunks.has(chunk_key):
+		return true
+	if _try_serve_from_in_flight_write(chunk_key):
 		return true
 	if _try_integrate_read(chunk_key):
 		return true
 	return _try_dispatch_read(chunk_key)
+
+
+## Read-through in-flight-write cache (Story vox-013, ADR-0015 Decision §3):
+## if [param chunk_key] is currently mid-eviction-flush -- its serialized
+## bytes live in [member _write_in_flight_data] because [method
+## _try_dispatch_write] dispatched the background flush but [method
+## _reap_finished_async_writes] has not yet confirmed it durable -- this
+## re-hydrates [member _chunks] directly from those in-memory bytes and
+## returns TRUE, WITHOUT dispatching or consuming any region-file read at
+## all. This is the correctness fix for the gap [method _request_resident]'s
+## own (now-superseded) doc comment used to name: the region file may be
+## mid-write and genuinely incomplete while a flush is in flight, so a
+## re-needed chunk must NEVER be served via a race between "read the file"
+## and "the file is still being written" -- the in-memory bytes are the sole
+## authoritative source for the whole window the flush is in flight (ADR-0015
+## Decision §3: "the authoritative bytes live in memory until the write is
+## durable").
+##
+## The background flush itself is completely unaffected by this -- it keeps
+## running to completion regardless of whether this method re-hydrates the
+## chunk in the meantime, and [method _reap_finished_async_writes] still
+## clears [member _write_in_flight_data] only once (and exactly once) that
+## flush is confirmed durable via the mutex-guarded [member _write_results];
+## reads resume from the region file transparently afterward (Story vox-013's
+## AC-2), exactly as before this story. If [param chunk_key] is later evicted
+## again before any new write touches it, [method _request_evict] finds it
+## absent from [member _dirty_chunks] (already cleared by the FIRST eviction's
+## dispatch) and simply drops it from [member _chunks] with no new flush
+## dispatched -- correct, since the bytes already in flight are unchanged and
+## the original flush task still carries them to disk.
+func _try_serve_from_in_flight_write(chunk_key: Vector2i) -> bool:
+	if not _write_in_flight_data.has(chunk_key):
+		return false
+	_chunks[chunk_key] = _deserialize_chunk_buffer(_write_in_flight_data[chunk_key])
+	return true
 
 
 ## Non-blocking: TRUE and integrates [param chunk_key] into [member _chunks]
