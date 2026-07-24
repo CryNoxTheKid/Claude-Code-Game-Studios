@@ -99,9 +99,10 @@ func test_ac_assembly_gameworld_wires_all_tier_modules_into_valley_and_boots_act
 	var valley: Valley = world.get_valley() as Valley
 	assert_object(valley).is_not_null()
 
-	# Voxel World (grid + mesher)
+	# Voxel World (grid + mesher + mesh view-window streamer, story vox-018)
 	assert_object(valley.get_voxel_world()).is_not_null()
 	assert_object(valley.get_voxel_world_mesher()).is_not_null()
+	assert_object(valley.get_voxel_world_mesh_streamer()).is_not_null()
 	# Camera & Input
 	assert_object(valley.get_camera_input()).is_not_null()
 	# Building System (four modules)
@@ -113,9 +114,10 @@ func test_ac_assembly_gameworld_wires_all_tier_modules_into_valley_and_boots_act
 	assert_object(valley.get_villager_ai()).is_not_null()
 
 	# The assembly seam (GameWorld._gather_valley_tier_modules) fed exactly
-	# these eight, in the load-bearing DI order Valley itself reports.
+	# these nine (story vox-018 added the mesh streamer as a ninth), in the
+	# load-bearing DI order Valley itself reports.
 	assert_array(world.injected_tier_modules).contains_exactly(valley.get_injected_tier_modules())
-	assert_int(world.injected_tier_modules.size()).is_equal(8)
+	assert_int(world.injected_tier_modules.size()).is_equal(9)
 
 
 func test_ac_assembly_hosted_modules_ran_through_boot_gated_setup_never_their_own_ready() -> void:
@@ -131,6 +133,7 @@ func test_ac_assembly_hosted_modules_ran_through_boot_gated_setup_never_their_ow
 	# boot-gated sweep (ADR-0005) reached it -- never a module's own _ready().
 	assert_bool(valley.get_voxel_world().is_set_up()).is_true()
 	assert_bool(valley.get_voxel_world_mesher().is_set_up()).is_true()
+	assert_bool(valley.get_voxel_world_mesh_streamer().is_set_up()).is_true()
 	assert_bool(valley.get_camera_input().is_set_up()).is_true()
 	assert_bool(valley.get_tool_state_machine().is_set_up()).is_true()
 	assert_bool(valley.get_placement_pick().is_set_up()).is_true()

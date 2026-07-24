@@ -25,7 +25,7 @@ stories:
     name: "60-FPS-with-culling measurement on the live Valley (criterion #12) — THE UNRETIRED UNKNOWN, sequenced FIRST"
     file: "production/epics/voxel-world/story-018-60fps-culling-measurement.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete
     owner: "godot-gdscript-specialist"
     estimate_days: 2.5
     blocker: "sequenced FIRST on the gdscript lane; deps vox-015, scene-004, vox-007, cam-006 all DONE (S4–S6); MISS-remediation risk — 2-day buffer reserved"

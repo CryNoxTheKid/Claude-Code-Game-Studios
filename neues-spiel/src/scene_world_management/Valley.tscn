@@ -1,4 +1,4 @@
-[gd_scene load_steps=16 format=3]
+[gd_scene load_steps=17 format=3]
 
 [ext_resource type="Script" path="res://src/scene_world_management/valley.gd" id="1_valley"]
 [ext_resource type="Script" path="res://src/voxel_world/voxel_world_grid.gd" id="2_voxelgrid"]
@@ -6,6 +6,7 @@
 [ext_resource type="Script" path="res://src/camera_input/camera_input.gd" id="4_camerainput"]
 [ext_resource type="Resource" path="res://data/config/camera_input_config.tres" id="5_cameracfg"]
 [ext_resource type="Script" path="res://src/voxel_world/voxel_world_mesher.gd" id="6_mesher"]
+[ext_resource type="Script" path="res://src/voxel_world/voxel_world_mesh_streamer.gd" id="6b_meshstreamer"]
 [ext_resource type="Script" path="res://src/building_system/tool_state_machine.gd" id="7_toolsm"]
 [ext_resource type="Script" path="res://src/building_system/placement_pick.gd" id="8_placementpick"]
 [ext_resource type="Resource" path="res://data/config/placement_pick_config.tres" id="9_placementcfg"]
@@ -25,6 +26,9 @@ config = ExtResource("3_voxelcfg")
 
 [node name="VoxelWorldMesher" type="Node3D" parent="."]
 script = ExtResource("6_mesher")
+
+[node name="VoxelWorldMeshStreamer" type="Node" parent="."]
+script = ExtResource("6b_meshstreamer")
 
 [node name="CameraInput" type="Node" parent="."]
 script = ExtResource("4_camerainput")

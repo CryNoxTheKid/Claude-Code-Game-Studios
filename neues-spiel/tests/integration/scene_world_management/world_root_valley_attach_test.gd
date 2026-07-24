@@ -161,7 +161,11 @@ func test_hosted_building_system_and_villager_ai_modules_are_children_of_valley(
 	# their absence when neither epic had landed code yet -- see
 	# gameworld_e2e_loop_test.gd for this story's own dedicated, fuller
 	# assembly proof; this is a light presence/count regression guard local
-	# to this suite's own established child-topology coverage).
+	# to this suite's own established child-topology coverage). Story
+	# vox-018 adds a ninth hosted child, [VoxelWorldMeshStreamer] -- see
+	# `live_view_window_wiring_test.gd` for that story's own dedicated
+	# wiring/boot-timing proof; this count is updated consciously, not
+	# incidentally.
 	var world: GameWorld = auto_free(GameWorld.new())
 	var database: MockResourceItemDatabase = auto_free(MockResourceItemDatabase.new())
 	database.configure_ready_immediately()
@@ -173,8 +177,9 @@ func test_hosted_building_system_and_villager_ai_modules_are_children_of_valley(
 
 	# Assert
 	var valley: Valley = world.get_valley() as Valley
-	assert_int(valley.get_child_count()).is_equal(8)
+	assert_int(valley.get_child_count()).is_equal(9)
 	assert_object(valley.get_voxel_world_mesher()).is_not_null()
+	assert_object(valley.get_voxel_world_mesh_streamer()).is_not_null()
 	assert_object(valley.get_tool_state_machine()).is_not_null()
 	assert_object(valley.get_placement_pick()).is_not_null()
 	assert_object(valley.get_commit_pipeline()).is_not_null()

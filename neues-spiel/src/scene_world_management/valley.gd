@@ -49,6 +49,35 @@
 ## reached via [method get_injected_tier_modules] below, not a second one on
 ## this class).
 ##
+## Story vox-018 (ADR-0014 primary -- the deferred live-wiring integration
+## `VoxelWorldMeshStreamer`'s own class doc comment explicitly named as a
+## LATER story's job; ADR-0015 secondary) additionally hosts
+## [VoxelWorldMeshStreamer], structurally, exactly like every other hosted
+## sibling above -- [method _wire_hosted_modules] code-assigns its
+## [member VoxelWorldMeshStreamer.grid]/[member VoxelWorldMeshStreamer.mesher]
+## cross-references; `setup()` is still ONLY ever reached via
+## [method GameWorld._setup_injected_tier] (this class calls it nowhere).
+## [method _process] is this story's ONE new per-frame hook on this class:
+## every engine frame it reads the hosted [CameraInput]'s current orbit
+## target ([method CameraInput.get_target] -- the SAME ground-plane point
+## `tools/camera_sandbox.gd` already mirrors onto its own driven [Camera3D]
+## every frame, not the mouse-dependent world-ray/ground-pick, which would
+## tie the mesh STREAMING window to wherever the cursor happens to point
+## rather than to where the camera itself actually is), converts it to a
+## cell via [method VoxelWorldGrid.world_to_cell] (the same conversion
+## [PlacementPick] already uses for its own screen-ray pick), and forwards it
+## to [method VoxelWorldMeshStreamer.update_view_window] -- the budgeted,
+## per-frame streaming step vox-015 built and proved correct in isolation,
+## now finally driven by a live, continuously-moving focus point in
+## production. The UNBOUNDED initial window build
+## ([method VoxelWorldMeshStreamer.build_initial_window], vox-015 AC-3) is
+## deliberately NOT called from here -- it must run exactly once, during
+## [GameWorld]'s own boot/WIRING sequence, strictly before this class's first
+## `_process` call ever lands (so the ~2.6s unbounded build is never
+## interleaved with the budgeted per-frame path) -- see
+## [method GameWorld._build_initial_voxel_mesh_window] for that call site and
+## its own doc comment for the honest note on today's boot-overlay gap.
+##
 ## **The villager population's non-`@export` shared collaborators**
 ## ([VillagerDecidingScheduler], [VillagerNavGraph]) cannot be Inspector-wired
 ## -- both are plain `RefCounted`, not `Node`/`Resource` (see each class's own
@@ -86,6 +115,14 @@ extends Node3D
 ## `camera-input` epic, already-landed story cam-001/002). Structural child
 ## only -- see [member _voxel_world]'s doc comment.
 @onready var _camera_input: CameraInput = $CameraInput
+
+## Hosted Voxel World mesh view-window streamer instance (ADR-0001
+## injected-tier module; `voxel-world` epic, story vox-015 landed the
+## machinery, story vox-018 wires it live). Structural child only -- see
+## [member _voxel_world]'s doc comment; cross-wired to [member _voxel_world]/
+## [member _voxel_world_mesher] in [method _wire_hosted_modules], driven every
+## frame by [method _process] -- see class doc comment's vox-018 scope note.
+@onready var _voxel_world_mesh_streamer: VoxelWorldMeshStreamer = $VoxelWorldMeshStreamer
 
 ## Hosted Building System tool state machine instance (ADR-0001 injected-tier
 ## module; `building-system` epic, story building-019). Structural child
@@ -139,6 +176,8 @@ func _ready() -> void:
 ## cross-sibling Node references are assigned here.
 func _wire_hosted_modules() -> void:
 	_voxel_world_mesher.grid = _voxel_world
+	_voxel_world_mesh_streamer.grid = _voxel_world
+	_voxel_world_mesh_streamer.mesher = _voxel_world_mesher
 	_placement_pick.camera_input = _camera_input
 	_placement_pick.voxel_world = _voxel_world
 	_placement_pick.tool_state_machine = _tool_state_machine
@@ -146,6 +185,24 @@ func _wire_hosted_modules() -> void:
 	_commit_pipeline.voxel_world = _voxel_world
 	_construction_tick_loop.voxel_world = _voxel_world
 	_villager_ai.voxel_world = _voxel_world
+
+
+## Story vox-018's ONE new per-frame hook (class doc comment) -- reads the
+## hosted [CameraInput]'s CURRENT orbit target every engine frame, converts
+## it to a cell, and drives the hosted [VoxelWorldMeshStreamer]'s budgeted
+## per-frame streaming step. Safe to run from this class's very first
+## processed frame onward: by the time any node's `_process` callback can
+## fire, [GameWorld]'s entire boot sequence (`_attach_valley` ->
+## `_gather_valley_tier_modules` -> `_setup_injected_tier` ->
+## [method GameWorld._build_initial_voxel_mesh_window]) has already run
+## synchronously to completion within the SAME call stack that attached this
+## instance to the tree -- so [member _voxel_world_mesh_streamer]'s DI is
+## wired, every hosted module's `setup()` has already run, and the UNBOUNDED
+## initial window build has already happened exactly once, before this
+## method is ever invoked for the first time.
+func _process(_delta: float) -> void:
+	var focus_cell: Vector3i = VoxelWorldGrid.world_to_cell(_camera_input.get_target())
+	_voxel_world_mesh_streamer.update_view_window(focus_cell)
 
 
 ## Performs the villager population's non-`@export` DI assignment -- see
@@ -179,6 +236,12 @@ func get_camera_input() -> CameraInput:
 	return _camera_input
 
 
+## Returns the hosted Voxel World mesh view-window streamer instance
+## (story vox-018).
+func get_voxel_world_mesh_streamer() -> VoxelWorldMeshStreamer:
+	return _voxel_world_mesh_streamer
+
+
 ## Returns the hosted Building System tool state machine instance.
 func get_tool_state_machine() -> ToolStateMachine:
 	return _tool_state_machine
@@ -207,8 +270,11 @@ func get_villager_ai() -> VillagerAi:
 ## The GameWorld assembly seam (Story scene-004): every hosted tier module
 ## this Valley owns, in the load-bearing DI order [method
 ## GameWorld._setup_injected_tier] will call `setup()` in (Voxel World grid,
-## then its mesher, then Camera & Input, then the four Building System
-## modules, then Villager AI). [GameWorld] calls this exactly once, from
+## then its mesher, then its mesh view-window streamer (story vox-018 --
+## placed here so both its `grid`/`mesher` dependencies have already
+## completed their own `setup()` by the time this streamer's runs), then
+## Camera & Input, then the four Building System modules, then Villager AI).
+## [GameWorld] calls this exactly once, from
 ## [method GameWorld._on_database_settled], AFTER [method
 ## GameWorld._attach_valley] has already attached this instance -- appending
 ## the result to its own [member GameWorld.injected_tier_modules] array
@@ -222,6 +288,7 @@ func get_injected_tier_modules() -> Array[Node]:
 	return [
 		_voxel_world,
 		_voxel_world_mesher,
+		_voxel_world_mesh_streamer,
 		_camera_input,
 		_tool_state_machine,
 		_placement_pick,

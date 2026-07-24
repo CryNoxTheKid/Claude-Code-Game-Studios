@@ -85,6 +85,31 @@
 ## itself is UNCHANGED -- this remains the sole `setup()` call site (ADR-0005);
 ## this story only widens what feeds that array, never how it is consumed.
 ##
+## Scene/World Management Story vox-018 scope note (ADR-0014 primary --
+## the deferred live-wiring integration [VoxelWorldMeshStreamer]'s own class
+## doc comment explicitly named as a LATER story's job; ADR-0005 secondary
+## boot-timing): [method _build_initial_voxel_mesh_window] runs the hosted
+## [VoxelWorldMeshStreamer]'s UNBOUNDED initial view-window mesh build
+## exactly once, from [method _on_database_settled], AFTER
+## [method _setup_injected_tier] returns and BEFORE [member _boot_state] ever
+## reaches [constant BootState.ACTIVE] -- the same "before the first
+## interactive frame" timing this class's boot gate already guarantees for
+## every injected-tier `setup()` call, extended here to this ADDITIONAL,
+## non-`setup()` initial-build call. **Honest note, not silently glossed
+## over**: this codebase has no dedicated boot-time loading-overlay Control
+## landed yet (TR-scene-world-management-032 is a signal/UI contract this
+## class's own [signal transition_begun]/[signal transition_ended] surface
+## anticipates, but no concrete full-screen presentation exists today --
+## see this class's own Story 003 scope note above). Running the initial
+## build during WIRING, strictly before ACTIVE, is the best available
+## proxy for "behind the transition overlay, not on a visible frozen frame"
+## until that dedicated overlay lands -- a later scene-world-management story
+## wiring a real overlay Control to [signal boot_halted]'s sibling concern
+## would slot in front of this same call site without changing it. This
+## method itself calls no `setup()` (ADR-0005's sole `setup()` call site
+## remains [method _setup_injected_tier], unchanged) -- [method
+## VoxelWorldMeshStreamer.build_initial_window] is a distinct entry point.
+##
 ## Scene/World Management Story 003 scope note (ADR-0001 contract surface +
 ## ADR-0013 Key Interfaces, which already anticipated this exact signal pair
 ## living on the World Root): [signal transition_begun] / [signal
@@ -278,6 +303,8 @@ func _on_database_settled(success: bool, issues: Array) -> void:
 	_gather_valley_tier_modules()
 	_setup_injected_tier()
 	if _boot_state != BootState.HALTED:
+		_build_initial_voxel_mesh_window()
+	if _boot_state != BootState.HALTED:
 		_boot_state = BootState.ACTIVE
 
 
@@ -296,6 +323,43 @@ func _gather_valley_tier_modules() -> void:
 	@warning_ignore("unsafe_method_access")
 	var valley_modules: Array[Node] = _valley.get_injected_tier_modules()
 	injected_tier_modules.append_array(valley_modules)
+
+
+## Story vox-018 (see class doc comment's own scope note above for the full
+## timing rationale). Runs the hosted [VoxelWorldMeshStreamer]'s UNBOUNDED
+## initial view-window build exactly once, using the hosted [CameraInput]'s
+## CURRENT orbit target as the initial focus cell (the SAME
+## [method CameraInput.get_target] -> [method VoxelWorldGrid.world_to_cell]
+## conversion [Valley]'s own [method Valley._process] uses every subsequent
+## frame -- see that method's doc comment) -- so the very first frame this
+## streamer's budgeted per-frame path takes over, the window it maintains is
+## already centered on exactly where the boot-time build left it, never a
+## mismatched center. A no-op when no Valley was ever attached, or the
+## attached Valley does not expose
+## [method Valley.get_voxel_world_mesh_streamer]/[method Valley.get_camera_input]
+## (duck-typed via [method Object.has_method], mirroring [method
+## _gather_valley_tier_modules]'s own guard) -- every pre-existing DI/
+## boot-gate-only test Valley stand-in that predates this story remains
+## unaffected.
+func _build_initial_voxel_mesh_window() -> void:
+	if _valley == null:
+		return
+	if not _valley.has_method(&"get_voxel_world_mesh_streamer"):
+		return
+	@warning_ignore("unsafe_method_access")
+	var streamer: Object = _valley.get_voxel_world_mesh_streamer()
+	if streamer == null:
+		return
+	var focus_cell: Vector3i = Vector3i.ZERO
+	if _valley.has_method(&"get_camera_input"):
+		@warning_ignore("unsafe_method_access")
+		var camera_input: Object = _valley.get_camera_input()
+		if camera_input != null and camera_input.has_method(&"get_target"):
+			@warning_ignore("unsafe_method_access")
+			var target: Vector3 = camera_input.get_target()
+			focus_cell = VoxelWorldGrid.world_to_cell(target)
+	@warning_ignore("unsafe_method_access")
+	streamer.build_initial_window(focus_cell)
 
 
 ## Calls [code]setup()[/code] on every wired injected-tier module, in array
