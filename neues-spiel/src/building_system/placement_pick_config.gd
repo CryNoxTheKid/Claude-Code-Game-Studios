@@ -28,11 +28,25 @@ const MAX_PICK_DISTANCE_MIN: float = 1.0
 ## .fov_degrees]'s own `[assumption]` precedent.
 @export var max_pick_distance: float = 200.0
 
+## Safe range for [member drag_threshold_px] (`design/gdd/building-system.md`
+## Tuning Knobs: 4-12, default 6 -- "Prototype-validated"; Story
+## building-021, GDD Formula F4, [TR-building-system-081]).
+const DRAG_THRESHOLD_PX_MIN: float = 4.0
+const DRAG_THRESHOLD_PX_MAX: float = 12.0
 
-## See [ConfigResource.validate]. Clamps [member max_pick_distance] to its
-## sanity floor and appends a warning string if violated -- no BLOCKING
-## cross-value invariant exists for this single-field config (ADR-0002
-## two-tier policy), mirroring [CameraInputConfig]'s clamp-only precedent.
+## Click-vs-drag screen-space pixel threshold (GDD Formula F4): `is_drag =
+## cursor_travel_px >= drag_threshold_px` while `build_place` is held --
+## [PlacementPick] (Story building-021's extension to that class) is the sole
+## consumer, via [method PlacementPick.is_drag]. Default 6 -- prototype-
+## validated (GDD Tuning Knobs). [TR-building-system-081]
+@export var drag_threshold_px: float = 6.0
+
+
+## See [ConfigResource.validate]. Clamps [member max_pick_distance] and
+## [member drag_threshold_px] to their respective bounds and appends a
+## warning string per clamped field -- no BLOCKING cross-value invariant
+## exists for this config (ADR-0002 two-tier policy), mirroring
+## [CameraInputConfig]'s clamp-only precedent.
 func validate() -> Array[String]:
 	var issues: Array[String] = []
 	if max_pick_distance < MAX_PICK_DISTANCE_MIN:
@@ -41,4 +55,10 @@ func validate() -> Array[String]:
 			[MAX_PICK_DISTANCE_MIN, max_pick_distance]
 		)
 		max_pick_distance = MAX_PICK_DISTANCE_MIN
+	if drag_threshold_px < DRAG_THRESHOLD_PX_MIN or drag_threshold_px > DRAG_THRESHOLD_PX_MAX:
+		issues.append(
+			"drag_threshold_px out of range [%s, %s], got %s -- clamped" %
+			[DRAG_THRESHOLD_PX_MIN, DRAG_THRESHOLD_PX_MAX, drag_threshold_px]
+		)
+		drag_threshold_px = clampf(drag_threshold_px, DRAG_THRESHOLD_PX_MIN, DRAG_THRESHOLD_PX_MAX)
 	return issues

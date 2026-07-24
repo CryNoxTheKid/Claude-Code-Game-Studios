@@ -97,6 +97,27 @@
 ## (ADR-0010 Decision §2) is not yet checked here -- no Building UI code exists
 ## in this codebase yet to check against; a future story wires that gate in
 ## once Building UI lands, without a second input-routing mechanism.
+##
+## **Story building-021 extension** (click-vs-drag discrimination, GDD
+## Formula F4, [TR-building-system-081]): [method _unhandled_input]'s press
+## branch now additionally records the press's screen-space position
+## ([member _press_screen_pos]) and its ATTACH cell ([member _press_cell]);
+## [method _input]'s release branch computes the press-to-release pixel
+## distance and derives `is_drag` via [method is_drag] BEFORE calling
+## [method ToolStateMachine.complete_drag], then emits [signal build_committed]
+## -- this class's own new commit TRIGGER, consumed by [CommitPipeline]
+## (Story building-021's own class). This signal fires ONLY from a genuine
+## release reaching this exact code path -- never from an aborted drag
+## (Suspended entry, cancel, or re-arming another tool mid-drag all resolve
+## through [ToolStateMachine]'s own [signal ToolStateMachine.drag_aborted]
+## path instead, which this class does not react to and which never reaches
+## [method _input]'s release branch) -- so "no commit on an aborted drag"
+## [TR-building-system-067] holds by construction, not by a second check.
+## This class still creates no blueprint cell and calls no [VoxelWorldGrid]
+## write API itself -- see class doc comment item 4's "pick stays
+## side-effect-free" contract, which this extension preserves (it only
+## measures pixels and derives cells, exactly like [method get_attach_cell]
+## already did).
 class_name PlacementPick
 extends Node
 
@@ -116,6 +137,16 @@ const BUILD_PLACE_ACTION: StringName = &"build_place"
 ## "only on actual change" precedent. A future ghost-preview story (023) can
 ## consume this without polling every frame itself.
 signal pick_changed(result: RaycastHitResult)
+
+## Fires exactly once per genuine drag-release (Story building-021's own
+## commit TRIGGER, GDD Formula F4, [TR-building-system-081]) -- see class doc
+## comment for why this never fires on an aborted drag. [param is_drag] is
+## the F4 discrimination result ([method is_drag]) for this press-to-release
+## pair; [param press_cell]/[param release_cell] are the ATTACH cell (Core
+## Rule 3) resolved at press time and at release time respectively.
+## [CommitPipeline] (Story building-021) is this signal's consumer -- this
+## class creates no blueprint cell itself.
+signal build_committed(is_drag: bool, press_cell: Vector3i, release_cell: Vector3i)
 
 ## Injected-tier dependency (ADR-0001) -- the sole producer of the mouse
 ## world-ray this class forwards to [member voxel_world]'s DDA raycast
@@ -157,6 +188,19 @@ var _has_locked_plane: bool = false
 ## surface a drag builds ON), never the picked block's own Y -- see class doc
 ## comment.
 var _locked_plane_cell_y: int = 0
+
+## Screen-space mouse position at the moment [constant BUILD_PLACE_ACTION]
+## was last pressed (Story building-021, GDD Formula F4) -- meaningless until
+## a press has occurred at least once. `Vector2.ZERO` for any triggering
+## [InputEvent] that is not an [InputEventMouseButton] (defensive;
+## [constant BUILD_PLACE_ACTION] is always bound to a mouse button per this
+## class's own doc comment).
+var _press_screen_pos: Vector2 = Vector2.ZERO
+
+## The ATTACH cell (Core Rule 3) resolved at the moment of the most recent
+## valid press (Story building-021) -- forwarded via [signal build_committed]
+## as that signal's `press_cell` payload.
+var _press_cell: Vector3i = Vector3i.ZERO
 
 ## Ghost-anchored pick predicate overlay (ADR-0014 §4), set via
 ## [method set_extra_solid] -- forwarded unchanged to every
@@ -280,6 +324,17 @@ func resolve_pick(ray_origin: Vector3, ray_direction: Vector3) -> RaycastHitResu
 ## testable-pure-function shape.
 static func derive_attach_cell(hit_cell: Vector3i, normal: Vector3i) -> Vector3i:
 	return hit_cell + normal
+
+
+## F4 -- click-vs-drag discrimination (Story building-021, GDD Formula F4,
+## [TR-building-system-081]): `is_drag = cursor_travel_px >= drag_threshold_px`.
+## `>=` is deliberate (AC6's "exactly-at-threshold takes the drag path" edge
+## case) -- a press-to-release pixel distance of EXACTLY [param
+## drag_threshold_px] is a drag, never a click. Pure and stateless --
+## exercisable directly with arbitrary values, mirroring [method
+## derive_attach_cell]'s established testable-pure-function shape.
+static func is_drag(cursor_travel_px: float, drag_threshold_px: float) -> bool:
+	return cursor_travel_px >= drag_threshold_px
 
 
 ## Pure locked-working-plane pick (Core Rule 3, AC8): intersects
@@ -434,8 +489,11 @@ func _unhandled_input(event: InputEvent) -> void:
 	update_pick()
 	if not _current_pick.hit:
 		return
-	_locked_plane_cell_y = PlacementPick.derive_attach_cell(_current_pick.cell, _current_pick.normal).y
+	var attach_cell: Vector3i = PlacementPick.derive_attach_cell(_current_pick.cell, _current_pick.normal)
+	_locked_plane_cell_y = attach_cell.y
 	_has_locked_plane = true
+	_press_cell = attach_cell
+	_press_screen_pos = (event as InputEventMouseButton).position if event is InputEventMouseButton else Vector2.ZERO
 	tool_state_machine.start_drag()
 	set_process_input(true)
 
@@ -458,7 +516,14 @@ func _input(event: InputEvent) -> void:
 		return
 	if not event.is_action_released(BUILD_PLACE_ACTION):
 		return
+	var release_screen_pos: Vector2 = (
+		(event as InputEventMouseButton).position if event is InputEventMouseButton else _press_screen_pos
+	)
+	var cursor_travel_px: float = _press_screen_pos.distance_to(release_screen_pos)
+	var was_drag: bool = PlacementPick.is_drag(cursor_travel_px, config.drag_threshold_px)
+	var release_cell: Vector3i = get_attach_cell()
 	tool_state_machine.complete_drag()
 	_has_locked_plane = false
 	get_viewport().set_input_as_handled()
 	set_process_input(false)
+	build_committed.emit(was_drag, _press_cell, release_cell)
