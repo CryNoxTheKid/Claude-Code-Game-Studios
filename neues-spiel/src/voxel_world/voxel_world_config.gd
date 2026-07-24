@@ -88,6 +88,18 @@ const SETTLEMENT_RADIUS_CHUNKS_MAX: int = 32
 const MAX_CONCURRENT_ASYNC_TASKS_MIN: int = 1
 const MAX_CONCURRENT_ASYNC_TASKS_MAX: int = 128
 
+## Safe range for [member page_budget_ms]/[member evict_budget_ms] (Story
+## vox-012, ADR-0015 Decision §1 -- "a time budget... validated at 4.0 ms
+## each"). This range is this story's own choice, same "spike-tuned knob,
+## not a GDD Tuning Knob" rationale as [constant REGION_SIZE_CHUNKS_MIN]/
+## [constant MAX] -- wide enough that a test can set a deliberately generous
+## budget (proving no item-count is silently capped even when time is
+## plentiful) while still catching a degenerate zero-or-negative value that
+## would defeat the "not a fixed item count" guarantee (a budget of exactly
+## 0 would starve every item after the always-progress first one).
+const STREAM_BUDGET_MS_MIN: float = 0.1
+const STREAM_BUDGET_MS_MAX: float = 1000.0
+
 ## Fallback used by [method validate] when [member region_directory] is
 ## empty (a single-field clamp-to-default, same two-tier policy as every
 ## other ranged knob here).
@@ -177,6 +189,30 @@ const REGION_DIRECTORY_DEFAULT: String = "user://regions"
 ## IS the failure mode"). [TR-voxel-world-053]
 @export var max_concurrent_async_tasks: int = 32
 
+## Per-frame TIME budget (milliseconds) for PAGE-IN work -- integrating an
+## already-finished background read result into [member _chunks] AND
+## dispatching a fresh page-in task for a not-yet-requested chunk (Story
+## vox-012, ADR-0015 Decision §1; TR-voxel-world-053) -- NOT a fixed
+## chunks-per-frame count. Spike-validated default 4.0 ms, leaving ~12 ms of
+## the 16.6 ms frame budget for game work alongside [member evict_budget_ms]'s
+## own 4.0 ms. Re-checked after every single processed item
+## ([VoxelWorldGrid._drain_budgeted]) -- a burst of ready/queued items in one
+## [method VoxelWorldGrid.update_residency] call can never collectively
+## exceed this; the excess simply stays unprocessed and is retried the next
+## call (the "later frame" ADR-0015 requires). [TR-voxel-world-053]
+@export var page_budget_ms: float = 4.0
+
+## Per-frame TIME budget (milliseconds) for EVICTION work -- reaping an
+## already-finished background flush result AND dispatching a fresh
+## eviction-flush task for a newly-stale dirty chunk (Story vox-012,
+## ADR-0015 Decision §1; TR-voxel-world-053) -- see [member page_budget_ms]'s
+## doc comment for the shared rationale/mechanism; the eviction counterpart,
+## spike-validated default 4.0 ms. Reaping and dispatching each get their OWN
+## fresh budget window per [method VoxelWorldGrid.update_residency] call
+## (never a shared/cumulative one with page-in or with each other) -- see
+## that method's doc comment for why. [TR-voxel-world-053]
+@export var evict_budget_ms: float = 4.0
+
 
 ## See [ConfigResource.validate]. Clamps every ranged knob to its
 ## GDD-documented safe bound in place (the sole sanctioned runtime write to
@@ -253,6 +289,18 @@ func validate() -> Array[String]:
 			[MAX_CONCURRENT_ASYNC_TASKS_MIN, MAX_CONCURRENT_ASYNC_TASKS_MAX, max_concurrent_async_tasks]
 		)
 		max_concurrent_async_tasks = clampi(max_concurrent_async_tasks, MAX_CONCURRENT_ASYNC_TASKS_MIN, MAX_CONCURRENT_ASYNC_TASKS_MAX)
+	if page_budget_ms < STREAM_BUDGET_MS_MIN or page_budget_ms > STREAM_BUDGET_MS_MAX:
+		issues.append(
+			"page_budget_ms out of range [%s, %s], got %s -- clamped" %
+			[STREAM_BUDGET_MS_MIN, STREAM_BUDGET_MS_MAX, page_budget_ms]
+		)
+		page_budget_ms = clampf(page_budget_ms, STREAM_BUDGET_MS_MIN, STREAM_BUDGET_MS_MAX)
+	if evict_budget_ms < STREAM_BUDGET_MS_MIN or evict_budget_ms > STREAM_BUDGET_MS_MAX:
+		issues.append(
+			"evict_budget_ms out of range [%s, %s], got %s -- clamped" %
+			[STREAM_BUDGET_MS_MIN, STREAM_BUDGET_MS_MAX, evict_budget_ms]
+		)
+		evict_budget_ms = clampf(evict_budget_ms, STREAM_BUDGET_MS_MIN, STREAM_BUDGET_MS_MAX)
 	if min_y > max_y:
 		issues.append(ConfigResource.format_blocking(
 			"min_y (%s) must be <= max_y (%s)" % [min_y, max_y]

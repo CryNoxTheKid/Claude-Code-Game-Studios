@@ -153,6 +153,48 @@ func test_voxel_world_config_validate_frequency_above_max_clamps_and_warns() -> 
 
 
 # ---------------------------------------------------------------------------
+# VoxelWorldConfig — page_budget_ms/evict_budget_ms (Story vox-012,
+# ADR-0015 Decision §1) defaults + validate() clamp+warn tier
+# ---------------------------------------------------------------------------
+
+func test_voxel_world_config_stream_budget_defaults_match_spike_validated_4ms() -> void:
+	# Arrange + Act
+	var config := VoxelWorldConfig.new()
+
+	# Assert — ADR-0015 Decision §1: "validated at 4.0 ms each."
+	assert_float(config.page_budget_ms).is_equal_approx(4.0, 0.0001)
+	assert_float(config.evict_budget_ms).is_equal_approx(4.0, 0.0001)
+
+
+func test_voxel_world_config_validate_page_budget_ms_below_min_clamps_and_warns() -> void:
+	# Arrange
+	var config := VoxelWorldConfig.new()
+	config.page_budget_ms = -1.0
+
+	# Act
+	var issues: Array[String] = config.validate()
+
+	# Assert
+	assert_int(issues.size()).is_equal(1)
+	assert_bool(ConfigResource.has_blocking_issue(issues)).is_false()
+	assert_float(config.page_budget_ms).is_equal_approx(VoxelWorldConfig.STREAM_BUDGET_MS_MIN, 0.0001)
+
+
+func test_voxel_world_config_validate_evict_budget_ms_above_max_clamps_and_warns() -> void:
+	# Arrange
+	var config := VoxelWorldConfig.new()
+	config.evict_budget_ms = 999999.0
+
+	# Act
+	var issues: Array[String] = config.validate()
+
+	# Assert
+	assert_int(issues.size()).is_equal(1)
+	assert_bool(ConfigResource.has_blocking_issue(issues)).is_false()
+	assert_float(config.evict_budget_ms).is_equal_approx(VoxelWorldConfig.STREAM_BUDGET_MS_MAX, 0.0001)
+
+
+# ---------------------------------------------------------------------------
 # VoxelWorldConfig.validate() — BLOCKING cross-value invariant (min_y <= max_y)
 # ---------------------------------------------------------------------------
 

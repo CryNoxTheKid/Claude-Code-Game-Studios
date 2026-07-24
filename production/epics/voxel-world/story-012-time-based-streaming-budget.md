@@ -1,7 +1,7 @@
 # Story 012: Time-based per-frame page-in / eviction budget
 
 > **Epic**: Voxel World / Grid Data
-> **Status**: Ready
+> **Status: Complete (2026-07-24 — 497/497 suite green, parent-verified)
 > **Layer**: Presentation (world-storage residency tier)
 > **Type**: Integration
 > **Estimate**: 1 day

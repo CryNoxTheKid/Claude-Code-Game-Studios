@@ -58,30 +58,59 @@
 ## data first -- that page-in-before-write correctness rule is Story 014's
 ## explicit scope.
 ##
-## Story vox-011 (this revision, ADR-0015 Decision §6) makes EVERY region
-## read, region-flush write, and terrain regeneration run on a capped
-## `WorkerThreadPool` ([member VoxelWorldConfig.max_concurrent_async_tasks])
-## instead of synchronously on the calling thread -- "a synchronous fallback
-## IS the failure mode" the spike measured (a ~55 ms worst-case tail from one
-## unusually expensive item landing on the main thread). [method
-## update_residency] and [method get_cell]'s page-in check are now purely
-## non-blocking: a chunk whose background task has not finished, or could not
-## even be DISPATCHED because the pool is already at capacity, simply STAYS
-## QUEUED and is retried on the next call -- never read/regenerated/flushed
-## synchronously as a fallback. Every background task writes its result into
-## a mutex-guarded structure ([member _read_results]/[member _write_results])
-## that the calling thread later drains non-blockingly; [method
+## Story vox-011 (ADR-0015 Decision §6) makes EVERY region read, region-flush
+## write, and terrain regeneration run on a capped `WorkerThreadPool` ([member
+## VoxelWorldConfig.max_concurrent_async_tasks]) instead of synchronously on
+## the calling thread -- "a synchronous fallback IS the failure mode" the
+## spike measured (a ~55 ms worst-case tail from one unusually expensive item
+## landing on the main thread). [method update_residency] and [method
+## get_cell]'s page-in check are now purely non-blocking: a chunk whose
+## background task has not finished, or could not even be DISPATCHED because
+## the pool is already at capacity, simply STAYS QUEUED and is retried on the
+## next call -- never read/regenerated/flushed synchronously as a fallback.
+## Every background task writes its result into a mutex-guarded structure
+## ([member _read_results]/[member _write_results]) that the calling thread
+## later drains non-blockingly; [method
 ## WorkerThreadPool.wait_for_task_completion]'s return value (an [Error]
 ## code, not the task's data -- an engine fact the spike's own bug surfaced)
-## is never used as data anywhere in this file. The per-frame TIME BUDGET on
-## how much of this to drain per call is Story 012's scope (this story drains
-## everything currently ready, unbounded); the read-through in-flight-write
-## cache that lets a re-needed evicting chunk skip a racy region-file re-read
-## is Story 013's scope (a corresponding known gap is documented at [method
-## _request_resident]); the completion-DRIVEN (vs. this story's poll-based)
-## drain is Story 017's scope. [method wait_for_async_residency_idle] is a
-## bounded, blocking helper for tests and other explicit non-per-frame sync
-## points ONLY -- never call it from a per-frame path.
+## is never used as data anywhere in this file. The read-through in-flight-
+## write cache that lets a re-needed evicting chunk skip a racy region-file
+## re-read is Story 013's scope (a corresponding known gap is documented at
+## [method _request_resident]); the completion-DRIVEN (vs. poll-based) drain
+## is Story 017's scope. [method wait_for_async_residency_idle] is a bounded,
+## blocking helper for tests and other explicit non-per-frame sync points
+## ONLY -- never call it from a per-frame path.
+##
+## Story vox-012 (this revision, ADR-0015 Decision §1) adds the per-frame TIME
+## BUDGET Story vox-011 explicitly left as future scope: [method
+## update_residency] no longer drains/dispatches its full page-in and
+## eviction workload unconditionally -- each of the three call sites
+## ([method _reap_finished_async_writes] reaping finished flush results,
+## [method _request_resident]-per-desired-chunk page-in, [method
+## _request_evict]-per-stale-chunk eviction) now runs through [method
+## _drain_budgeted], which re-checks elapsed time against a configured budget
+## ([member VoxelWorldConfig.page_budget_ms] / [member
+## VoxelWorldConfig.evict_budget_ms]) AFTER EVERY SINGLE processed item --
+## never a fixed items-per-frame count. The FIRST item in any batch is always
+## processed unconditionally (progress guarantee: a single item that alone
+## exceeds the budget still gets integrated/dispatched before the loop
+## stops); every item after that is gated on the running elapsed time, so a
+## burst of ready items in one call can never collectively exceed the
+## budget -- the excess is simply left unprocessed and picked up again the
+## NEXT call (Story vox-011's existing "stays queued, retried later" contract,
+## now time- rather than concurrency-cap-bounded). The three phases each get
+## their OWN fresh timer window (never a cumulative one) so that one phase's
+## duration can never eat into another's budget -- [member
+## VoxelWorldConfig.page_budget_ms] and [member
+## VoxelWorldConfig.evict_budget_ms] are each independently spike-validated at
+## 4.0 ms. The elapsed-time reading itself is injectable ([method
+## set_time_source_for_test]) so tests can assert budget-driven cutoff
+## behavior deterministically, without any real sleep or wall-clock-dependent
+## assertion (QA determinism rule) -- production leaves it at the default
+## [Time.get_ticks_usec] wall clock. [method wait_for_async_residency_idle]/
+## [method drain_pending_async_reads] remain deliberately UNBOUNDED (pass no
+## budget) -- they are explicit test/non-per-frame sync points that must fully
+## settle, never partially drain.
 class_name VoxelWorldGrid
 extends Node
 
@@ -254,6 +283,17 @@ var _task_mutex := Mutex.new()
 ## (tests/explicit sync points only, never the per-frame path itself).
 var _last_camera_focus_cell: Vector3i = Vector3i.ZERO
 var _last_settlement_anchor_cell: Vector3i = Vector3i.ZERO
+
+## Injectable elapsed-time source (Story vox-012, ADR-0015 Decision §1) for
+## [method _drain_budgeted]'s per-item budget re-check -- a zero-arg
+## `Callable` returning microseconds as an `int`, defaulting to the real
+## engine wall clock ([Time.get_ticks_usec]). Tests override this via
+## [method set_time_source_for_test] with a deterministic fake clock so
+## budget-driven stop/defer behavior can be asserted precisely without any
+## real sleep or wall-clock-dependent assertion (QA determinism rule) --
+## production code never calls the setter, so production always measures
+## real elapsed time.
+var _time_source_usec: Callable = Callable(Time, "get_ticks_usec")
 
 ## Current [enum GridState] -- see [method get_state] and [method
 ## generate_terrain]. Starts UNINITIALIZED for every new instance
@@ -889,6 +929,68 @@ func _chunk_height() -> int:
 # Story vox-010 -- paged region-file residency (ADR-0015)
 # =============================================================================
 
+## Test-only override for [member _time_source_usec] (Story vox-012) -- lets
+## a test substitute a deterministic fake clock ([Callable] returning an
+## `int` microsecond count) so [method _drain_budgeted]'s per-item budget
+## re-check can be asserted precisely (e.g. "the Nth item's post-check trips
+## the budget") without any real sleep or wall-clock read. Never called from
+## production code -- production always measures real elapsed time via the
+## default [Time.get_ticks_usec].
+func set_time_source_for_test(source: Callable) -> void:
+	_time_source_usec = source
+
+
+## Current elapsed-time reading in microseconds, via [member _time_source_usec]
+## (real wall clock in production, an injected fake clock in tests -- see
+## [method set_time_source_for_test]).
+func _now_usec() -> int:
+	return _time_source_usec.call()
+
+
+## Converts a [VoxelWorldConfig] millisecond budget knob ([member
+## VoxelWorldConfig.page_budget_ms] / [member VoxelWorldConfig.evict_budget_ms])
+## to the microsecond unit [method _drain_budgeted] compares against --
+## keeping the config-facing knob in the GDD/ADR's own "ms" unit while the
+## internal comparison uses the same unit [method _now_usec] returns.
+func _budget_usec(budget_ms: float) -> int:
+	return int(budget_ms * 1000.0)
+
+
+## Generic per-item time-budget drain (Story vox-012, ADR-0015 Decision §1;
+## TR-voxel-world-053): invokes [param action] once per entry of [param
+## items], in order, re-checking elapsed time against [param budget_usec]
+## (elapsed since [param start_usec]) AFTER every single invocation -- never
+## BEFORE the first one, so the first item in any batch is always processed
+## unconditionally (the "a single item that alone exceeds the budget is
+## still integrated, then the loop stops" progress guarantee). The instant an
+## item's post-check shows the budget exceeded, every remaining item in
+## [param items] is left untouched for this call -- simply not visited at
+## all, no partial/half-applied state of any kind, since [param action] is
+## only ever called for items this method decided to fully process. The
+## caller is responsible for retrying the untouched remainder on ITS next
+## call (every call site rebuilds its own worklist fresh from current state,
+## so nothing needs to be threaded through as an explicit carry-over queue).
+##
+## [param budget_usec] < 0 means UNBOUNDED -- every item in [param items] is
+## processed regardless of elapsed time, and [method _now_usec] is never even
+## called. This is the explicit escape hatch [method wait_for_async_residency_idle]
+## and [method drain_pending_async_reads] use (test/non-per-frame sync points
+## that must fully settle, never partially drain) -- the default parameter
+## values on [method _reap_finished_async_writes] preserve this for every
+## existing bare call site.
+func _drain_budgeted(items: Array, start_usec: int, budget_usec: int, action: Callable) -> void:
+	if budget_usec < 0:
+		for item in items:
+			action.call(item)
+		return
+	var exceeded: bool = false
+	for item in items:
+		if exceeded:
+			break
+		action.call(item)
+		exceeded = (_now_usec() - start_usec) >= budget_usec
+
+
 ## Recomputes the resident working set as camera-near
 ## [member VoxelWorldConfig.view_radius_chunks] UNION active-settlement
 ## [member VoxelWorldConfig.settlement_radius_chunks], around [param
@@ -905,11 +1007,22 @@ func _chunk_height() -> int:
 ## or not yet evicted) and is retried the NEXT time this method is called --
 ## never a synchronous read/regen/flush fallback. This method's own public
 ## contract (signature, desired-set computation) is unchanged from Story
-## vox-010; only the page-in/eviction MECHANISM is now async. The per-frame
-## TIME BUDGET on how much of this to process per call is Story 012's scope
-## (this method itself processes the full desired/stale set every call,
-## bounded only by whatever the WorkerThreadPool cap allows to be dispatched
-## or has already finished).
+## vox-010; only the page-in/eviction MECHANISM is now async.
+##
+## Story vox-012 (this revision, ADR-0015 Decision §1): each of the three
+## phases below -- reaping finished eviction-flush results, requesting
+## page-in for the desired set, requesting eviction for the stale set -- now
+## runs through [method _drain_budgeted], bounded by [member
+## VoxelWorldConfig.evict_budget_ms] (reap and evict-dispatch) / [member
+## VoxelWorldConfig.page_budget_ms] (page-in), re-checked after every single
+## item. Each phase reads its OWN fresh [method _now_usec] start immediately
+## before its own loop -- never a start captured once at the top and shared
+## across phases -- so one phase's duration can never silently eat into
+## another's budget; each of the three call sites gets its full nominal
+## budget independent of how long the others took. A chunk left unprocessed
+## when a phase's budget is exceeded is simply retried the NEXT call, exactly
+## like a concurrency-cap-miss already was (Story vox-011) -- time-based and
+## cap-based deferral compose without special-casing either.
 ##
 ## Both focus cells may lie outside the configured world bounds (e.g. a
 ## camera just past the world's edge) -- each candidate window chunk is
@@ -930,18 +1043,22 @@ func update_residency(camera_focus_cell: Vector3i, settlement_anchor_cell: Vecto
 	_residency_active = true
 	_last_camera_focus_cell = camera_focus_cell
 	_last_settlement_anchor_cell = settlement_anchor_cell
-	_reap_finished_async_writes()
+
+	var reap_start_usec: int = _now_usec()
+	_reap_finished_async_writes(reap_start_usec, _budget_usec(config.evict_budget_ms))
+
 	var desired: Dictionary[Vector2i, bool] = {}
 	_collect_window(desired, _chunk_key(camera_focus_cell), config.view_radius_chunks)
 	_collect_window(desired, _chunk_key(settlement_anchor_cell), config.settlement_radius_chunks)
-	for chunk_key: Vector2i in desired:
-		_request_resident(chunk_key)
+	var page_in_start_usec: int = _now_usec()
+	_drain_budgeted(desired.keys(), page_in_start_usec, _budget_usec(config.page_budget_ms), Callable(self, "_request_resident"))
+
 	var to_evict: Array[Vector2i] = []
 	for chunk_key: Vector2i in _chunks:
 		if not desired.has(chunk_key):
 			to_evict.append(chunk_key)
-	for chunk_key: Vector2i in to_evict:
-		_request_evict(chunk_key)
+	var evict_dispatch_start_usec: int = _now_usec()
+	_drain_budgeted(to_evict, evict_dispatch_start_usec, _budget_usec(config.evict_budget_ms), Callable(self, "_request_evict"))
 
 
 ## True if [param chunk_key] is CURRENTLY resident (has an entry in [member
@@ -1228,23 +1345,46 @@ func _bg_flush_chunk(chunk_key: Vector2i, path: String, slot: int, offset: int, 
 ## Story vox-010's documented load-before-write gap. Called at the top of
 ## every [method update_residency] call, and by [method
 ## wait_for_async_residency_idle].
-func _reap_finished_async_writes() -> void:
+##
+## Story vox-012 (this revision) adds [param start_usec]/[param budget_usec] --
+## the SAME per-item time-budget drain [method update_residency]'s page-in/
+## eviction-dispatch phases use ([method _drain_budgeted]), so a burst of
+## MANY finished flushes settling in the same call cannot collectively exceed
+## [member VoxelWorldConfig.evict_budget_ms] either; any not-yet-reaped
+## finished task simply stays in [member _write_tasks] and is reaped on a
+## later call (harmless -- it is already durable on disk, just not yet
+## bookkept as such). Defaults ([param start_usec] = -1, [param budget_usec] =
+## -1) mean UNBOUNDED, preserving every existing bare `_reap_finished_async_writes()`
+## call site's "drain everything currently finished" behavior verbatim (Story
+## vox-011's [method wait_for_async_residency_idle], a test/non-per-frame
+## sync point that must fully settle).
+func _reap_finished_async_writes(start_usec: int = -1, budget_usec: int = -1) -> void:
 	if _write_tasks.is_empty():
 		return
 	var done: Array[Vector2i] = []
 	for chunk_key: Vector2i in _write_tasks:
 		if WorkerThreadPool.is_task_completed(_write_tasks[chunk_key]):
 			done.append(chunk_key)
-	for chunk_key: Vector2i in done:
-		WorkerThreadPool.wait_for_task_completion(_write_tasks[chunk_key])  # instant join/free; Error return discarded
-		_write_tasks.erase(chunk_key)
-		_task_mutex.lock()
-		var ok: bool = _write_results.get(chunk_key, false)
-		_write_results.erase(chunk_key)
-		_task_mutex.unlock()
-		if not ok:
-			push_error("VoxelWorldGrid._reap_finished_async_writes: background flush failed for chunk %s" % chunk_key)
-		_write_in_flight_data.erase(chunk_key)
+	_drain_budgeted(done, start_usec, budget_usec, Callable(self, "_reap_one_finished_write"))
+
+
+## Per-item body of [method _reap_finished_async_writes] (Story vox-012
+## extraction -- behavior-preserving refactor, not a semantic change; the
+## exact statements [method _reap_finished_async_writes]'s own loop body
+## always ran inline before this story). Joins/frees [param chunk_key]'s
+## already-complete flush task, consumes its success result from the
+## MUTEX-GUARDED [member _write_results], and clears its in-flight-write
+## bookkeeping.
+func _reap_one_finished_write(chunk_key: Vector2i) -> void:
+	WorkerThreadPool.wait_for_task_completion(_write_tasks[chunk_key])  # instant join/free; Error return discarded
+	_write_tasks.erase(chunk_key)
+	_task_mutex.lock()
+	var ok: bool = _write_results.get(chunk_key, false)
+	_write_results.erase(chunk_key)
+	_task_mutex.unlock()
+	if not ok:
+		push_error("VoxelWorldGrid._reap_one_finished_write: background flush failed for chunk %s" % chunk_key)
+	_write_in_flight_data.erase(chunk_key)
 
 
 ## Blocks (BOUNDED) until every currently in-flight async page-in/eviction
