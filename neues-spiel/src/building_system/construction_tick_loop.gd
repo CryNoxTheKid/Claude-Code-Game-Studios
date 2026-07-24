@@ -13,11 +13,16 @@
 ##    is the MOCKED on-site-job boundary this story's own Implementation
 ##    Notes name ("Test with a mocked on-site job... the villager claim/
 ##    path/arrival mechanic is Story 030"). A real caller (Story 030's
-##    claim/report/on-site queue pipeline) will call this SAME method with a
-##    real claiming villager once it lands -- this story treats "claimed"
-##    and "on site" as the same fact (Story 030's own on-site/occupied-cell-
-##    defer refinement layers on top of this seam without changing its
-##    shape).
+##    claim/report/on-site queue pipeline, [ConstructionJobQueue]) calls this
+##    SAME method with a real claiming villager -- this class still treats
+##    "claimed" and "on site" as the same fact for its OWN crediting loop
+##    ([method _on_tick] has no villager-position concept and never will;
+##    the real on-site/off-site distinction, [ConstructionJobQueue.is_on_site],
+##    is wired by a future Villager AI story, not here). Story 030 (this
+##    revision) DOES layer one refinement directly onto this seam without
+##    changing [method claim_job]'s own shape: [method set_occupancy_predicate]
+##    (see point 2b below) and [method release_job] (the symmetric un-claim
+##    [method claim_job] never had a counterpart for).
 ## 2. **Tick-driven progress** (GDD Formula F3, [TR-building-system-079]):
 ##    [method _on_tick] -- this module's SOLE entry point that ever advances
 ##    any job -- credits every ACTIVE job exactly one tick per [signal
@@ -30,6 +35,24 @@
 ##    and no warp read of any kind, so "tick count to complete is unchanged
 ##    by warp" and "at most `max_ticks_per_frame` ticks fire in one frame"
 ##    hold structurally, not via a second implementation of either rule.
+## 2b. **Occupied-cell defer** (Story building-030, GDD Edge Case 6,
+##    [TR-building-system-037]): [method set_occupancy_predicate] wires an
+##    OPTIONAL `Callable(cell: Vector3i) -> bool` seam -- mirrors
+##    [CommitPipeline]'s own established `set_furniture_support_predicate`
+##    pattern exactly (an optional, default-invalid `Callable`, a future real
+##    caller overrides it). Default `Callable()` (invalid) means "never
+##    occupied" -- every pre-030 test/consumer's behavior is completely
+##    unaffected. When wired, [method _on_tick] skips crediting any job whose
+##    cell currently reads occupied THIS tick -- no `progress_ticks`
+##    increment, the job stays exactly as UnderConstruction as it was, and
+##    every OTHER active job in the SAME `_on_tick` dispatch still credits
+##    normally (Edge Case 6: "that cell's progress is skipped... while all
+##    other queued cells process normally" -- deferral is per-cell, never
+##    per-command or global). The actual occupancy READ (a real character
+##    standing on the target cell) is [ConstructionJobQueue]'s/Villager AI's
+##    concern entirely -- this class only consults whatever boolean the
+##    predicate returns, exactly as [CommitPipeline]'s furniture-support seam
+##    never reasons about footprint geometry itself.
 ## 3. **Per-job independence, no rollover** (F3 burst rule, AC25/AC45,
 ##    [TR-building-system-080]): active jobs are tracked one per CELL, keyed
 ##    by that cell's address -- "N villagers complete at most N cells per
@@ -57,11 +80,19 @@
 ##
 ## **Explicitly out of scope** (this story's own Out of Scope section, and
 ## the neighbouring stories that own it):
-## - Story 030: the REAL claim/report/on-site queue pipeline, occupied-cell
-##   defer, and unreachable-job feedback. This class's [method claim_job] is
-##   the seam that story wires into -- it does not itself decide WHICH
-##   villager should claim WHICH cell, does not path anyone anywhere, and
-##   has no "on site" concept distinct from "claimed."
+## - Story 030 (this revision landed the two seams above -- point 2b's
+##   occupancy predicate, [method release_job] -- but NOT the rest): the REAL
+##   claim/report/on-site QUEUE itself (job aggregation across projects, the
+##   Villager AI-facing `has_available_job()`/`release_claim()` contract,
+##   one-job-per-villager bookkeeping, the on-site predicate definition, and
+##   the unreachable-ghost signal/flag) lives in the separate
+##   [ConstructionJobQueue] collaborator, not here. This class still does not
+##   itself decide WHICH villager should claim WHICH cell, does not path
+##   anyone anywhere, and still has no "on site" concept distinct from
+##   "claimed" for its OWN crediting loop -- [ConstructionJobQueue] is the
+##   seam that layers those concerns on top, calling [method claim_job]/
+##   [method release_job]/[method set_occupancy_predicate] exactly as any
+##   other caller would.
 ## - Story 033: batching multiple same-frame completions into one
 ##   [method VoxelWorldGrid.bulk_write] call, the self-write undo-exemption
 ##   tag, and the batched "construction completed" signal to Build
@@ -136,6 +167,14 @@ var _is_set_up: bool = false
 ## See [_ActiveJob] doc comment above.
 var _active_jobs: Dictionary[Vector3i, _ActiveJob] = {}
 
+## Occupied-cell defer seam (Story building-030, class doc comment point 2b)
+## -- `Callable(cell: Vector3i) -> bool`, `true` meaning "occupied this
+## tick." Default `Callable()` (invalid) mirrors [CommitPipeline]'s own
+## `_furniture_support_predicate` default exactly: "never occupied," a
+## complete no-op for every pre-030 caller. Set via [method
+## set_occupancy_predicate].
+var _occupancy_predicate: Callable = Callable()
+
 
 ## Explicitly callable wiring/validation entry point (ADR-0001). Asserts
 ## [member voxel_world] and a [member time_tick_system]-shaped dependency
@@ -188,10 +227,43 @@ func claim_job(blueprint_cell: BlueprintCell, villager_id: int) -> bool:
 	return true
 
 
+## Symmetric un-claim to [method claim_job] (Story building-030, GDD Rule 3 /
+## [TR-building-system-054]'s "a villager finishes or abandons its current
+## job before claiming another" -- the release half of that contract, which
+## [ConstructionTickLoop] never had a counterpart for before this story).
+## Transitions [param cell]'s active job's [member BlueprintCell.state] back
+## to [constant BlueprintCell.MicroState.PLANNED] and erases it from [member
+## _active_jobs] -- any [member _ActiveJob.progress_ticks] already banked is
+## discarded with it (this codebase carries no partial-progress-preservation
+## concept anywhere; an abandoned-then-reclaimed job restarts from zero,
+## mirroring [method claim_job]'s own fresh-[_ActiveJob] construction).
+## Returns `false` (no-op, nothing mutated) if [param cell] has no active
+## job. [ConstructionJobQueue] is this method's real caller (graceful
+## abandon / claim-released-on-abandon, GDD Rule 3/Edge Case 4) -- this class
+## itself never decides WHEN to release, only performs the mechanical
+## un-claim once asked.
+func release_job(cell: Vector3i) -> bool:
+	if not _active_jobs.has(cell):
+		return false
+	var job: _ActiveJob = _active_jobs[cell]
+	job.blueprint_cell.state = BlueprintCell.MicroState.PLANNED
+	_active_jobs.erase(cell)
+	return true
+
+
 ## Whether [param cell] currently has an active (claimed, not yet completed)
 ## construction job.
 func is_job_active(cell: Vector3i) -> bool:
 	return _active_jobs.has(cell)
+
+
+## Wires the occupied-cell defer seam (Story building-030, class doc comment
+## point 2b) -- [ConstructionJobQueue]'s real caller, or a test's mocked
+## occupied-state stand-in, supplies `Callable(cell: Vector3i) -> bool`.
+## Passing an invalid [Callable] (the default, or an explicit `Callable()`)
+## restores the pre-030 "never occupied" behavior.
+func set_occupancy_predicate(predicate: Callable) -> void:
+	_occupancy_predicate = predicate
 
 
 ## Ticks credited so far toward [param cell]'s active job, or `0` if it has
@@ -221,9 +293,15 @@ static func required_ticks_for(category: BlueprintCell.Category, ticks_config: C
 ## currently-active job exactly one tick, completing any that reach their
 ## `required_ticks_for(...)` total. Iterates a SNAPSHOT of [member
 ## _active_jobs]'s keys (never the live [Dictionary] itself) since [method
-## _complete_job] erases entries mid-iteration.
+## _complete_job] erases entries mid-iteration. Story building-030 (class doc
+## comment point 2b): a job whose cell is currently occupied per [member
+## _occupancy_predicate] is skipped entirely THIS dispatch -- no progress
+## increment, no completion check -- while every other active job in the
+## SAME snapshot still credits normally.
 func _on_tick() -> void:
 	for cell: Vector3i in _active_jobs.keys():
+		if _occupancy_predicate.is_valid() and bool(_occupancy_predicate.call(cell)):
+			continue
 		var job: _ActiveJob = _active_jobs[cell]
 		job.progress_ticks += 1
 		if job.progress_ticks >= ConstructionTickLoop.required_ticks_for(job.blueprint_cell.category, config):

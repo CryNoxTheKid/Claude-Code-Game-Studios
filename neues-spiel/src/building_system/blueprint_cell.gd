@@ -36,6 +36,19 @@
 ## relying on this default, mirroring [CommitPipeline]'s own established
 ## placeholder-pending-a-later-story precedent (`_default_cell_set`'s doc
 ## comment).
+##
+## Story building-030 (this revision) adds [member is_unreachable] -- GDD
+## Edge Case 5 / [TR-building-system-087]'s "the ghost switches to a pulsing
+## orange tint" visual state. Deliberately a plain rendering-annotation flag,
+## NOT a fifth [enum MicroState] value: an unreachable cell is still fully
+## [constant MicroState.PLANNED] (still job-eligible, still enumerable by
+## [method BuildProject.get_building_eligible_cells], never auto-canceled,
+## per AC35) -- only its GHOST TINT changes. [ConstructionJobQueue] is the
+## sole owner of this field's writes ([method ConstructionJobQueue.
+## report_unreachable] sets it, a successful [method ConstructionJobQueue.
+## claim_job] clears it) -- no ghost-rendering consumer exists yet in this
+## codebase to read it, mirroring [member category]/[member contents]' own
+## "field lands now, the real consumer wires in a later story" precedent.
 class_name BlueprintCell
 extends RefCounted
 
@@ -76,6 +89,12 @@ var category: Category
 ## Story building-029 addition, PLACEHOLDER pending Story 022's real
 ## material selection (see class doc comment).
 var contents: CellContents
+
+## See class doc comment (Story building-030 addition, GDD Edge Case 5,
+## [TR-building-system-087]). Defaults `false` -- a freshly-created cell is
+## never unreachable until [method ConstructionJobQueue.report_unreachable]
+## says otherwise.
+var is_unreachable: bool = false
 
 
 func _init(

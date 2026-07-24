@@ -42,7 +42,7 @@ stories:
     name: "Construction job queue — claim/report + on-site + occupied-defer + unreachable feedback"
     file: "production/epics/building-system/story-030-construction-job-queue.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete
     owner: "godot-gdscript-specialist"
     estimate_days: 1.0
     blocker: "depends on building-029 (DONE), building-004 (in-sprint)"

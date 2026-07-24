@@ -1,7 +1,7 @@
 # Story 030: Construction job queue — claim/report pipeline + on-site + occupied-cell defer + unreachable feedback
 
 > **Epic**: Building System
-> **Status**: Ready
+> **Status: Complete (2026-07-24 — 731/731 suite green, parent-verified; AC21/AC36b PROVISIONAL until crown villager-ai-012)
 > **Layer**: Core
 > **Type**: Integration
 > **Estimate**: 1 day
