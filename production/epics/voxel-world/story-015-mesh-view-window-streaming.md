@@ -1,7 +1,7 @@
 # Story 015: Mesh view-window streaming with per-frame build + unload budgets
 
 > **Epic**: Voxel World / Grid Data
-> **Status**: Ready
+> **Status: Complete (2026-07-24 — 682/682 suite green, parent-verified — unlocks milestone criterion #12 measurement)
 > **Layer**: Presentation (mesher tier)
 > **Type**: Integration
 > **Estimate**: 1 day

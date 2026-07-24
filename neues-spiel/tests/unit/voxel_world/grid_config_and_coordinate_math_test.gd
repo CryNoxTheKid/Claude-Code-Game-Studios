@@ -195,6 +195,50 @@ func test_voxel_world_config_validate_evict_budget_ms_above_max_clamps_and_warns
 
 
 # ---------------------------------------------------------------------------
+# VoxelWorldConfig — mesh_build_budget_ms/mesh_unload_budget_ms (Story
+# vox-015, ADR-0014 Decision §3 / ADR-0015 Decision §1) defaults + validate()
+# clamp+warn tier
+# ---------------------------------------------------------------------------
+
+func test_voxel_world_config_mesh_stream_budget_defaults_match_spike_validated_4ms() -> void:
+	# Arrange + Act
+	var config := VoxelWorldConfig.new()
+
+	# Assert — reuses the data tier's own spike-validated 4.0 ms as the
+	# initial mesh-tier value, pending Story 016's own tuning pass.
+	assert_float(config.mesh_build_budget_ms).is_equal_approx(4.0, 0.0001)
+	assert_float(config.mesh_unload_budget_ms).is_equal_approx(4.0, 0.0001)
+
+
+func test_voxel_world_config_validate_mesh_build_budget_ms_below_min_clamps_and_warns() -> void:
+	# Arrange
+	var config := VoxelWorldConfig.new()
+	config.mesh_build_budget_ms = -1.0
+
+	# Act
+	var issues: Array[String] = config.validate()
+
+	# Assert
+	assert_int(issues.size()).is_equal(1)
+	assert_bool(ConfigResource.has_blocking_issue(issues)).is_false()
+	assert_float(config.mesh_build_budget_ms).is_equal_approx(VoxelWorldConfig.STREAM_BUDGET_MS_MIN, 0.0001)
+
+
+func test_voxel_world_config_validate_mesh_unload_budget_ms_above_max_clamps_and_warns() -> void:
+	# Arrange
+	var config := VoxelWorldConfig.new()
+	config.mesh_unload_budget_ms = 999999.0
+
+	# Act
+	var issues: Array[String] = config.validate()
+
+	# Assert
+	assert_int(issues.size()).is_equal(1)
+	assert_bool(ConfigResource.has_blocking_issue(issues)).is_false()
+	assert_float(config.mesh_unload_budget_ms).is_equal_approx(VoxelWorldConfig.STREAM_BUDGET_MS_MAX, 0.0001)
+
+
+# ---------------------------------------------------------------------------
 # VoxelWorldConfig.validate() — BLOCKING cross-value invariant (min_y <= max_y)
 # ---------------------------------------------------------------------------
 

@@ -37,6 +37,19 @@
 ## left alone; Story 015 owns chunk-membership decisions, this class only
 ## reacts within whatever membership already exists.
 ##
+## Story vox-015 (this revision, ADR-0014 Decision Section 3 / ADR-0015
+## Decision Section 1; TR-voxel-world-025/026) lands the chunk-membership
+## owner this Scope note names -- [VoxelWorldMeshStreamer] -- and adds the
+## one lifecycle method this class's own construction/mutation surface was
+## still missing for it: [method unload_chunk] (releases an already-tracked
+## chunk's [MeshInstance3D] and its tracking entry, the mirror image of
+## [method build_chunk]'s "creates on first call, reuses after"). Whether/how
+## OFTEN [method unload_chunk] is called, and how many calls are staggered
+## across how many frames, is entirely [VoxelWorldMeshStreamer]'s own
+## per-frame TIME BUDGET decision (Control Manifest Forbidden: "queue_free
+## bursts") -- this class itself applies no staggering of its own, exactly
+## like [method build_chunk] applies none either.
+##
 ## Texturing (deliberately deferred, not this story's scope): no atlas story
 ## exists yet anywhere in `production/epics/voxel-world/` as of this story --
 ## [constant DEBUG_BLOCK_COLORS] stubs a flat per-block-type placeholder
@@ -188,6 +201,48 @@ func get_chunk_mesh_instance(chunk_coord: Vector2i) -> MeshInstance3D:
 ## auto-rebuilding (Scope note).
 func is_chunk_tracked(chunk_coord: Vector2i) -> bool:
 	return _chunk_nodes.has(chunk_coord)
+
+
+## Every chunk coordinate CURRENTLY tracked (class doc comment, Story vox-015)
+## -- snapshotted into a plain array, mirroring [method
+## VoxelWorldGrid.get_resident_chunk_keys]'s identical "current key set"
+## shape. [VoxelWorldMeshStreamer] uses this to compute which tracked chunks
+## have fallen OUTSIDE the current view window and should be [method
+## unload_chunk]'d.
+func get_tracked_chunk_keys() -> Array[Vector2i]:
+	var keys: Array[Vector2i] = []
+	for key: Vector2i in _chunk_nodes:
+		keys.append(key)
+	return keys
+
+
+## Releases an already-tracked chunk's [MeshInstance3D] (Story vox-015, class
+## doc comment) -- the mirror image of [method build_chunk]'s "creates the
+## chunk's [MeshInstance3D] child on first call; subsequent calls reuse it":
+## this method erases [param chunk_coord]'s [member _chunk_nodes] entry FIRST
+## (so a [method is_chunk_tracked] check immediately after this call returns
+## `false`, and a LATER [method build_chunk] call for the same coordinate
+## creates a genuinely fresh node rather than reusing one already queued for
+## deletion), then [method Node.queue_free]s the node itself -- never
+## [method Object.free] directly, matching this engine's standard safe-removal
+## discipline for a node that may still be mid-frame elsewhere in the
+## [SceneTree]. A no-op (no error, nothing to free) if [param chunk_coord] was
+## never tracked in the first place -- the same lenient "erase what may not be
+## there" tolerance [VoxelWorldMeshStreamer]'s own budgeted retry logic relies
+## on (an already-unloaded chunk showing up in a stale worklist is harmless).
+##
+## Calling THIS method for many chunks in a single frame is exactly the
+## "queue_free burst" the Control Manifest forbids (ADR-0014 Context: "the
+## prototype's one 133 ms hitch came from an unload burst") -- staggering
+## across frames is entirely [VoxelWorldMeshStreamer]'s own per-frame time-
+## budget responsibility, never this method's; this method itself performs no
+## staggering or budgeting of any kind.
+func unload_chunk(chunk_coord: Vector2i) -> void:
+	if not _chunk_nodes.has(chunk_coord):
+		return
+	var mesh_instance: MeshInstance3D = _chunk_nodes[chunk_coord]
+	_chunk_nodes.erase(chunk_coord)
+	mesh_instance.queue_free()
 
 
 ## Returns the ONE shared [ShaderMaterial] instance (art-bible SS8.9.1) --

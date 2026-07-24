@@ -164,10 +164,19 @@ const REGION_DIRECTORY_DEFAULT: String = "user://regions"
 @export var region_size_chunks: int = 32
 
 ## Camera-near residency window radius, in chunks (ADR-0015 Decision §1's
-## "camera-near chunks (ADR-0014 view radius)"; spike default 24). Camera &
-## Input's own view-window streaming (Story 015) does not exist in
-## production yet -- this knob is residency's own copy of the same concept
-## until that story lands and the two are reconciled. [TR-voxel-world-053]
+## "camera-near chunks (ADR-0014 view radius)"; spike default 24).
+##
+## Story vox-015 (this revision, ADR-0014 Decision §3): this is the SAME knob
+## [VoxelWorldMeshStreamer] reads for the MESH view window's own radius --
+## the reconciliation this doc comment previously named as pending is now
+## resolved by reuse, not by a second, independent mesh-radius field. The two
+## windows can still observe different chunk MEMBERSHIP at any instant
+## (residency additionally unions in the active-settlement window, [member
+## settlement_radius_chunks], which the mesh tier deliberately does not -- a
+## settlement chunk outside camera view has no mesh to show regardless of
+## Villager AI needing its DATA resident), but both windows are centered on
+## the same camera focus concept at the same radius. [TR-voxel-world-053]
+## [TR-voxel-world-025]
 @export var view_radius_chunks: int = 24
 
 ## Active-settlement residency window radius, in chunks, around an injected
@@ -212,6 +221,30 @@ const REGION_DIRECTORY_DEFAULT: String = "user://regions"
 ## (never a shared/cumulative one with page-in or with each other) -- see
 ## that method's doc comment for why. [TR-voxel-world-053]
 @export var evict_budget_ms: float = 4.0
+
+## Per-frame TIME budget (milliseconds) for MESH BUILD work -- meshing a
+## newly-entered chunk of the camera VIEW WINDOW (Story vox-015, ADR-0014
+## Decision §3's "per-frame build budget" reworked to ADR-0015 Decision §1's
+## time-based discipline, applied here to the MESH tier) -- NOT a fixed
+## chunks-per-frame count (ADR-0015 Decision §1's "never a fixed
+## chunks-per-frame streaming count" rule applies here exactly as it does to
+## [member page_budget_ms]/[member evict_budget_ms]'s own data-tier budgets).
+## Distinct from those two: this bounds a MESH build (an [ArrayMesh] rebuild
+## on the MAIN thread, ~1.1 ms measured per chunk, ADR-0014 Measurements),
+## never disk/regen I/O. Spike-validated 4.0 ms is reused as the initial
+## value pending Story 016's own dedicated mesh-tier tuning pass -- see
+## [VoxelWorldMeshStreamer] for the consuming per-frame streaming step.
+## [TR-voxel-world-025]
+@export var mesh_build_budget_ms: float = 4.0
+
+## Per-frame TIME budget (milliseconds) for MESH UNLOAD work -- staggering
+## [method VoxelWorldMesher.unload_chunk] calls for chunks that left the
+## camera view window (Story vox-015, ADR-0014 Decision §3's "chunks beyond
+## radius+margin are unloaded staggered across frames -- the prototype's one
+## 133 ms hitch came from an unload burst" / Control Manifest Forbidden:
+## "queue_free bursts"). See [member mesh_build_budget_ms]'s doc comment for
+## the shared time-based-not-fixed-count rationale. [TR-voxel-world-025]
+@export var mesh_unload_budget_ms: float = 4.0
 
 
 ## See [ConfigResource.validate]. Clamps every ranged knob to its
@@ -301,6 +334,18 @@ func validate() -> Array[String]:
 			[STREAM_BUDGET_MS_MIN, STREAM_BUDGET_MS_MAX, evict_budget_ms]
 		)
 		evict_budget_ms = clampf(evict_budget_ms, STREAM_BUDGET_MS_MIN, STREAM_BUDGET_MS_MAX)
+	if mesh_build_budget_ms < STREAM_BUDGET_MS_MIN or mesh_build_budget_ms > STREAM_BUDGET_MS_MAX:
+		issues.append(
+			"mesh_build_budget_ms out of range [%s, %s], got %s -- clamped" %
+			[STREAM_BUDGET_MS_MIN, STREAM_BUDGET_MS_MAX, mesh_build_budget_ms]
+		)
+		mesh_build_budget_ms = clampf(mesh_build_budget_ms, STREAM_BUDGET_MS_MIN, STREAM_BUDGET_MS_MAX)
+	if mesh_unload_budget_ms < STREAM_BUDGET_MS_MIN or mesh_unload_budget_ms > STREAM_BUDGET_MS_MAX:
+		issues.append(
+			"mesh_unload_budget_ms out of range [%s, %s], got %s -- clamped" %
+			[STREAM_BUDGET_MS_MIN, STREAM_BUDGET_MS_MAX, mesh_unload_budget_ms]
+		)
+		mesh_unload_budget_ms = clampf(mesh_unload_budget_ms, STREAM_BUDGET_MS_MIN, STREAM_BUDGET_MS_MAX)
 	if min_y > max_y:
 		issues.append(ConfigResource.format_blocking(
 			"min_y (%s) must be <= max_y (%s)" % [min_y, max_y]
