@@ -1,7 +1,7 @@
 # Story 007: Chunked face-culled mesher — CW winding + backface culling ENABLED (TECH DEBT 1)
 
 > **Epic**: Voxel World / Grid Data
-> **Status**: Ready
+> **Status: Complete (2026-07-24 — 335/335 suite green; evidence PNGs parent-inspected: oblique angle clean, culling ON)
 > **Layer**: Presentation (Voxel World mesher tier)
 > **Type**: Visual/Feel
 > **Estimate**: 1.5 days
