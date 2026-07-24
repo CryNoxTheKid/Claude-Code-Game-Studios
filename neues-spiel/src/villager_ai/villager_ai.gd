@@ -26,6 +26,18 @@
 ## guarantee holds structurally rather than by a conditional bypass (the same
 ## structural-guarantee style `CameraInput`'s raw-delta contract already
 ## established for this codebase).
+##
+## Story villager-ai-002 (this revision) adds the two shared walkability
+## predicates ADR-0007 Decision §1 assigns to Villager AI as its public API:
+## [method is_standable] and [method is_step_legal]. Both are pure queries
+## against [member voxel_world]'s cell data plus two registered design
+## constants ([constant VILLAGER_CLEARANCE], [constant MAX_STEP_HEIGHT]) --
+## no mutation, no cached state, no duplicated copy anywhere else (Control
+## Manifest Feature Layer Forbidden: "never duplicate walkability rules or
+## constants"). Every future consumer -- this class's own AStar3D pathfinder
+## (story 007), Build Validation's independent BFS, and the Unstuck
+## Watchdog's rescue-target search (story 014) -- calls these same two
+## functions; none of them may re-derive an equivalent rule locally.
 class_name VillagerAi
 extends Node
 
@@ -42,6 +54,22 @@ enum State {
 	BREATHER,
 	WANDERING,
 }
+
+## Vertical clearance a standable cell requires: the cell itself plus the
+## two cells directly above it must all be empty (GDD Rule 8/8a,
+## [TR-villager-ai-behavior-009]/[TR-villager-ai-behavior-098]'s body-column
+## definition -- the 2-cell body plus one buffer cell of headroom). A
+## registered design constant (`design/registry/entities.yaml`'s
+## `villager_clearance` = 3), not a tunable knob -- same locked-constant
+## rationale as [VoxelWorldGrid.CHUNK_SIZE]; deliberately absent from
+## [VillagerAIConfig] (ADR-0007: "no duplicated constants, anywhere").
+const VILLAGER_CLEARANCE: int = 3
+
+## Maximum legal height difference between two adjacent standable cells
+## (GDD Rule 9, [TR-villager-ai-behavior-010]). A registered design constant
+## (`design/registry/entities.yaml`'s `max_step_height` = 1), not a tunable
+## knob -- same locked-constant rationale as [constant VILLAGER_CLEARANCE].
+const MAX_STEP_HEIGHT: int = 1
 
 ## Tuning config dependency (ADR-0002). Wired via a scene file's Inspector in
 ## production, or assigned directly in a headless test. Never read inside
@@ -115,6 +143,81 @@ func is_set_up() -> bool:
 ## Returns the current agent state (read-only observability/test seam).
 func get_state() -> State:
 	return _state
+
+
+## Standability predicate (ADR-0007 Decision §1, GDD Rule 8/[TR-villager-ai-
+## behavior-009]): [param cell] is standable iff the cell directly below it
+## is solid (occupied -- terrain or a Built block) AND [param cell] itself
+## plus the [constant VILLAGER_CLEARANCE] - 1 cells directly above it are all
+## empty (GDD Rule 8a's body-column: the 2-cell body plus one buffer cell of
+## headroom).
+##
+## An unbuilt Planned blueprint cell is never written to [member voxel_world]
+## (Control Manifest Core Layer: "Built cells mutate ONLY via worker-executed
+## jobs") -- it reads back empty via [method VoxelWorldGrid.get_cell], so it
+## is non-solid/passable here BY CONSTRUCTION, matching Building System Core
+## Rule 14b / GDD AC17 with no special-case branch needed.
+##
+## Pure query: reads only [member voxel_world]'s cell data, never mutates
+## anything, caches nothing of its own (Control Manifest Feature Layer
+## Guardrail: "predicates are pure queries... no mutation, no caching state
+## of their own"). A cell outside the configured world bounds reads back
+## `null` from [method VoxelWorldGrid.get_cell] and is treated as blocking by
+## both helpers below -- the world simply does not extend there, so it can
+## neither support a foot (never solid-below) nor offer clearance (never
+## passable).
+func is_standable(cell: Vector3i) -> bool:
+	assert(voxel_world != null, "VillagerAi.voxel_world not wired")
+	if not _is_solid(cell + Vector3i(0, -1, 0)):
+		return false
+	for offset in range(VILLAGER_CLEARANCE):
+		if not _is_passable(cell + Vector3i(0, offset, 0)):
+			return false
+	return true
+
+
+## Step-legality predicate (ADR-0007 Decision §1, GDD Rule 9/[TR-villager-ai-
+## behavior-010]): a step from [param from_cell] to [param to_cell] is legal
+## iff the vertical height difference is at most [constant MAX_STEP_HEIGHT],
+## AND -- only when the step is diagonal (both the X and Z coordinates
+## differ; a purely orthogonal step never runs this second check at all) --
+## both flanking orthogonal cells (the cell at `(to_cell.x, from_cell.y,
+## from_cell.z)` and the cell at `(from_cell.x, from_cell.y, to_cell.z)`) are
+## themselves standable ([method is_standable]) -- no corner-cutting through
+## walls.
+##
+## Assumes [param from_cell] and [param to_cell] are themselves standable --
+## the caller (the AStar3D graph builder, story 007) only ever connects
+## standable-cell pairs via this predicate, so re-verifying that here would
+## duplicate [method is_standable]'s own job. Pure query, no mutation, no
+## cached state (same guardrail as [method is_standable]).
+func is_step_legal(from_cell: Vector3i, to_cell: Vector3i) -> bool:
+	if absi(to_cell.y - from_cell.y) > MAX_STEP_HEIGHT:
+		return false
+	var dx: int = to_cell.x - from_cell.x
+	var dz: int = to_cell.z - from_cell.z
+	if dx != 0 and dz != 0:
+		var flanker_a := Vector3i(to_cell.x, from_cell.y, from_cell.z)
+		var flanker_b := Vector3i(from_cell.x, from_cell.y, to_cell.z)
+		if not is_standable(flanker_a) or not is_standable(flanker_b):
+			return false
+	return true
+
+
+## Solidity read for [method is_standable]'s "solid below" check -- an
+## out-of-bounds cell ([method VoxelWorldGrid.get_cell] returns `null`) is
+## never solid (there is nothing to stand ON there).
+func _is_solid(cell: Vector3i) -> bool:
+	var contents: CellContents = voxel_world.get_cell(cell)
+	return contents != null and not contents.is_empty()
+
+
+## Passability read for [method is_standable]'s clearance-column check -- an
+## out-of-bounds cell is never passable (the world doesn't extend there, so
+## clearance can't be confirmed).
+func _is_passable(cell: Vector3i) -> bool:
+	var contents: CellContents = voxel_world.get_cell(cell)
+	return contents != null and contents.is_empty()
 
 
 ## [signal TimeTickSystem.tick] handler -- the sole entry point that ever

@@ -1,7 +1,7 @@
 # Story 002: Walkability predicates (is_standable / is_step_legal)
 
 > **Epic**: Villager AI & Behavior
-> **Status**: Ready
+> **Status: Complete (2026-07-24 — 388/388 suite green, parent-verified)
 > **Layer**: Core
 > **Type**: Logic
 > **Estimate**: ~1 agent-day
