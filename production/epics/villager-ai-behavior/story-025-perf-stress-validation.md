@@ -1,12 +1,12 @@
 # Story 025: Performance stress validation (30-villager)
 
 > **Epic**: Villager AI & Behavior
-> **Status**: Ready
+> **Status: Complete (2026-07-24 — 843/843 blocking suite green + 5/5 advisory perf suite, parent-verified; worst per-tick 3.02ms @30 villagers)
 > **Layer**: Core
 > **Type**: Integration
 > **Estimate**: ~1 agent-day
 > **Manifest Version**: 2026-07-23
-> **Last Updated**: —
+> **Last Updated**: 2026-07-24
 
 ## Context
 

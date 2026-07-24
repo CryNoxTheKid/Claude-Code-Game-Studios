@@ -123,7 +123,7 @@ stories:
     name: "Perf stress validation (30-villager) — produces the production-load measurement the #4 re-tune needs (Advisory)"
     file: "production/epics/villager-ai-behavior/story-025-perf-stress-validation.md"
     priority: nice-to-have
-    status: backlog
+    status: complete
     owner: "ai-programmer"
     estimate_days: 1.0
     blocker: "depends on villager-ai-005, villager-ai-009 (DONE), villager-ai-012 (in-sprint)"

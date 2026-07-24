@@ -284,3 +284,21 @@ tails of BOTH the building and AI chains and is sequenced last of all.
 - **Next step:** run `/qa-plan sprint` to define test cases per story (especially the crown's
   claim→build→report cycle-stage assertions and building-030's on-site/occupied-defer/unreachable pass
   conditions) before `/dev-story`.
+
+
+---
+
+## Sprint Result — CLOSED 2026-07-24
+
+**12/12 stories complete** (6 Must, 3 Should, 3 Nice; presentation-001 = Sub-A with CD sign-off APPROVED WITH ADVISORIES, Sub-B formally open awaiting villager-ai-019). Suite grew 682 -> 843 blocking + 5 advisory perf tests, green with 0 orphans on every story commit.
+
+Highlights:
+- **THE CROWN (villager-ai-012) landed: the closed job loop** — release -> queue -> F2 select -> claim -> travel -> on-site work -> construction ticks -> real voxel write -> report -> re-decide, all real components; assembled E2E converted to the worker-driven path (manual claim_job removed, grep-guarded). Milestone M01 criterion #2 MET.
+- Building chain: BuildProject entity + release + job queue + worker attribution + registry (union-find grouping/merge, reverse index).
+- Undo/redo core: plan-only (grep-guarded), bounded, transition-aware; write-seam batching with self-write tag (undo never invalidates own construction writes).
+- Ambient life wave 1 Sub-A: smoke/sway/clutter/flicker per Art Bible, CD-approved with 7 advisories for later waves.
+- Perf stress basis for the re-tune decision: worst per-tick 3.02ms @30 villagers (5.5x under budget); FINDING: Rule 2 periodic recheck keeps the deciding queue chronically full (bounded, never quiescent) — key re-tune input.
+
+Process incidents: one gate near-miss — presentation-001's agent reported exit 0 but the suite exited 101 (5 test orphans from unparented GPUParticles3D under headless); caught by parent verification, root-caused, fixed same-day. Engine facts recorded: RefCounted/Object not @export-able; tests/performance/ correctly outside the blocking gate (README doc gap flagged).
+
+Open for Sprint 8: re-tune value decision (designer numbers; measurement basis now exists), criterion #12 measurement story (file must be created), Sub-B via villager-ai-019, building-006/007/008/009 lifecycle breadth, golden-hour ambient re-shoot at Valley integration (CD advisory #2).
