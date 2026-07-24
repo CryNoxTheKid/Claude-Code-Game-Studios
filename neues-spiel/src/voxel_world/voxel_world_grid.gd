@@ -35,6 +35,12 @@
 ## Uninitialized->Generated lifecycle transition (TR-voxel-world-029). Meshing
 ## the generated terrain (Story 007/015) and removing it via dig orders
 ## (Story 009) remain out of this class's scope.
+##
+## Story vox-005 (this revision) adds [method iterate_occupied] -- the
+## occupied-cells iteration API (ADR-0014 primary / ADR-0012 secondary;
+## TR-voxel-world-021/048/033) the future Save/Load orchestrator (VS-tier)
+## will consume; torn-read-free by construction (a plain synchronous scan,
+## no locks) rather than via any locking mechanism.
 class_name VoxelWorldGrid
 extends Node
 
@@ -466,6 +472,68 @@ func get_cell(cell: Vector3i) -> CellContents:
 	var buffer: _ChunkBuffer = _chunks[key]
 	var offset: int = _local_offset(cell, key)
 	return CellContents.new(buffer.block_type_ids[offset], buffer.material_ids[offset])
+
+
+## Occupied-cell iteration API (Story vox-005, ADR-0014 primary / ADR-0012
+## secondary; TR-voxel-world-021/048/033) -- the sole interface the future
+## Save/Load orchestrator (VS-tier) needs to serialize this grid's cell data;
+## it never needs to know this class stores cells as chunked packed-byte
+## buffers ([_ChunkBuffer]) to use this method (GDD "Save/Load & World
+## Persistence" Interactions row).
+##
+## Walks [member _chunks] chunk-by-chunk (only chunks touched by at least one
+## write are ever visited -- an untouched chunk contributes nothing and is
+## never allocated just to iterate it, the same read-purity discipline as
+## [method get_cell]), and within each touched chunk walks every local cell in
+## a fixed, deterministic `(y, z, x)` order matching [method _local_offset]'s
+## own indexing scheme. Any cell whose [member CellContents.block_type_id]
+## equals [constant CellContents.EMPTY_BLOCK_TYPE_ID] is skipped -- ONLY
+## non-empty (occupied) cells are ever wrapped into a returned
+## [CellOccupantRecord] (TR-voxel-world-021, AC15). A cell within a touched
+## chunk whose column happens to fall outside the configured world bounds
+## (possible only if `world_width_cells`/`world_depth_cells` isn't an exact
+## multiple of [constant CHUNK_SIZE]) is never itself a false positive here --
+## [method _apply_write] never writes an out-of-bounds offset in the first
+## place, so it stays zero-filled ("empty") and is skipped by the same check.
+##
+## Torn-read-free by construction, not by any lock (Implementation Notes: "Do
+## not add locks; assert the serialization invariant in a test"): this method
+## is a single, plain synchronous loop with no `await` and no
+## `Thread`/`WorkerThreadPool` call anywhere in its body -- nothing here ever
+## yields control back to the caller mid-scan, so no write can interleave
+## between two cells of the SAME call (there is no "iteration step" the
+## engine could pause on). Every write this grid ever applies ([method
+## _apply_write]) is itself a single uninterrupted synchronous call that
+## updates BOTH packed-byte buffers before its change signal fires (Story
+## 002/003's already-established contract) -- so even a write triggered
+## reentrantly from within a signal handler that itself calls this method
+## observes only a fully-committed record, never a partial one
+## (TR-voxel-world-048, AC14; TR-voxel-world-033's "Mutating state is brief,
+## no concurrent writes" is exactly why no lock is needed here). Never
+## mutates [member _chunks] -- safe to call at any time, the same read-purity
+## guarantee as [method get_cell]/[method raycast_cells].
+##
+## Returns an empty array for an all-empty grid (edge case, QA plan AC-2).
+func iterate_occupied() -> Array[CellOccupantRecord]:
+	assert(config != null, "VoxelWorldGrid.config not wired")
+	var occupied: Array[CellOccupantRecord] = []
+	var height: int = _chunk_height()
+	for key: Vector2i in _chunks:
+		var buffer: _ChunkBuffer = _chunks[key]
+		for local_y in height:
+			for local_z in CHUNK_SIZE:
+				for local_x in CHUNK_SIZE:
+					var offset: int = (local_y * CHUNK_SIZE + local_z) * CHUNK_SIZE + local_x
+					var block_type_id: int = buffer.block_type_ids[offset]
+					if block_type_id == CellContents.EMPTY_BLOCK_TYPE_ID:
+						continue
+					var cell := Vector3i(
+						key.x * CHUNK_SIZE + local_x,
+						config.min_y + local_y,
+						key.y * CHUNK_SIZE + local_z
+					)
+					occupied.append(CellOccupantRecord.new(cell, CellContents.new(block_type_id, buffer.material_ids[offset])))
+	return occupied
 
 
 ## Chunked low-level write API (Core Rule 5, TR-voxel-world-007): overwrites

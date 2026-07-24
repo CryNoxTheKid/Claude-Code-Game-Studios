@@ -1,7 +1,7 @@
 # Story 005: iterate_occupied API — occupied-cells iteration, torn-read-free
 
 > **Epic**: Voxel World / Grid Data
-> **Status**: Ready
+> **Status: Complete (2026-07-24 — 343/343 suite green, parent-verified)
 > **Layer**: Foundation
 > **Type**: Integration
 > **Estimate**: 0.5–1 day
