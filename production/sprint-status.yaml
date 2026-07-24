@@ -9,97 +9,205 @@
 #   done           ↔  Complete
 #   blocked        ↔  Blocked
 #
-# Active sprint: 4. Sprint 1, 2 & 3 history retained below the Sprint 4 block.
+# Active sprint: 5. Sprint 1, 2, 3 & 4 history retained below the Sprint 5 block.
 
-sprint: 4
-goal: "Retire the critical path: land the chunked mesher CW-winding + culling rewrite (vox-007, THE critical story) on terrain (vox-006) so the voxel world renders for the first time; complete the camera motion set (cam-004 zoom, cam-005 pan) for the windowed feel check; deliver the Save/Load iteration primitive (vox-005); open the first real Core logic story, the shared walkability predicates (villager-ai-002); and capacity-permitting close camera Active/Suspended (cam-006, cam-007) to unblock Building System for Sprint 5."
+sprint: 5
+goal: "Open the two hardest Core epics on now-DONE Foundation and stand up the ADR-0015 residency tier: land the Building System opener (building-019 tool SM on the DONE cam-007 Suspended state, then building-020 DDA placement pick); stand up paged region-file residency (vox-010) + async I/O (vox-011), the ADR-0015 cluster the spike de-risked; advance Villager AI with body-column occupancy (villager-ai-003); and capacity-permitting extend each chain (vox-012 time-budget, villager-ai-004 deterministic position) and close the CD-protected loop-payoff scaffolding half (presentation-002)."
 start: "2026-07-24"
 end: ""
 generated: "2026-07-24"
 updated: "2026-07-24"
 
 stories:
-  - id: "vox-006"
-    name: "Procedural terrain generation + single batched gen signal"
-    file: "production/epics/voxel-world/story-006-procedural-terrain-generation.md"
-    priority: must-have
-    status: complete-for-dev
-    owner: "godot-gdscript-specialist"
-    estimate_days: 1
-    blocker: ""
-    completed: ""
-  - id: "vox-007"
-    name: "Chunked mesher — CW winding + backface culling ENABLED (TECH DEBT 1) — THE critical story"
-    file: "production/epics/voxel-world/story-007-chunked-mesher-cw-winding-culling.md"
+  - id: "vox-010"
+    name: "Region-file paged residency — opens the ADR-0015 cluster"
+    file: "production/epics/voxel-world/story-010-region-file-paged-residency.md"
     priority: must-have
     status: ready-for-dev
     owner: "godot-gdscript-specialist"
     estimate_days: 1.5
     blocker: ""
     completed: ""
-  - id: "vox-005"
-    name: "iterate_occupied API — occupied-cells iteration, torn-read-free"
-    file: "production/epics/voxel-world/story-005-iterate-occupied.md"
+  - id: "vox-011"
+    name: "Async region I/O — WorkerThreadPool off-main-thread load/save"
+    file: "production/epics/voxel-world/story-011-async-region-io-workerpool.md"
     priority: must-have
     status: ready-for-dev
     owner: "godot-gdscript-specialist"
-    estimate_days: 1
-    blocker: ""
+    estimate_days: 1.5
+    blocker: "depends on vox-010 (in-sprint)"
     completed: ""
-  - id: "cam-004"
-    name: "Zoom — multiplicative, clamped, rapid-event safe"
-    file: "production/epics/camera-input/story-004-multiplicative-zoom.md"
+  - id: "building-019"
+    name: "Tool state machine — THE Building System opener"
+    file: "production/epics/building-system/story-019-tool-state-machine.md"
     priority: must-have
     status: ready-for-dev
     owner: "godot-specialist"
     estimate_days: 1
     blocker: ""
     completed: ""
-  - id: "cam-005"
-    name: "WASD pan — yaw-relative, distance-scaled, bound + delta clamp"
-    file: "production/epics/camera-input/story-005-wasd-pan.md"
+  - id: "building-020"
+    name: "DDA placement pick — screen ray → voxel cell"
+    file: "production/epics/building-system/story-020-dda-placement-pick.md"
     priority: must-have
     status: ready-for-dev
     owner: "godot-specialist"
     estimate_days: 1
-    blocker: ""
+    blocker: "depends on building-019 (in-sprint)"
     completed: ""
-  - id: "villager-ai-002"
-    name: "Walkability predicates (is_standable / is_step_legal) — shared pure functions — first real Core logic"
-    file: "production/epics/villager-ai-behavior/story-002-walkability-predicates.md"
+  - id: "villager-ai-003"
+    name: "Body-column occupancy / clearance — first Villager spatial-logic story"
+    file: "production/epics/villager-ai-behavior/story-003-body-column-clearance.md"
     priority: must-have
     status: ready-for-dev
     owner: "ai-programmer"
     estimate_days: 1
     blocker: ""
     completed: ""
-  - id: "cam-006"
-    name: "Mouse world-ray API + ground-plane intersection (always computable)"
-    file: "production/epics/camera-input/story-006-mouse-world-ray-api.md"
+  - id: "vox-012"
+    name: "Time-based streaming budget — per-frame page-in cap"
+    file: "production/epics/voxel-world/story-012-time-based-streaming-budget.md"
+    priority: should-have
+    status: backlog
+    owner: "godot-gdscript-specialist"
+    estimate_days: 1
+    blocker: "depends on vox-010, vox-011 (in-sprint)"
+    completed: ""
+  - id: "villager-ai-004"
+    name: "Deterministic position model"
+    file: "production/epics/villager-ai-behavior/story-004-deterministic-position-model.md"
+    priority: should-have
+    status: backlog
+    owner: "ai-programmer"
+    estimate_days: 1
+    blocker: "depends on villager-ai-003 (in-sprint)"
+    completed: ""
+  - id: "presentation-002"
+    name: "Loop-payoff communication scaffolding (CD-protected — closes exit criterion #10 scaffolding half)"
+    file: "production/epics/presentation-experience/story-002-loop-payoff-communication-scaffolding.md"
     priority: should-have
     status: backlog
     owner: "godot-specialist"
     estimate_days: 1
-    blocker: ""
+    blocker: "CD-protected — cut only with CD sign-off"
     completed: ""
-  - id: "cam-007"
-    name: "Active/Suspended state machine — scene-transition suspend, exact-state restore"
-    file: "production/epics/camera-input/story-007-active-suspended-state.md"
-    priority: should-have
+  - id: "building-021"
+    name: "Commit pipeline — placement → committed cells (parallel-lane fill)"
+    file: "production/epics/building-system/story-021-commit-pipeline.md"
+    priority: nice-to-have
     status: backlog
     owner: "godot-specialist"
     estimate_days: 1
-    blocker: "depends on cam-004, cam-005, cam-006 (in-sprint)"
+    blocker: "pull only if building lane clears 019+020; depends on building-020, building-019 (in-sprint)"
     completed: ""
-  - id: "vox-008"
-    name: "Floor/terrain replace write path (parallel-lane fill)"
-    file: "production/epics/voxel-world/story-008-floor-terrain-replace-write-path.md"
+  - id: "vox-015"
+    name: "Mesh view-window streaming — unlocks #12 60-FPS-with-culling measurement (parallel-lane fill)"
+    file: "production/epics/voxel-world/story-015-mesh-view-window-streaming.md"
     priority: nice-to-have
     status: backlog
     owner: "godot-gdscript-specialist"
     estimate_days: 1
-    blocker: "pull only if the gdscript voxel lane clears early; depends on vox-006 (in-sprint)"
+    blocker: "pull only if residency chain 010→011→012 fully clears; depends on vox-007 (DONE), vox-010, vox-012 (in-sprint)"
     completed: ""
+  - id: "tick-006"
+    name: "Cross-system integration guarantees (parallel-lane fill)"
+    file: "production/epics/time-tick-system/story-006-cross-system-integration-guarantees.md"
+    priority: nice-to-have
+    status: backlog
+    owner: "godot-gdscript-specialist"
+    estimate_days: 0.5
+    blocker: "small filler; pull if gdscript lane clears; depends on tick-003, tick-004 (DONE)"
+    completed: ""
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SPRINT 4 HISTORY (retained; all 8/8 Complete, suite 311→421 green; the voxel world RENDERS —
+# vox-007 chunked mesher landed CW-winding + backface-culling ENABLED with parent-inspected
+# screenshot evidence, mesher tech-debt #1 retired / exit criterion #3 MET pending formal signoff;
+# Camera epic COMPLETE through cam-007 Active/Suspended — building-019's Suspended-state dep now DONE;
+# first real Core logic story landed, walkability predicates villager-ai-002; zero unplanned rework,
+# zero carryover. vox-008 Nice-to-have not pulled.)
+# ─────────────────────────────────────────────────────────────────────────────
+sprint_4_history:
+  sprint: 4
+  goal: "Retire the critical path: land the chunked mesher CW-winding + culling rewrite (vox-007, THE critical story) on terrain (vox-006) so the voxel world renders for the first time; complete the camera motion set (cam-004 zoom, cam-005 pan) for the windowed feel check; deliver the Save/Load iteration primitive (vox-005); open the first real Core logic story, the shared walkability predicates (villager-ai-002); and capacity-permitting close camera Active/Suspended (cam-006, cam-007) to unblock Building System for Sprint 5."
+  start: "2026-07-24"
+  end: "2026-07-24"
+  generated: "2026-07-24"
+  updated: "2026-07-24"
+  result: "8/8 Complete; suite 311→421 green (+110 tests); the voxel world RENDERS (vox-007 chunked mesher, CW-winding + backface-culling ENABLED, parent-inspected screenshot evidence — mesher tech-debt #1 retired, exit criterion #3 MET pending formal signoff); Camera epic COMPLETE through cam-007 (Active/Suspended — building-019's Suspended-state dep now DONE as planned); first real Core logic story landed (villager-ai-002 walkability predicates); windowed feel check demonstrated (orbit/zoom/pan around rendered terrain); zero unplanned rework, zero carryover. vox-008 (Nice-to-have) not pulled."
+  stories:
+    - id: "vox-006"
+      name: "Procedural terrain generation + single batched gen signal"
+      file: "production/epics/voxel-world/story-006-procedural-terrain-generation.md"
+      priority: must-have
+      status: complete
+      owner: "godot-gdscript-specialist"
+      estimate_days: 1
+      blocker: ""
+      completed: "2026-07-24"
+    - id: "vox-007"
+      name: "Chunked mesher — CW winding + backface culling ENABLED (TECH DEBT 1) — THE critical story"
+      file: "production/epics/voxel-world/story-007-chunked-mesher-cw-winding-culling.md"
+      priority: must-have
+      status: complete
+      owner: "godot-gdscript-specialist"
+      estimate_days: 1.5
+      blocker: ""
+      completed: "2026-07-24"
+    - id: "vox-005"
+      name: "iterate_occupied API — occupied-cells iteration, torn-read-free"
+      file: "production/epics/voxel-world/story-005-iterate-occupied.md"
+      priority: must-have
+      status: complete
+      owner: "godot-gdscript-specialist"
+      estimate_days: 1
+      blocker: ""
+      completed: "2026-07-24"
+    - id: "cam-004"
+      name: "Zoom — multiplicative, clamped, rapid-event safe"
+      file: "production/epics/camera-input/story-004-multiplicative-zoom.md"
+      priority: must-have
+      status: complete
+      owner: "godot-specialist"
+      estimate_days: 1
+      blocker: ""
+      completed: "2026-07-24"
+    - id: "cam-005"
+      name: "WASD pan — yaw-relative, distance-scaled, bound + delta clamp"
+      file: "production/epics/camera-input/story-005-wasd-pan.md"
+      priority: must-have
+      status: complete
+      owner: "godot-specialist"
+      estimate_days: 1
+      blocker: ""
+      completed: "2026-07-24"
+    - id: "villager-ai-002"
+      name: "Walkability predicates (is_standable / is_step_legal) — shared pure functions — first real Core logic"
+      file: "production/epics/villager-ai-behavior/story-002-walkability-predicates.md"
+      priority: must-have
+      status: complete
+      owner: "ai-programmer"
+      estimate_days: 1
+      blocker: ""
+      completed: "2026-07-24"
+    - id: "cam-006"
+      name: "Mouse world-ray API + ground-plane intersection (always computable)"
+      file: "production/epics/camera-input/story-006-mouse-world-ray-api.md"
+      priority: should-have
+      status: complete
+      owner: "godot-specialist"
+      estimate_days: 1
+      blocker: ""
+      completed: "2026-07-24"
+    - id: "cam-007"
+      name: "Active/Suspended state machine — scene-transition suspend, exact-state restore"
+      file: "production/epics/camera-input/story-007-active-suspended-state.md"
+      priority: should-have
+      status: complete
+      owner: "godot-specialist"
+      estimate_days: 1
+      blocker: ""
+      completed: "2026-07-24"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SPRINT 3 HISTORY (retained; all 9/9 Complete, suite 198→311 green; Scene/World Mgmt epic
