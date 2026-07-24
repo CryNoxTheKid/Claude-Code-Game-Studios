@@ -1,7 +1,7 @@
 # Story 014: Load-before-write for far-world (non-resident) mutations
 
 > **Epic**: Voxel World / Grid Data
-> **Status**: Ready
+> **Status: Complete (2026-07-24 — 662/662 suite green, parent-verified — closes the last ADR-0015 invariant with vox-013)
 > **Layer**: Presentation (world-storage residency tier)
 > **Type**: Integration
 > **Estimate**: 1 day

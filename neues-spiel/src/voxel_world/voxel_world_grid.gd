@@ -130,6 +130,59 @@
 ## already-evicting chunk while its flush is still in flight remains Story
 ## 014's explicit scope (that story's own load-before-write rule, which this
 ## in-flight cache composes with rather than duplicates).
+##
+## Story vox-014 (this revision, ADR-0015 Decision §3) closes the WRITE-side
+## gap [method _apply_write]'s own (now-superseded) doc comment used to name:
+## a write targeting a cell in a chunk that is NOT currently resident (while
+## [member _residency_active]) no longer lazily allocates a fresh, blank
+## chunk over whatever may already be persisted for it -- it instead requests
+## page-in ([method _request_resident], reusing the EXACT same dispatch/
+## in-flight-cache/regen machinery Story vox-011/013 already built for reads)
+## and, if the chunk cannot be made resident within that same call (dispatch
+## pending, or cap-missed), QUEUES the write ([member _pending_writes],
+## [method _queue_pending_write]) rather than applying it -- so [method
+## set_cell]/[method bulk_write] return `null`/omit that cell for this call,
+## exactly like today's existing out-of-bounds no-op contract, but for a
+## different reason (deferred, not discarded). The instant the chunk actually
+## becomes resident -- via [method _try_serve_from_in_flight_write] or
+## [method _try_integrate_read], from ANY call path that reaches them
+## ([method _request_resident], [method wait_for_async_residency_idle]'s own
+## direct drain, [method drain_pending_async_reads]) -- [method
+## _apply_pending_writes] applies every cell queued for that chunk directly
+## onto the just-loaded resident copy (disk-persisted OR seed-regenerated,
+## Decision §5 -- the SAME [method _request_resident] a write triggers never
+## distinguishes "loading for a read" from "loading for a write"), marks the
+## chunk dirty, and emits [signal cells_changed_batch] for the applied records
+## -- normal staggered eviction ([method _request_evict]) then flushes it
+## exactly like any other dirty chunk, no special-cased "far write" flush
+## path. [method update_residency] additionally drives forward progress for a
+## chunk that has pending writes but sits OUTSIDE the current camera/
+## settlement window (where nothing else would ever re-visit it): a small
+## budgeted retry phase re-requests residency for every [member
+## _pending_writes] key each call, so a far write settles as soon as its
+## page-in's dispatch/cap-miss constraints allow, even though the chunk was
+## never part of the desired residency set. This is the story's own "the rule
+## lives in ONE place" requirement (TR-voxel-world-051 AC-3): [method
+## _apply_write] is the SOLE per-cell write core [method set_cell]/[method
+## clear_cell]/[method bulk_write] all fall through to (unchanged by this
+## story), so a future caller (Story 009's dig-order removal, Building
+## System's own writes) inherits load-before-write automatically the moment
+## it calls either of those two public methods -- there is no separate
+## dig-order-specific or building-specific residency check anywhere in this
+## file. Known, accepted consequence: a caller that both engages residency
+## AND writes to a chunk far outside the desired window sees [method
+## set_cell] return `null`/[method bulk_write] omit that cell's record THIS
+## call (the write is accepted and will land, just not synchronously) --
+## matching ADR-0015 Decision §3's own text ("a page-in on the write path is
+## acceptable... asynchronous, never blocking the frame"). [method bulk_write]
+## can, as a result, emit its [signal cells_changed_batch] for a batch's
+## immediately-resident cells and a SECOND, separate
+## [signal cells_changed_batch] later for any cells that were deferred to a
+## different (non-resident) chunk -- a deliberate, documented relaxation of
+## this class's pre-014 "at most one batch signal per bulk_write call"
+## framing, scoped ONLY to the far-write case residency introduces; a
+## residency-inactive grid (opt-in, unchanged) or a bulk write entirely within
+## resident chunks still emits exactly one signal, exactly as before.
 class_name VoxelWorldGrid
 extends Node
 
@@ -182,6 +235,20 @@ class _ChunkBuffer:
 		# the lazy-allocation contract (CellContents.EMPTY_BLOCK_TYPE_ID ==
 		# 0), no explicit fill pass needed (matches the reference's own
 		# "zero-filled = air" comment).
+
+
+## One queued far-world write (Story vox-014, ADR-0015 Decision §3) -- see
+## [member _pending_writes]. A plain value holder, not a [Resource]/
+## [RefCounted]-with-getters like [CellChangeRecord] -- this is purely
+## internal bookkeeping, never returned or exposed to any caller outside this
+## file.
+class _PendingWrite:
+	var cell: Vector3i
+	var contents: CellContents
+
+	func _init(p_cell: Vector3i, p_contents: CellContents) -> void:
+		cell = p_cell
+		contents = p_contents
 
 
 ## Fires exactly once per single [method set_cell]/[method clear_cell] call
@@ -289,6 +356,25 @@ var _write_results: Dictionary[Vector2i, bool] = {}
 ## chunk re-needed before its own flush lands is served from here directly,
 ## never racing a region-file read against the still-in-flight write.
 var _write_in_flight_data: Dictionary[Vector2i, PackedByteArray] = {}
+
+## Per-chunk QUEUE of not-yet-applied far-world writes (Story vox-014,
+## ADR-0015 Decision §3), keyed by chunk coordinate -- populated by [method
+## _queue_pending_write] when [method _apply_write] targets a chunk that is
+## NOT currently resident and could not be made resident within the same
+## call ([method _request_resident] dispatched or cap-missed, rather than
+## resolving immediately). Each value is a plain `Array` of `_PendingWrite`
+## entries, in the exact order [method _apply_write] queued them -- so two
+## far writes to the same non-resident chunk coalesce onto the ONE in-flight
+## page-in [method _request_resident] already dispatches (never a second
+## dispatch) and apply in their original call order once that page-in lands.
+## Drained -- and the queued cells actually applied onto the just-loaded
+## resident copy -- by [method _apply_pending_writes], called the instant a
+## chunk transitions to resident via [method _try_serve_from_in_flight_write]
+## or [method _try_integrate_read]; a chunk_key present here is by
+## construction never simultaneously a key in [member _chunks] (queuing only
+## ever happens while the chunk is absent from [member _chunks], and the key
+## is erased from here in the SAME call that adds it to [member _chunks]).
+var _pending_writes: Dictionary[Vector2i, Array] = {}
 
 ## Guards every read/write of [member _read_results] and [member
 ## _write_results] from both the calling thread and every background
@@ -879,30 +965,55 @@ func bulk_write(changes: Dictionary[Vector3i, CellContents]) -> Array[CellChange
 
 ## Shared write-application core (Story vox-003, ADR-0014 Implementation
 ## Notes: bulk_write "reuses the single-write mechanism internally") --
-## performs the bounds check, lazy chunk allocation, and packed-buffer
-## mutation common to both [method set_cell] and [method bulk_write],
-## returning the resulting [CellChangeRecord] (or `null` for an
-## out-of-bounds cell -- nothing changed, no record, and deliberately no
-## signal of any kind here; emitting [signal cell_changed]/[signal
-## cells_changed_batch] is each caller's own responsibility, not this
-## helper's). Callers validate [param contents] (packed-byte range,
-## non-null) BEFORE calling this -- this function assumes that check already
-## passed.
+## the SOLE per-cell write entry point [method set_cell]/[method clear_cell]/
+## [method bulk_write] all fall through to, unchanged by this story (this is
+## the "the rule lives in ONE place" guarantee TR-voxel-world-051 AC-3 names --
+## a future dig-order/Building-System caller inherits everything below simply
+## by calling [method set_cell]/[method bulk_write], with no residency code of
+## its own). Returns `null` for an out-of-bounds cell -- nothing changed, no
+## record, no signal (each caller's own responsibility, not this helper's) --
+## exactly as before this story.
 ##
-## KNOWN GAP, deliberately deferred to Story 014 (ADR-0015 Decision §3,
-## "load-before-write"): if [param cell]'s chunk was previously resident,
-## dirtied, evicted, and flushed to a region file, and is NOT currently
-## resident, this method still lazily allocates a FRESH (empty) chunk here --
-## exactly the same lazy-allocation this method has always done, unchanged by
-## Story vox-010 -- rather than first paging in the persisted region data.
-## That page-in-before-write correctness rule is Story 014's explicit scope
-## (see that story's Dependencies: "Depends on: ... Story 010 (residency)").
-## This is a real, intentional gap today, not a silent regression: it only
-## exists once a caller BOTH engages residency (Story vox-010's [method
-## update_residency] is opt-in) AND writes to an already-evicted chunk.
+## Story vox-014 (this revision, ADR-0015 Decision §3, "load-before-write")
+## closes the gap this doc comment used to name (a write to an already-
+## evicted, non-resident chunk lazily allocating a FRESH, blank chunk over
+## whatever was actually persisted -- silent data loss on the next flush).
+## While [member _residency_active], a write targeting a non-resident chunk
+## now requests page-in FIRST ([method _request_resident] -- the exact same
+## dispatch/in-flight-cache/seed-regen machinery a read already uses; a write
+## never distinguishes "loading for a read" from "loading for a write"). If
+## that resolves the chunk to resident WITHIN this same call (an
+## already-finished background result, or the read-through in-flight-write
+## cache), the write applies immediately below, same as always. If it does
+## NOT -- freshly dispatched, or cap-missed -- the write is QUEUED instead
+## ([method _queue_pending_write]) and this call returns `null`: the write is
+## never applied to the region file blind, and never dropped -- it lands
+## later, the instant the chunk becomes resident, via [method
+## _apply_pending_writes] (called from [method _try_serve_from_in_flight_write]/
+## [method _try_integrate_read], whichever path resolves it). A grid that
+## never engages residency ([member _residency_active] false) is completely
+## unaffected -- the lazy-allocate-fresh-chunk fallback below still runs
+## exactly as it always has for that opt-in-inactive case.
 func _apply_write(cell: Vector3i, contents: CellContents) -> CellChangeRecord:
 	if not is_in_bounds(cell):
 		return null
+	var key: Vector2i = _chunk_key(cell)
+	if _residency_active and not _chunks.has(key):
+		_request_resident(key)
+		if not _chunks.has(key):
+			_queue_pending_write(key, cell, contents)
+			return null
+	return _apply_write_to_resident_chunk(cell, contents)
+
+
+## The tail of [method _apply_write] -- lazy chunk allocation (only ever
+## exercised here when [member _residency_active] is false, or as a no-op
+## guard when the chunk is already resident) and the packed-buffer mutation
+## itself. Extracted (Story vox-014, behavior-preserving for every pre-014
+## call path) so [method _apply_pending_writes] can apply a queued far write
+## onto an already-resident chunk without re-running [method _apply_write]'s
+## own residency-request/queue logic a second time.
+func _apply_write_to_resident_chunk(cell: Vector3i, contents: CellContents) -> CellChangeRecord:
 	var key: Vector2i = _chunk_key(cell)
 	if not _chunks.has(key):
 		_chunks[key] = _ChunkBuffer.new(CHUNK_SIZE * CHUNK_SIZE * _chunk_height())
@@ -914,6 +1025,42 @@ func _apply_write(cell: Vector3i, contents: CellContents) -> CellChangeRecord:
 	_dirty_chunks[key] = true
 	var after := CellContents.new(contents.block_type_id, contents.material_id)
 	return CellChangeRecord.new(cell, before, after)
+
+
+## Appends [param cell]/[param contents] to [param chunk_key]'s pending-write
+## queue (Story vox-014) -- see [member _pending_writes]'s doc comment for the
+## coalescing/ordering guarantees this provides.
+func _queue_pending_write(chunk_key: Vector2i, cell: Vector3i, contents: CellContents) -> void:
+	if not _pending_writes.has(chunk_key):
+		_pending_writes[chunk_key] = []
+	_pending_writes[chunk_key].append(_PendingWrite.new(cell, contents))
+
+
+## Applies every write queued for [param chunk_key] (Story vox-014) directly
+## onto its just-loaded resident copy -- called the instant [param chunk_key]
+## transitions to resident, from [method _try_serve_from_in_flight_write] or
+## [method _try_integrate_read] (see [member _pending_writes]'s doc comment
+## for why those two call sites, specifically). A no-op if [param chunk_key]
+## has no pending writes (the overwhelmingly common case -- most chunks that
+## become resident were paged in for a READ, not a write). Emits [signal
+## cells_changed_batch] once for every record actually applied here -- see
+## this class's own doc comment for why this is [signal cells_changed_batch]
+## rather than per-cell [signal cell_changed]: an entire chunk's worth of
+## deferred writes landing together reads as one batched event, the same
+## semantics [method bulk_write] already established for "more than one cell
+## changing together."
+func _apply_pending_writes(chunk_key: Vector2i) -> void:
+	if not _pending_writes.has(chunk_key):
+		return
+	var queued: Array = _pending_writes[chunk_key]
+	_pending_writes.erase(chunk_key)
+	var records: Array[CellChangeRecord] = []
+	for entry: _PendingWrite in queued:
+		var record: CellChangeRecord = _apply_write_to_resident_chunk(entry.cell, entry.contents)
+		if record != null:
+			records.append(record)
+	if not records.is_empty():
+		cells_changed_batch.emit(records)
 
 
 ## Chunk coordinate for [param cell]
@@ -1057,6 +1204,26 @@ func _drain_budgeted(items: Array, start_usec: int, budget_usec: int, action: Ca
 ## _last_camera_focus_cell]/[member _last_settlement_anchor_cell] -- consumed
 ## ONLY by [method wait_for_async_residency_idle] (tests/explicit sync points,
 ## never the per-frame path).
+##
+## Story vox-014 (this revision, ADR-0015 Decision §3) adds a fourth budgeted
+## phase -- retrying [method _request_resident] for every chunk with an
+## outstanding entry in [member _pending_writes] -- run BEFORE the desired-
+## window page-in phase, with its own fresh budget window (same "never a
+## shared/cumulative window" discipline Story vox-012 established for the
+## other three phases). This is the ONLY thing that drives a far write's
+## page-in to completion when its target chunk sits OUTSIDE both the camera
+## and settlement windows: the desired-window page-in phase below would never
+## otherwise visit it, and [method get_cell]'s own transparent page-in check
+## is gated behind a persisted region entry existing already (never true for
+## a pending write's first-ever touch of a pristine chunk). If this phase
+## resolves a chunk to resident within this same call, [method
+## _apply_pending_writes] has already applied its queued writes and marked it
+## dirty by the time the eviction phase below runs -- since that chunk is (by
+## definition) not in [param camera_focus_cell]/[param settlement_anchor_cell]'s
+## desired window either, it is immediately queued for eviction-flush in this
+## SAME call (budget permitting) -- exactly the "let staggered eviction flush
+## it" half of the load-before-write rule, with no special-cased "far write"
+## flush path of its own.
 func update_residency(camera_focus_cell: Vector3i, settlement_anchor_cell: Vector3i) -> void:
 	assert(config != null, "VoxelWorldGrid.update_residency: config not wired")
 	_residency_active = true
@@ -1065,6 +1232,9 @@ func update_residency(camera_focus_cell: Vector3i, settlement_anchor_cell: Vecto
 
 	var reap_start_usec: int = _now_usec()
 	_reap_finished_async_writes(reap_start_usec, _budget_usec(config.evict_budget_ms))
+
+	var pending_write_start_usec: int = _now_usec()
+	_drain_budgeted(_pending_writes.keys(), pending_write_start_usec, _budget_usec(config.page_budget_ms), Callable(self, "_request_resident"))
 
 	var desired: Dictionary[Vector2i, bool] = {}
 	_collect_window(desired, _chunk_key(camera_focus_cell), config.view_radius_chunks)
@@ -1186,10 +1356,17 @@ func _request_resident(chunk_key: Vector2i) -> bool:
 ## dispatch) and simply drops it from [member _chunks] with no new flush
 ## dispatched -- correct, since the bytes already in flight are unchanged and
 ## the original flush task still carries them to disk.
+##
+## Story vox-014 addition: also applies any far write queued for [param
+## chunk_key] ([method _apply_pending_writes]) the instant it re-hydrates --
+## this is one of the two transition points a chunk can become resident
+## through, so a deferred write waiting on THIS chunk lands here exactly as
+## it would via [method _try_integrate_read].
 func _try_serve_from_in_flight_write(chunk_key: Vector2i) -> bool:
 	if not _write_in_flight_data.has(chunk_key):
 		return false
 	_chunks[chunk_key] = _deserialize_chunk_buffer(_write_in_flight_data[chunk_key])
+	_apply_pending_writes(chunk_key)  # Story vox-014: apply any far write that queued while this chunk paged in
 	return true
 
 
@@ -1202,6 +1379,11 @@ func _try_serve_from_in_flight_write(chunk_key: Vector2i) -> bool:
 ## never blocks in that case), and its [Error]-code return is discarded,
 ## never treated as the chunk's data (ADR-0015 Decision §6 engine note;
 ## TR-voxel-world-053 QA AC-3).
+##
+## Story vox-014 addition: also applies any far write queued for [param
+## chunk_key] ([method _apply_pending_writes]) the instant this integration
+## succeeds -- see [method _try_serve_from_in_flight_write]'s matching note
+## (the other transition-to-resident point).
 func _try_integrate_read(chunk_key: Vector2i) -> bool:
 	if not _read_tasks.has(chunk_key):
 		return false
@@ -1215,6 +1397,7 @@ func _try_integrate_read(chunk_key: Vector2i) -> bool:
 	_read_results.erase(chunk_key)
 	_task_mutex.unlock()
 	_chunks[chunk_key] = _deserialize_chunk_buffer(result["data"])
+	_apply_pending_writes(chunk_key)  # Story vox-014: apply any far write that queued while this chunk paged in
 	return true
 
 
