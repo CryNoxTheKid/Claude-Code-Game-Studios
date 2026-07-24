@@ -31,6 +31,19 @@
 ## directory under `user://` (never `res://`, never shared across tests,
 ## never committed) via [method _make_temp_region_dir], removed recursively
 ## in [method after_test].
+##
+## Story vox-011 ADAPTATION (ADR-0015 Decision §6): page-in/eviction is now
+## dispatched on a [WorkerThreadPool] instead of running synchronously within
+## a single [method VoxelWorldGrid.update_residency]/[method
+## VoxelWorldGrid.get_cell] call -- exactly what this story's own doc
+## comments forward-declared ("moving it onto a WorkerThreadPool is Story
+## 011's explicit scope"). Every assertion below that depends on a page-in or
+## eviction-flush having ACTUALLY completed (not merely been requested) now
+## calls [method VoxelWorldGrid.wait_for_async_residency_idle] first -- a
+## bounded, test-only settle helper (see that method's doc comment) that
+## makes the otherwise multi-frame async settle deterministic in one call.
+## The CORRECTNESS this file proves is unchanged; only the synchronous-same-
+## call TIMING assumption is adapted to the async model.
 class_name RegionFileResidencyTest
 extends GdUnitTestSuite
 
@@ -97,7 +110,24 @@ func test_update_residency_resident_set_is_exactly_camera_window_union_settlemen
 	# Act
 	grid.update_residency(camera_focus, settlement_anchor)
 
-	# Assert — the distant, previously-written chunk was evicted.
+	# Story vox-011 CORRECTION: eviction dispatch SHARES one concurrency
+	# budget with page-in dispatch (ADR-0015 Decision §6 — "reads AND writes
+	# SHARE one concurrency budget"). In this single call, the desired
+	# window's 34 pristine chunks (25 camera + 9 settlement, no overlap) are
+	# requested FIRST and saturate the default cap (32) with regen dispatches
+	# before the eviction loop ever reaches chunk (16,16) -- so THIS
+	# specific eviction can itself be a cap-miss and stay resident for a
+	# call or two, exactly the same "stays queued, never a synchronous
+	# fallback" contract as a page-in cap-miss (never a special case). A
+	# bare same-call check here would be flaky/incorrect under the async
+	# model; settling first (as every other assertion in this file now does)
+	# is the correct fix, not a relaxation of the guarantee — the chunk IS
+	# still evicted, just not necessarily within the exact call that first
+	# requested it.
+	grid.wait_for_async_residency_idle()
+
+	# Assert — the distant, previously-written chunk was evicted once
+	# settled.
 	assert_bool(grid.is_chunk_resident(Vector2i(16, 16))).is_false()
 
 	# Assert — resident set is EXACTLY the union, nothing more, nothing less.
@@ -130,6 +160,7 @@ func test_update_residency_overlapping_camera_and_settlement_windows_counted_onc
 
 	# Act
 	grid.update_residency(camera_focus, settlement_anchor)
+	grid.wait_for_async_residency_idle()  # Story vox-011: page-in is async — settle first
 
 	# Assert — resident count matches the UNION size, never the (larger) sum
 	# of both windows' sizes counted separately.
@@ -157,6 +188,7 @@ func test_update_residency_on_large_world_stays_bounded_by_footprint_not_world_s
 
 	# Act — camera and settlement share the same anchor (world center).
 	grid.update_residency(Vector3i(1024, 0, 1024), Vector3i(1024, 0, 1024))
+	grid.wait_for_async_residency_idle()  # Story vox-011: page-in is async — settle first
 
 	# Assert — resident count is tiny relative to the 128x128 = 16,384-chunk
 	# world (a 9x9 window, footprint-bounded, TR-voxel-world-053).
@@ -183,11 +215,18 @@ func test_get_cell_after_evict_and_reapproach_returns_originally_written_value()
 	var written_cell := Vector3i(160, 2, 160)  # chunk (10, 10)
 	grid.set_cell(written_cell, CellContents.new(42, 7))
 
-	# Act — move residency far away (evicts + flushes chunk (10,10)), then
-	# bring it back into view via update_residency's own bulk page-in.
+	# Act — move residency far away (evicts + dispatches chunk (10,10)'s
+	# flush), then bring it back into view via update_residency's own bulk
+	# page-in.
 	grid.update_residency(Vector3i(0, 0, 0), Vector3i(0, 0, 0))
-	assert_bool(grid.is_chunk_resident(Vector2i(10, 10))).is_false()
+	assert_bool(grid.is_chunk_resident(Vector2i(10, 10))).is_false()  # dropped the instant the flush was DISPATCHED (Story vox-011)
+	# Story vox-011: the eviction's flush is now async — settle it here so the
+	# region file is DURABLE before the page-back-in reads it (without this,
+	# the read could race the still-in-flight write, a real gap this story
+	# defers to Story 013's read-through cache; settling avoids exercising it).
+	grid.wait_for_async_residency_idle()
 	grid.update_residency(written_cell, written_cell)
+	grid.wait_for_async_residency_idle()  # Story vox-011: page-in is async — settle before reading back
 
 	# Assert — lossless round trip; accessor signature/semantics unchanged.
 	var read_back: CellContents = grid.get_cell(written_cell)
@@ -209,16 +248,40 @@ func test_get_cell_on_evicted_chunk_pages_in_transparently_without_explicit_upda
 	grid.config = config
 	var written_cell := Vector3i(64, 3, 64)  # chunk (4, 4)
 	grid.set_cell(written_cell, CellContents.new(15, 3))
-	grid.update_residency(Vector3i(0, 0, 0), Vector3i(0, 0, 0))  # evicts + flushes chunk (4,4)
+	grid.update_residency(Vector3i(0, 0, 0), Vector3i(0, 0, 0))  # evicts + dispatches chunk (4,4)'s flush
 	assert_bool(grid.is_chunk_resident(Vector2i(4, 4))).is_false()
+	# Story vox-011: settle the flush so the region file is DURABLE before a
+	# bare get_cell dispatches its own read against it (same rationale as
+	# test_get_cell_after_evict_and_reapproach_returns_originally_written_value
+	# — avoids racing the read against a still-in-flight write, a real gap
+	# this story defers to Story 013's read-through cache).
+	grid.wait_for_async_residency_idle()
 
-	# Act — a bare get_cell, no update_residency call in between.
+	# Act — a bare get_cell, no update_residency call in between. Story
+	# vox-011: get_cell's own page-in is now NON-BLOCKING (ADR-0015 Decision
+	# §6 — never a synchronous fallback), so the FIRST bare call only
+	# DISPATCHES the background read and transparently serves an empty
+	# result for now; it does not yet reflect the persisted data. Draining
+	# that dispatched read (via the NARROW [method
+	# VoxelWorldGrid.drain_pending_async_reads] — deliberately NOT [method
+	# VoxelWorldGrid.wait_for_async_residency_idle], which would re-drive
+	# update_residency toward the STALE (0,0,0) window used to evict this
+	# chunk earlier and evict it again immediately, since chunk (4,4) is
+	# outside that window and was only ever brought back by this bare
+	# get_cell "side channel" — see that method's own doc comment) lets the
+	# dispatched read complete, and a SECOND bare get_cell call then observes
+	# it — this is the exact "stays queued until a later call" contract
+	# ADR-0015 requires, not a regression from Story vox-010's synchronous
+	# version.
+	var first_read: CellContents = grid.get_cell(written_cell)
+	assert_bool(first_read.is_empty()).is_true()
+	grid.drain_pending_async_reads()
 	var read_back: CellContents = grid.get_cell(written_cell)
 
 	# Assert
 	assert_int(read_back.block_type_id).is_equal(15)
 	assert_int(read_back.material_id).is_equal(3)
-	assert_bool(grid.is_chunk_resident(Vector2i(4, 4))).is_true()  # page-in happened as a side effect of the read
+	assert_bool(grid.is_chunk_resident(Vector2i(4, 4))).is_true()  # page-in landed once the background read settled
 
 
 func test_pristine_chunk_pages_in_via_terrain_regen_and_stays_unpersisted_when_evicted() -> void:
@@ -247,14 +310,23 @@ func test_pristine_chunk_pages_in_via_terrain_regen_and_stays_unpersisted_when_e
 
 	# Act — bring the never-touched chunk into residency.
 	grid.update_residency(pristine_cell, pristine_cell)
+	grid.wait_for_async_residency_idle()  # Story vox-011: regen dispatch is async — settle before asserting
 
 	# Assert — resident, and reads back real (non-empty) regenerated terrain.
 	assert_bool(grid.is_chunk_resident(Vector2i(4, 4))).is_true()
 	var contents: CellContents = grid.get_cell(pristine_cell)
 	assert_bool(contents.is_empty()).is_false()
 
-	# Act — evict it again with no writes in between.
+	# Act — evict it again with no writes in between. Chunk (4,4)'s OWN
+	# eviction needs no I/O at all and is immediate (clean, never dirtied --
+	# the same zero-I/O contract Story vox-010 already had), but this call
+	# ALSO dispatches page-in for the NEW (0,0,0)-anchored window's own
+	# pristine chunks as a side effect — settle so no task is left in flight
+	# referencing this grid when it is freed at test end (a background task
+	# holds a `Callable(self, ...)` into this Node; see [method
+	# VoxelWorldGrid._notification]'s doc comment).
 	grid.update_residency(Vector3i(0, 0, 0), Vector3i(0, 0, 0))
+	grid.wait_for_async_residency_idle()
 
 	# Assert — never dirtied, so its region file was never created at all.
 	assert_bool(grid.is_chunk_resident(Vector2i(4, 4))).is_false()
@@ -282,16 +354,36 @@ func test_region_header_io_happens_exactly_once_across_many_touches() -> void:
 
 	# Act — repeatedly evict and re-page-in the SAME region across many
 	# separate update_residency calls ("touched repeatedly over many ticks").
+	# Story vox-011 NOTE: no settle call is needed between iterations here —
+	# [VoxelWorldRegionFile]'s header bookkeeping ([method
+	# VoxelWorldRegionFile._ensure_header]/[method has_chunk]/[method
+	# offset_of]/[method reserve_offset_for_write]) runs SYNCHRONOUSLY on the
+	# main thread by design (ADR-0015 Decision §6's one sanctioned
+	# synchronous exception) regardless of whether the corresponding PAYLOAD
+	# read/write is dispatched async — this assertion is about header I/O
+	# count, not payload data correctness, so it is unaffected by the
+	# eviction-flush/page-in timing this story changed elsewhere in this file.
 	for i in 10:
 		grid.update_residency(Vector3i(2000, 0, 2000), Vector3i(2000, 0, 2000))  # evict (out of world -> empty desired set)
 		grid.update_residency(cell, cell)  # page back in
+
+	# Story vox-011: the header-count assertion itself needs no settle (see
+	# note above), but 20 rapid-fire update_residency calls with no delay
+	# between them can leave a same-chunk read/write dispatch still in
+	# flight at the moment this test function returns — drain before the
+	# grid is freed at test end (belt-and-suspenders alongside [method
+	# VoxelWorldGrid._notification]'s own PREDELETE safety net; a background
+	# task actively executing at the exact moment of `free()` can race that
+	# net, so tests drain explicitly rather than relying on it alone).
+	grid.wait_for_async_residency_idle()
 
 	# Assert — header I/O for chunk (2,2)'s region occurred exactly once.
 	assert_int(grid.get_region_header_load_count(Vector2i(2, 2))).is_equal(1)
 
 
 func test_region_header_load_count_is_zero_for_a_region_never_touched() -> void:
-	# Arrange + Act
+	# Arrange + Act — no update_residency/get_cell call at all, so no async
+	# dispatch is ever engaged (Story vox-011 unaffected: nothing to settle).
 	var config := VoxelWorldConfig.new()
 	config.region_directory = _make_temp_region_dir("ac3_untouched")
 	var grid: VoxelWorldGrid = auto_free(VoxelWorldGrid.new())
@@ -307,7 +399,10 @@ func test_region_header_load_count_is_zero_for_a_region_never_touched() -> void:
 
 func test_grid_that_never_calls_update_residency_never_evicts_a_written_chunk() -> void:
 	# Arrange — pre-existing behavior (Story vox-002/003) must be byte-for-
-	# byte unchanged for a caller that never engages residency.
+	# byte unchanged for a caller that never engages residency. Story
+	# vox-011 unaffected: [member VoxelWorldGrid._residency_active] gates
+	# EVERY async dispatch path exactly as it gated the old synchronous one,
+	# so a caller that never calls update_residency dispatches nothing.
 	var config := VoxelWorldConfig.new()
 	config.region_directory = _make_temp_region_dir("opt_in_untouched")
 	var grid: VoxelWorldGrid = auto_free(VoxelWorldGrid.new())

@@ -110,16 +110,27 @@ func test_iterate_occupied_missing_config_raises_assertion() -> void:
 
 func test_no_await_or_threading_apis_anywhere_in_voxel_world_source() -> void:
 	# Grep-verifiable structural proof (Implementation Notes: "Do not add
-	# locks; assert the serialization invariant in a test") — a plain
-	# synchronous scan with no `await`/`Thread`/`WorkerThreadPool` anywhere in
-	# this system's own code can never be paused mid-scan for a write to
-	# interleave; torn-read prevention follows from this, not from a lock.
-	# Comment-stripped scan mirrors this codebase's established precedent
-	# (`tests/integration/voxel_world/dda_raycast_test.gd`'s
-	# `_read_all_gd_source` helper) so this file's own doc comments (which
-	# legitimately name the checked terms to document their absence) are
-	# never mistaken for a violation.
+	# locks; assert the serialization invariant in a test") — [method
+	# VoxelWorldGrid.iterate_occupied] itself is a plain synchronous scan with
+	# no `await`/`Thread`/`WorkerThreadPool` anywhere in ITS OWN method body,
+	# so it can never be paused mid-scan for a write to interleave; torn-read
+	# prevention follows from this, not from a lock.
+	#
+	# Story vox-011 SCOPE NARROWING (ADR-0015 Decision §6): this check used to
+	# scan the ENTIRE `src/voxel_world/` directory, back when nothing in this
+	# system used any threading API at all. Story vox-011 legitimately
+	# introduces `WorkerThreadPool` for the paged-residency tier's async
+	# region I/O/terrain-gen ([VoxelWorldGrid]'s `_bg_*`/`_try_dispatch_*`/
+	# `_request_*` methods, [VoxelWorldRegionFile]'s `static` payload I/O) —
+	# a DIFFERENT, unrelated code path from [method iterate_occupied]. This
+	# story's own torn-read-free guarantee is about [method iterate_occupied]
+	# specifically (Story vox-005's AC14), so the check is narrowed to that
+	# method's own body via [method _extract_method_body] rather than the
+	# whole directory — the invariant this test proves is UNCHANGED; only the
+	# scan's scope is corrected to match what the invariant was ever actually
+	# about.
 	var source: String = _read_all_gd_source("res://src/voxel_world")
+	var method_body: String = _extract_method_body(source, "func iterate_occupied(")
 
 	var banned_substrings: Array[String] = [
 		"await",
@@ -127,7 +138,26 @@ func test_no_await_or_threading_apis_anywhere_in_voxel_world_source() -> void:
 		"WorkerThreadPool",
 	]
 	for banned: String in banned_substrings:
-		assert_bool(source.contains(banned)).is_false()
+		assert_bool(method_body.contains(banned)).is_false()
+
+
+## Extracts a single top-level function's body (from [param start_marker] up
+## to -- but not including -- the next top-level `func` declaration, or end
+## of [param source] if it is the last one) out of already comment-stripped,
+## flattened [param source] (see [method _read_all_gd_source]). Narrow,
+## purpose-built for this test's Story vox-011 scope-narrowing (see [method
+## test_no_await_or_threading_apis_anywhere_in_voxel_world_source]) rather
+## than a general-purpose parser -- relies on this codebase's convention of
+## one top-level `func` per line with no nested top-level `func` keyword
+## occurring mid-body (true for every method in `src/voxel_world/`).
+func _extract_method_body(source: String, start_marker: String) -> String:
+	var start_index: int = source.find(start_marker)
+	assert(start_index != -1, "Method not found: %s" % start_marker)
+	var body_start: int = start_index + start_marker.length()
+	var next_func_index: int = source.find("\nfunc ", body_start)
+	if next_func_index == -1:
+		return source.substr(body_start)
+	return source.substr(body_start, next_func_index - body_start)
 
 
 # ---------------------------------------------------------------------------

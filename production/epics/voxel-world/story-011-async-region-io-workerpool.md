@@ -1,7 +1,7 @@
 # Story 011: Async region I/O + terrain-gen on a capped WorkerThreadPool
 
 > **Epic**: Voxel World / Grid Data
-> **Status**: Ready
+> **Status: Complete (2026-07-24 — 463/463 suite green twice, parent-verified)
 > **Layer**: Presentation (world-storage residency tier)
 > **Type**: Integration
 > **Estimate**: 1–1.5 days

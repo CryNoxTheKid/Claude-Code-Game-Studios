@@ -9,17 +9,34 @@
 ## of the same chunk (every payload is the same fixed size, so no reflow is
 ## ever needed). A region that never has a dirty chunk never gets a file on
 ## disk at all (Decision §5) -- [method _ensure_header] never creates the
-## file itself; only [method write_chunk] does, on its own first call.
+## file itself; only [method reserve_offset_for_write] does, on its own first
+## call for that region.
 ##
 ## Per-region header I/O ([method _ensure_header]) is the ONE sanctioned
 ## synchronous disk operation in Voxel World's residency tier (ADR-0015
 ## Decision §6) -- it runs exactly once per instance (guarded by [member
 ## _header_loaded]), never per-tick; [member header_load_count] exists purely
 ## so a test can observe that guarantee directly (TR-voxel-world-053, story
-## QA plan AC-3). Every other region operation in THIS story
-## (`has_chunk`/`read_chunk`/`write_chunk`'s own payload I/O) is ALSO
-## synchronous today -- moving it onto a `WorkerThreadPool` is Story 011's
-## explicit scope, layered behind this same class's public contract.
+## vox-010 QA plan AC-3).
+##
+## Story vox-011 (this revision, ADR-0015 Decision §6) splits every remaining
+## PAYLOAD I/O operation off the main thread: this class now only performs
+## main-thread BOOKKEEPING -- [method has_chunk] / [method offset_of] (pure
+## in-memory lookups past the one-time header load) and [method
+## reserve_offset_for_write] (allocates a slot's byte offset and creates the
+## region's blank header file on first touch, still a one-time-per-region
+## synchronous cost, never a per-chunk one). The actual chunk-payload bytes
+## are read/written by the `static` [method read_payload_at] / [method
+## write_payload_at] -- pure functions that open their OWN [FileAccess]
+## handle and touch no instance state, so they are safe to call from a
+## background [WorkerThreadPool] task ([VoxelWorldGrid]'s `_bg_*` methods).
+## Splitting "reserve the offset" (must never race -- two concurrent
+## dispatches must never allocate the same append offset) from "write the
+## bytes" (safe to do concurrently once each writer has its own offset) is
+## what lets the slow part run off-thread without a race. There is
+## deliberately no instance-level synchronous full read/write method left in
+## this class anymore -- that was the exact temptation-to-a-sync-fallback
+## ADR-0015 Decision §6 calls "the failure mode."
 ##
 ## `RefCounted`, not `Resource` -- an internal storage-tier handle, never
 ## authored/serialized/shared as project data. Unlike this directory's other
@@ -30,9 +47,10 @@
 ##
 ## Reference-only note: `prototypes/storage-residency-spike/region_file.gd`
 ## validated this exact format (header + fixed-size appended payloads, via
-## `store_buffer`/`get_buffer`) at 5/5 spike criteria; this file is written
-## fresh against that measured design, not copied from it (per this story's
-## Engine Notes).
+## `store_buffer`/`get_buffer`) at 5/5 spike criteria, including this same
+## main-thread-reserve / background-write split (its own `reserve_offset_for_write`
+## doc comment); this file is written fresh against that measured design, not
+## copied from it (per this story's Engine Notes).
 class_name VoxelWorldRegionFile
 extends RefCounted
 
@@ -67,7 +85,7 @@ var _header_loaded: bool = false
 
 ## Next unused append offset in this region's file body -- starts right after
 ## the header, advances by [member chunk_payload_bytes] each time a
-## previously-absent slot is written for the first time.
+## previously-absent slot is reserved for the first time.
 var _next_append_offset: int = 0
 
 
@@ -79,69 +97,105 @@ func _init(p_path: String, p_slots_per_region: int, p_chunk_payload_bytes: int) 
 
 ## True if [param slot] holds a persisted chunk payload (a non-zero header
 ## offset) -- false for a pristine/never-mutated slot. Triggers [method
-## _ensure_header] (a no-op past the first call).
+## _ensure_header] (a no-op past the first call). Main-thread only (pure
+## in-memory lookup past the one-time header load).
 func has_chunk(slot: int) -> bool:
 	_ensure_header()
 	return _offsets[slot] != 0
 
 
-## Reads [param slot]'s [member chunk_payload_bytes]-sized payload. Caller
-## MUST have already confirmed [method has_chunk] is true for this slot --
-## this method does not itself check.
-func read_chunk(slot: int) -> PackedByteArray:
+## Returns [param slot]'s byte offset (`0` if absent) with no file I/O beyond
+## the one-time [method _ensure_header] guard -- lets the async dispatch path
+## (Story 011, [VoxelWorldGrid._try_dispatch_read]) hand a background task
+## the exact offset it needs, entirely from main-thread bookkeeping, before
+## the actual disk read ever runs off-thread.
+func offset_of(slot: int) -> int:
 	_ensure_header()
-	var f: FileAccess = FileAccess.open(path, FileAccess.READ)
-	assert(
-		f != null,
-		"VoxelWorldRegionFile.read_chunk: could not open %s for read (%s)" % [path, FileAccess.get_open_error()]
-	)
-	f.seek(_offsets[slot])
-	var data: PackedByteArray = f.get_buffer(chunk_payload_bytes)
-	f.close()
-	return data
+	return _offsets[slot]
 
 
-## Writes (or overwrites in place -- every payload is the same fixed [member
-## chunk_payload_bytes] size) [param slot]'s payload and updates its header
-## entry, creating this region's file (header-only, all-zero offsets) on the
-## very first write to it (and its parent directory, if missing). Returns
-## `false` (and `push_error`s, never silently swallows -- Foundation Layer's
-## "detect, push_error, return false" precedent, ADR-0012) on any file-I/O
-## failure; returns `true` on success.
-func write_chunk(slot: int, data: PackedByteArray) -> bool:
+## MAIN-THREAD-ONLY bookkeeping (Story 011, ADR-0015 Decision §6 lever 2):
+## reserves (or returns the already-assigned) byte offset for [param slot]
+## WITHOUT performing the actual payload write -- that happens afterward in a
+## background [WorkerThreadPool] task via the `static` [method
+## write_payload_at]. Splitting "reserve the slot" from "write the bytes" is
+## what lets the slow part run off-thread without a race (see class doc
+## comment).
+##
+## If this is the FIRST write ever to this region, the (small) blank header
+## file -- and its parent directory, if missing -- is created HERE,
+## synchronously: centralizing region-file creation on the main thread
+## prevents two background tasks for two different chunks in the same
+## brand-new region from racing to create the file concurrently. This is a
+## one-time-per-region cost (ADR-0015 Decision §6's one sanctioned
+## synchronous exception), not a per-chunk one -- the same guarantee [method
+## _ensure_header] already gives read-side callers.
+func reserve_offset_for_write(slot: int) -> int:
 	_ensure_header()
 	if not FileAccess.file_exists(path):
 		var dir_result: Error = DirAccess.make_dir_recursive_absolute(path.get_base_dir())
-		if dir_result != OK:
-			push_error("VoxelWorldRegionFile.write_chunk: could not create directory for %s (error %s)" % [path, dir_result])
-			return false
+		assert(
+			dir_result == OK,
+			"VoxelWorldRegionFile.reserve_offset_for_write: could not create directory for %s (error %s)" % [path, dir_result]
+		)
 		var create_f: FileAccess = FileAccess.open(path, FileAccess.WRITE)
-		if create_f == null:
-			push_error("VoxelWorldRegionFile.write_chunk: could not create %s (%s)" % [path, FileAccess.get_open_error()])
-			return false
+		assert(
+			create_f != null,
+			"VoxelWorldRegionFile.reserve_offset_for_write: could not create %s (%s)" % [path, FileAccess.get_open_error()]
+		)
 		for i in slots_per_region:
-			if not create_f.store_64(0):
-				push_error("VoxelWorldRegionFile.write_chunk: failed writing header slot %d in %s" % [i, path])
-				create_f.close()
-				return false
+			create_f.store_64(0)
 		create_f.close()
-	var f: FileAccess = FileAccess.open(path, FileAccess.READ_WRITE)
-	if f == null:
-		push_error("VoxelWorldRegionFile.write_chunk: could not open %s for read/write (%s)" % [path, FileAccess.get_open_error()])
-		return false
 	var offset: int = _offsets[slot]
 	if offset == 0:
 		offset = _next_append_offset
 		_offsets[slot] = offset
 		_next_append_offset += chunk_payload_bytes
+	return offset
+
+
+## Pure, stateless payload read (Story 011) -- safe to call from a background
+## [WorkerThreadPool] task: opens its OWN [FileAccess] handle, touches no
+## instance state of any [VoxelWorldRegionFile]. Caller MUST already know
+## [param offset] via a main-thread [method has_chunk] / [method offset_of]
+## call BEFORE dispatching the background task that calls this -- this reads
+## whatever [param payload_bytes] sit at [param offset] unconditionally, with
+## no further presence check.
+static func read_payload_at(path: String, offset: int, payload_bytes: int) -> PackedByteArray:
+	var f: FileAccess = FileAccess.open(path, FileAccess.READ)
+	if f == null:
+		push_error("VoxelWorldRegionFile.read_payload_at: could not open %s for read (%s)" % [path, FileAccess.get_open_error()])
+		return PackedByteArray()
+	f.seek(offset)
+	var data: PackedByteArray = f.get_buffer(payload_bytes)
+	f.close()
+	return data
+
+
+## Pure, stateless payload write + header-slot update (Story 011) -- safe to
+## call from a background [WorkerThreadPool] task: opens its OWN [FileAccess]
+## handle, touches no instance state. [param offset] MUST already be reserved
+## via a main-thread [method reserve_offset_for_write] call BEFORE the
+## background task that calls this was dispatched -- this only performs the
+## actual byte write (payload, then that slot's header entry). Returns
+## `false` (and `push_error`s, never silently swallows -- Foundation Layer's
+## "detect, push_error, return false" precedent, ADR-0012) on any I/O
+## failure; the caller consumes this result via a mutex-guarded structure,
+## never via [method WorkerThreadPool.wait_for_task_completion]'s return
+## value (ADR-0015 Decision §6 engine note, TR-voxel-world-053 QA AC-3).
+static func write_payload_at(path: String, slot: int, offset: int, data: PackedByteArray) -> bool:
+	var f: FileAccess = FileAccess.open(path, FileAccess.READ_WRITE)
+	if f == null:
+		push_error("VoxelWorldRegionFile.write_payload_at: could not open %s for read/write (%s)" % [path, FileAccess.get_open_error()])
+		return false
 	f.seek(offset)
 	if not f.store_buffer(data):
-		push_error("VoxelWorldRegionFile.write_chunk: failed writing payload for slot %d in %s" % [slot, path])
+		push_error("VoxelWorldRegionFile.write_payload_at: failed writing payload for slot %d in %s" % [slot, path])
 		f.close()
 		return false
 	f.seek(slot * HEADER_ENTRY_BYTES)
 	if not f.store_64(offset):
-		push_error("VoxelWorldRegionFile.write_chunk: failed updating header for slot %d in %s" % [slot, path])
+		push_error("VoxelWorldRegionFile.write_payload_at: failed updating header for slot %d in %s" % [slot, path])
 		f.close()
 		return false
 	f.close()
@@ -151,8 +205,8 @@ func write_chunk(slot: int, data: PackedByteArray) -> bool:
 ## Reads (or, for a not-yet-existing file, initializes an all-absent) header
 ## exactly once per instance -- see class doc comment and [member
 ## header_load_count]. A missing file is NOT created here (see [method
-## write_chunk]) -- "a region that never has a dirty chunk never gets a file
-## on disk at all."
+## reserve_offset_for_write]) -- "a region that never has a dirty chunk never
+## gets a file on disk at all."
 func _ensure_header() -> void:
 	if _header_loaded:
 		return

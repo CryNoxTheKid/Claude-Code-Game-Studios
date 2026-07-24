@@ -42,26 +42,46 @@
 ## will consume; torn-read-free by construction (a plain synchronous scan,
 ## no locks) rather than via any locking mechanism.
 ##
-## Story vox-010 (this revision, ADR-0015) adds paged region-file residency
-## -- [method update_residency] computes the resident working set (camera-
-## near [member VoxelWorldConfig.view_radius_chunks] union active-settlement
-## [member VoxelWorldConfig.settlement_radius_chunks], around two injected
-## focus cells) and pages chunks in/out of [member _chunks] against on-disk
+## Story vox-010 (ADR-0015) added paged region-file residency -- [method
+## update_residency] computes the resident working set (camera-near [member
+## VoxelWorldConfig.view_radius_chunks] union active-settlement [member
+## VoxelWorldConfig.settlement_radius_chunks], around two injected focus
+## cells) and pages chunks in/out of [member _chunks] against on-disk
 ## [VoxelWorldRegionFile]s (TR-voxel-world-053). This is OPT-IN: a grid that
-## never calls [method update_residency] behaves byte-for-byte as before this
+## never calls [method update_residency] behaves byte-for-byte as before that
 ## story (every touched chunk stays resident for the session, zero
 ## filesystem touches) -- [member _residency_active] gates the only
 ## behavioral change to an existing method ([method get_cell]'s page-in
-## check). Page-in/eviction here are SYNCHRONOUS (this story's own scope);
-## moving them onto a `WorkerThreadPool` is Story 011, the per-frame time
-## budget is Story 012, the in-flight-write read-through cache is Story 013,
-## and load-before-write for a WRITE that targets a non-resident chunk is
-## Story 014 (today, [method _apply_write] still lazily allocates a fresh
-## chunk for such a write, same as before this story -- a known, deliberately
-## deferred gap, not a regression). A pristine chunk (never dirtied, absent
-## from its region file) pages in via deterministic terrain regeneration from
-## the seed ([method _regenerate_chunk_from_seed], ADR-0015 Decision §5),
-## never persisted until an actual write dirties it.
+## check). Story vox-010 also left a known, deliberately deferred gap: if a
+## WRITE ([method _apply_write]) targets an already-evicted chunk, it still
+## lazily allocates a fresh (empty) chunk rather than paging in the persisted
+## data first -- that page-in-before-write correctness rule is Story 014's
+## explicit scope.
+##
+## Story vox-011 (this revision, ADR-0015 Decision §6) makes EVERY region
+## read, region-flush write, and terrain regeneration run on a capped
+## `WorkerThreadPool` ([member VoxelWorldConfig.max_concurrent_async_tasks])
+## instead of synchronously on the calling thread -- "a synchronous fallback
+## IS the failure mode" the spike measured (a ~55 ms worst-case tail from one
+## unusually expensive item landing on the main thread). [method
+## update_residency] and [method get_cell]'s page-in check are now purely
+## non-blocking: a chunk whose background task has not finished, or could not
+## even be DISPATCHED because the pool is already at capacity, simply STAYS
+## QUEUED and is retried on the next call -- never read/regenerated/flushed
+## synchronously as a fallback. Every background task writes its result into
+## a mutex-guarded structure ([member _read_results]/[member _write_results])
+## that the calling thread later drains non-blockingly; [method
+## WorkerThreadPool.wait_for_task_completion]'s return value (an [Error]
+## code, not the task's data -- an engine fact the spike's own bug surfaced)
+## is never used as data anywhere in this file. The per-frame TIME BUDGET on
+## how much of this to drain per call is Story 012's scope (this story drains
+## everything currently ready, unbounded); the read-through in-flight-write
+## cache that lets a re-needed evicting chunk skip a racy region-file re-read
+## is Story 013's scope (a corresponding known gap is documented at [method
+## _request_resident]); the completion-DRIVEN (vs. this story's poll-based)
+## drain is Story 017's scope. [method wait_for_async_residency_idle] is a
+## bounded, blocking helper for tests and other explicit non-per-frame sync
+## points ONLY -- never call it from a per-frame path.
 class_name VoxelWorldGrid
 extends Node
 
@@ -160,13 +180,15 @@ var _boot_blocking_issues: Array[String] = []
 var _chunks: Dictionary[Vector2i, _ChunkBuffer] = {}
 
 ## Chunks with at least one write since they last became resident (either via
-## [method set_cell]/[method bulk_write], or a Story vox-010 page-in that
-## resulted from a fresh terrain regeneration is deliberately NOT marked
-## dirty here -- see [method _regenerate_chunk_from_seed]'s doc comment).
-## ONLY a dirty chunk is ever flushed to a region file on eviction (ADR-0015
-## Decision §2/§5: "a region that never has a dirty chunk never gets a file
-## on disk at all"). Set by [method _apply_write]; cleared by [method
-## _evict_chunk] on a successful flush.
+## [method set_cell]/[method bulk_write] -- a page-in that resulted from a
+## fresh terrain regeneration is deliberately NOT marked dirty here -- see
+## [method _bg_regenerate_from_seed]'s doc comment). ONLY a dirty chunk is
+## ever flushed to a region file on eviction (ADR-0015 Decision §2/§5: "a
+## region that never has a dirty chunk never gets a file on disk at all").
+## Set by [method _apply_write]; cleared by [method _request_evict] once its
+## background flush has been successfully DISPATCHED (Story vox-011 -- the
+## bytes then live on in [member _write_in_flight_data] until that flush is
+## actually durable).
 var _dirty_chunks: Dictionary[Vector2i, bool] = {}
 
 ## Per-region on-disk file handles (Story vox-010, ADR-0015 Decision §2),
@@ -182,10 +204,80 @@ var _region_files: Dictionary[Vector2i, VoxelWorldRegionFile] = {}
 ## (zero filesystem touches for a chunk that was never written).
 var _residency_active: bool = false
 
+## In-flight background PAGE-IN task ids (Story vox-011), keyed by chunk
+## coordinate -- present while a region-file read or terrain-gen dispatched
+## via [method _try_dispatch_read] has not yet been observed complete by
+## [method _try_integrate_read].
+var _read_tasks: Dictionary[Vector2i, int] = {}
+
+## Completed page-in results, keyed by chunk coordinate -- the MUTEX-GUARDED
+## structure [method _try_integrate_read] consumes ([member _task_mutex]),
+## written by a background task ([method _bg_read_from_disk]/[method
+## _bg_regenerate_from_seed]) exactly once each. [method
+## WorkerThreadPool.wait_for_task_completion]'s return value is NEVER used as
+## this data (ADR-0015 Decision §6 engine note, TR-voxel-world-053 QA AC-3).
+var _read_results: Dictionary[Vector2i, Dictionary] = {}
+
+## In-flight background EVICTION-FLUSH task ids (Story vox-011), keyed by
+## chunk coordinate -- present while a flush dispatched via [method
+## _try_dispatch_write] has not yet been reaped by [method
+## _reap_finished_async_writes].
+var _write_tasks: Dictionary[Vector2i, int] = {}
+
+## Completed flush results (`true` == succeeded), keyed by chunk coordinate --
+## the MUTEX-GUARDED structure [method _reap_finished_async_writes] consumes,
+## written by [method _bg_flush_chunk] exactly once each. Same
+## never-trust-`wait_for_task_completion`'s-return-value discipline as
+## [member _read_results].
+var _write_results: Dictionary[Vector2i, bool] = {}
+
+## A dirty chunk's serialized bytes while its eviction flush is in flight,
+## keyed by chunk coordinate -- populated by [method _try_dispatch_write] the
+## instant the resident copy is dropped from [member _chunks] (the bytes must
+## live SOMEWHERE while the background write runs), cleared by [method
+## _reap_finished_async_writes] once that write is durable. Story vox-013
+## wires the READ-THROUGH consumption of this (a chunk re-needed before its
+## own flush lands must be served from here, never from the region file,
+## which may be mid-write) -- this story only populates it; see [method
+## _request_resident]'s documented known gap.
+var _write_in_flight_data: Dictionary[Vector2i, PackedByteArray] = {}
+
+## Guards every read/write of [member _read_results] and [member
+## _write_results] from both the calling thread and every background
+## [WorkerThreadPool] task this class dispatches (Story vox-011, ADR-0015
+## Decision §6).
+var _task_mutex := Mutex.new()
+
+## The focus cells [method update_residency] was most recently called with --
+## used ONLY by [method wait_for_async_residency_idle] to keep re-driving the
+## same desired window while it waits for in-flight async work to settle
+## (tests/explicit sync points only, never the per-frame path itself).
+var _last_camera_focus_cell: Vector3i = Vector3i.ZERO
+var _last_settlement_anchor_cell: Vector3i = Vector3i.ZERO
+
 ## Current [enum GridState] -- see [method get_state] and [method
 ## generate_terrain]. Starts UNINITIALIZED for every new instance
 ## (TR-voxel-world-029).
 var _state: GridState = GridState.UNINITIALIZED
+
+
+## Lifecycle safety net (Story vox-011): every background [WorkerThreadPool]
+## task this class dispatches holds a `Callable(self, ...)` bound into THIS
+## Node -- freeing the Node while such a task is still in flight (queued or
+## executing) trips Godot's object-lock protection ("Attempted to free a
+## locked object"), since the engine correctly refuses to deallocate an
+## Object another thread might still be calling into. `NOTIFICATION_PREDELETE`
+## is the last point before actual deallocation where calling a method on
+## `self` is still valid, so draining every in-flight task here -- via the
+## SAME bounded, non-per-frame [method wait_for_async_residency_idle] tests
+## and other explicit sync points use -- is the correct, general fix (not a
+## test-only patch): ANY caller that destroys a grid with in-flight residency
+## work is protected, not just tests. A grid that never engaged residency
+## ([member _residency_active] false) has nothing to drain and this returns
+## immediately.
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_PREDELETE:
+		wait_for_async_residency_idle()
 
 
 ## Explicitly callable wiring/validation entry point (ADR-0001). Asserts
@@ -298,22 +390,45 @@ func generate_terrain() -> void:
 ## regardless of [param noise]'s returned value, so `noise2D` returning
 ## exactly `+-1` (QA plan AC-1 edge case) can never escape bounds.
 func _terrain_height(x: int, z: int, noise: FastNoiseLite) -> int:
-	var raw: float = float(config.base_height) + config.amplitude * noise.get_noise_2d(
-		float(x) * config.frequency, float(z) * config.frequency
+	return VoxelWorldGrid._pure_terrain_height(
+		x, z, noise, config.base_height, config.amplitude, config.frequency, config.min_y, config.max_y
 	)
-	return clampi(roundi(raw), config.min_y, config.max_y)
+
+
+## Pure per-column height evaluation (Story vox-011 extraction -- the exact
+## formula [method _terrain_height] always computed inline before this story;
+## behavior-preserving refactor, not a semantic change), parameterized
+## entirely by primitives rather than reading [member config] -- this is what
+## lets [method _bg_regenerate_from_seed] compute IDENTICAL terrain from a
+## background thread without touching this instance's [member config] Resource
+## at all (every value it needs is captured on the MAIN thread and bound into
+## the background task before dispatch, see [method _try_dispatch_read]).
+static func _pure_terrain_height(
+	x: int, z: int, noise: FastNoiseLite, base_height: int, amplitude: float, frequency: float, min_y: int, max_y: int
+) -> int:
+	var raw: float = float(base_height) + amplitude * noise.get_noise_2d(float(x) * frequency, float(z) * frequency)
+	return clampi(roundi(raw), min_y, max_y)
 
 
 ## Shared, fully-parameterized [FastNoiseLite] constructor (Story vox-010
 ## extraction -- identical field values [method generate_terrain] always set
 ## inline before this story; behavior-preserving refactor, not a semantic
-## change) -- used by both [method generate_terrain]'s eager fill and [method
-## _regenerate_chunk_from_seed]'s lazy per-chunk page-in regen, so both paths
-## derive terrain from the EXACT same deterministic seed setup
-## (TR-voxel-world-039).
+## change) -- used by [method generate_terrain]'s eager fill, so it derives
+## terrain from the EXACT same deterministic seed setup as [method
+## _pure_terrain_noise] (TR-voxel-world-039).
 func _make_terrain_noise() -> FastNoiseLite:
+	return VoxelWorldGrid._pure_terrain_noise(config.terrain_seed)
+
+
+## Pure counterpart of [method _make_terrain_noise] (Story vox-011
+## extraction), parameterized only by [param terrain_seed] -- used by BOTH
+## [method _make_terrain_noise] (main thread, reads [member config]) and
+## [method _bg_regenerate_from_seed] (background thread, never touches
+## [member config]), so two calls with the same seed produce byte-identical
+## terrain regardless of which thread runs them (TR-voxel-world-039).
+static func _pure_terrain_noise(terrain_seed: int) -> FastNoiseLite:
 	var noise := FastNoiseLite.new()
-	noise.seed = config.terrain_seed
+	noise.seed = terrain_seed
 	noise.noise_type = FastNoiseLite.TYPE_PERLIN
 	noise.frequency = 1.0
 	noise.fractal_type = FastNoiseLite.FRACTAL_NONE
@@ -531,13 +646,28 @@ func get_cell(cell: Vector3i) -> CellContents:
 		# data (this grid's own past write, now evicted) must page in and
 		# read correctly -- transparent residency. A chunk that was NEVER
 		# touched and has no region-file entry stays untouched here, exactly
-		# as before this story (no allocation, no filesystem I/O at all) --
-		# [member _residency_active] additionally gates this so a caller that
-		# never engages residency ([method update_residency]) sees zero
-		# behavior change.
+		# as before Story vox-010 (no allocation, no filesystem I/O at all,
+		# no async dispatch either -- TR-voxel-world-047 read-purity: a bare
+		# read over unexplored pristine terrain must never allocate or
+		# schedule background work as a side effect). [member
+		# _residency_active] additionally gates this so a caller that never
+		# engages residency ([method update_residency]) sees zero behavior
+		# change.
+		#
+		# Story vox-011 (ADR-0015 Decision §6): the page-in itself is now
+		# NON-BLOCKING -- [method _request_resident] either integrates an
+		# already-finished background result right now (no disk/regen touch
+		# on THIS thread, just consuming a completed task), dispatches a
+		# fresh background task (best-effort, cap-checked), or -- if the pool
+		# is already at capacity -- leaves the chunk queued for a later call.
+		# In every case this method returns WITHOUT blocking; if the chunk
+		# still isn't resident afterward, this read serves a transparent
+		# empty result for now (never a synchronous fallback) -- a later
+		# get_cell/update_residency call resolves it once the background task
+		# lands.
 		if _residency_active and _region_has_chunk(key):
-			_ensure_resident(key)
-		else:
+			_request_resident(key)
+		if not _chunks.has(key):
 			return CellContents.empty()
 	var buffer: _ChunkBuffer = _chunks[key]
 	var offset: int = _local_offset(cell, key)
@@ -763,12 +893,23 @@ func _chunk_height() -> int:
 ## [member VoxelWorldConfig.view_radius_chunks] UNION active-settlement
 ## [member VoxelWorldConfig.settlement_radius_chunks], around [param
 ## camera_focus_cell] and [param settlement_anchor_cell] respectively (ADR-0015
-## Decision §1, TR-voxel-world-053), then pages in every newly-desired chunk
-## ([method _ensure_resident]) and evicts every currently-resident chunk that
-## fell outside the new desired set ([method _evict_chunk]). SYNCHRONOUS --
-## this story's own scope; async dispatch (Story 011) and a per-frame time
-## budget (Story 012) are later stories layered behind this same method's
-## public contract, which does not change.
+## Decision §1, TR-voxel-world-053), then requests page-in for every
+## newly-desired chunk ([method _request_resident]) and requests eviction for
+## every currently-resident chunk that fell outside the new desired set
+## ([method _request_evict]).
+##
+## Story vox-011 (ADR-0015 Decision §6): both requests are NON-BLOCKING and
+## best-effort -- a chunk whose background task has not finished, or could
+## not even be dispatched because [member VoxelWorldConfig.max_concurrent_async_tasks]
+## is already saturated, simply STAYS in its current state (not yet resident,
+## or not yet evicted) and is retried the NEXT time this method is called --
+## never a synchronous read/regen/flush fallback. This method's own public
+## contract (signature, desired-set computation) is unchanged from Story
+## vox-010; only the page-in/eviction MECHANISM is now async. The per-frame
+## TIME BUDGET on how much of this to process per call is Story 012's scope
+## (this method itself processes the full desired/stale set every call,
+## bounded only by whatever the WorkerThreadPool cap allows to be dispatched
+## or has already finished).
 ##
 ## Both focus cells may lie outside the configured world bounds (e.g. a
 ## camera just past the world's edge) -- each candidate window chunk is
@@ -779,21 +920,28 @@ func _chunk_height() -> int:
 ## candidates near that edge, never crashes or corrupts state.
 ##
 ## Sets [member _residency_active] true on first call -- see that member's
-## doc comment for the opt-in behavior this gates on [method get_cell].
+## doc comment for the opt-in behavior this gates on [method get_cell]. Also
+## records [param camera_focus_cell]/[param settlement_anchor_cell] as [member
+## _last_camera_focus_cell]/[member _last_settlement_anchor_cell] -- consumed
+## ONLY by [method wait_for_async_residency_idle] (tests/explicit sync points,
+## never the per-frame path).
 func update_residency(camera_focus_cell: Vector3i, settlement_anchor_cell: Vector3i) -> void:
 	assert(config != null, "VoxelWorldGrid.update_residency: config not wired")
 	_residency_active = true
+	_last_camera_focus_cell = camera_focus_cell
+	_last_settlement_anchor_cell = settlement_anchor_cell
+	_reap_finished_async_writes()
 	var desired: Dictionary[Vector2i, bool] = {}
 	_collect_window(desired, _chunk_key(camera_focus_cell), config.view_radius_chunks)
 	_collect_window(desired, _chunk_key(settlement_anchor_cell), config.settlement_radius_chunks)
 	for chunk_key: Vector2i in desired:
-		_ensure_resident(chunk_key)
+		_request_resident(chunk_key)
 	var to_evict: Array[Vector2i] = []
 	for chunk_key: Vector2i in _chunks:
 		if not desired.has(chunk_key):
 			to_evict.append(chunk_key)
 	for chunk_key: Vector2i in to_evict:
-		_evict_chunk(chunk_key)
+		_request_evict(chunk_key)
 
 
 ## True if [param chunk_key] is CURRENTLY resident (has an entry in [member
@@ -832,78 +980,340 @@ func get_region_header_load_count(chunk_key: Vector2i) -> int:
 	return _region_files[region_key].header_load_count
 
 
-## Pages [param chunk_key] into [member _chunks] if it is not already
-## resident -- reads its persisted region-file payload if one exists
-## ([VoxelWorldRegionFile.has_chunk]), otherwise regenerates it deterministically
-## from the seed ([method _regenerate_chunk_from_seed], ADR-0015 Decision §5,
-## "pristine chunks regenerate from seed"). A no-op if already resident.
-func _ensure_resident(chunk_key: Vector2i) -> void:
+## Total in-flight async task count (Story vox-011) -- reads AND writes
+## SHARE one [member VoxelWorldConfig.max_concurrent_async_tasks] budget
+## (ADR-0015 Decision §6), so both dispatch paths check this same total
+## before adding a new task.
+func _in_flight_async_task_count() -> int:
+	return _read_tasks.size() + _write_tasks.size()
+
+
+## Test/diagnostic introspection (story QA plan AC-2): the current shared
+## in-flight task count. By construction ([method _try_dispatch_read]/[method
+## _try_dispatch_write] each check this BEFORE adding a task) this NEVER
+## exceeds [member VoxelWorldConfig.max_concurrent_async_tasks], regardless of
+## how many chunks are simultaneously desired.
+func get_in_flight_async_task_count() -> int:
+	return _in_flight_async_task_count()
+
+
+## Best-effort page-in request for [param chunk_key] (Story vox-011, ADR-0015
+## Decision §6) -- returns TRUE the instant the chunk is already resident,
+## has a just-finished background result integrated into [member _chunks]
+## right now ([method _try_integrate_read], non-blocking), or was freshly
+## dispatched onto the [WorkerThreadPool] this call ([method
+## _try_dispatch_read]). Returns FALSE only when the chunk still has no
+## finished result AND could not be dispatched because [member
+## VoxelWorldConfig.max_concurrent_async_tasks] is already saturated -- the
+## caller ([method update_residency]/[method get_cell]) simply leaves [param
+## chunk_key] queued and retries on a later call (ADR-0015 Decision §6:
+## cap-miss stays queued, never a synchronous read/regen fallback).
+##
+## KNOWN GAP, deliberately deferred to Story 013 (ADR-0015 Decision §3's
+## read-through in-flight-write cache -- the same "known, deliberately
+## deferred gap" pattern Story vox-010 documented for load-before-write): if
+## [param chunk_key] is currently mid-eviction-flush ([member
+## _write_in_flight_data] holds its not-yet-durable bytes), this method does
+## not yet serve those in-memory bytes directly -- it may dispatch a genuine
+## region-file read that races the still-in-flight write. Wiring that
+## read-through short-circuit is Story 013's explicit scope (see that
+## story's Dependencies: "Depends on: Story 011").
+func _request_resident(chunk_key: Vector2i) -> bool:
 	if _chunks.has(chunk_key):
-		return
+		return true
+	if _try_integrate_read(chunk_key):
+		return true
+	return _try_dispatch_read(chunk_key)
+
+
+## Non-blocking: TRUE and integrates [param chunk_key] into [member _chunks]
+## if (and only if) its background read task has already finished --
+## [method WorkerThreadPool.is_task_completed] is a pure poll, never a wait.
+## The finished payload is consumed from [member _read_results] under
+## [member _task_mutex] -- [method WorkerThreadPool.wait_for_task_completion]
+## IS still called here, but only to join/free an ALREADY-complete task (it
+## never blocks in that case), and its [Error]-code return is discarded,
+## never treated as the chunk's data (ADR-0015 Decision §6 engine note;
+## TR-voxel-world-053 QA AC-3).
+func _try_integrate_read(chunk_key: Vector2i) -> bool:
+	if not _read_tasks.has(chunk_key):
+		return false
+	var task_id: int = _read_tasks[chunk_key]
+	if not WorkerThreadPool.is_task_completed(task_id):
+		return false
+	WorkerThreadPool.wait_for_task_completion(task_id)  # instant join/free of an already-finished task; Error return discarded
+	_read_tasks.erase(chunk_key)
+	_task_mutex.lock()
+	var result: Dictionary = _read_results[chunk_key]
+	_read_results.erase(chunk_key)
+	_task_mutex.unlock()
+	_chunks[chunk_key] = _deserialize_chunk_buffer(result["data"])
+	return true
+
+
+## Dispatches a background page-in task for [param chunk_key] if [member
+## VoxelWorldConfig.max_concurrent_async_tasks] allows -- returns TRUE once
+## dispatched (or if a task for this key is already in flight), FALSE if the
+## shared cap is already saturated (cap-miss, caller leaves it queued). The
+## ONE sanctioned synchronous touch here is region-header bookkeeping
+## ([method VoxelWorldRegionFile.has_chunk]/[method VoxelWorldRegionFile.offset_of],
+## ADR-0015 Decision §6's one-time-per-region exception) -- the actual
+## payload read ([method _bg_read_from_disk]) or terrain regen ([method
+## _bg_regenerate_from_seed]) runs entirely on the [WorkerThreadPool], never
+## on this thread.
+func _try_dispatch_read(chunk_key: Vector2i) -> bool:
+	if _read_tasks.has(chunk_key):
+		return true
+	if _in_flight_async_task_count() >= config.max_concurrent_async_tasks:
+		return false
 	var region_key: Vector2i = _region_key_for_chunk(chunk_key)
 	var region_file: VoxelWorldRegionFile = _get_or_create_region_file(region_key)
 	var slot: int = _slot_in_region(chunk_key, region_key)
-	if region_file.has_chunk(slot):
-		_chunks[chunk_key] = _deserialize_chunk_buffer(region_file.read_chunk(slot))
+	var present: bool = region_file.has_chunk(slot)
+	var task_id: int
+	if present:
+		var offset: int = region_file.offset_of(slot)
+		task_id = WorkerThreadPool.add_task(
+			Callable(self, "_bg_read_from_disk").bind(chunk_key, region_file.path, offset, _chunk_payload_bytes())
+		)
 	else:
-		_chunks[chunk_key] = _regenerate_chunk_from_seed(chunk_key)
-
-
-## Evicts [param chunk_key] from [member _chunks] -- if it is currently
-## dirty ([member _dirty_chunks]), flushes its bytes to its region file
-## FIRST ([VoxelWorldRegionFile.write_chunk], ADR-0015 Decision §2) and only
-## then drops it from residency. A flush failure (surfaced via [method
-## VoxelWorldRegionFile.write_chunk]'s `bool` return) `push_error`s and keeps
-## the chunk resident rather than evicting it -- "never applied to disk
-## blind, and never dropped" (ADR-0015 Decision §3's principle, applied here
-## to the eviction-flush case too). A no-op if not currently resident.
-func _evict_chunk(chunk_key: Vector2i) -> void:
-	if not _chunks.has(chunk_key):
-		return
-	if _dirty_chunks.has(chunk_key):
-		var region_key: Vector2i = _region_key_for_chunk(chunk_key)
-		var region_file: VoxelWorldRegionFile = _get_or_create_region_file(region_key)
-		var slot: int = _slot_in_region(chunk_key, region_key)
-		var flushed: bool = region_file.write_chunk(slot, _serialize_chunk_buffer(_chunks[chunk_key]))
-		if not flushed:
-			push_error(
-				"VoxelWorldGrid._evict_chunk: failed to flush dirty chunk %s -- keeping it resident (never drop a write)" % chunk_key
+		task_id = WorkerThreadPool.add_task(
+			Callable(self, "_bg_regenerate_from_seed").bind(
+				chunk_key, config.terrain_seed, config.base_height, config.amplitude, config.frequency,
+				config.min_y, config.max_y, config.world_width_cells, config.world_depth_cells
 			)
-			return
-		_dirty_chunks.erase(chunk_key)
-	_chunks.erase(chunk_key)
+		)
+	_read_tasks[chunk_key] = task_id
+	return true
 
 
-## Deterministic per-chunk terrain regeneration (ADR-0015 Decision §5,
-## TR-voxel-world-039 seeded-regen premise) -- computes exactly the same
-## `procedural_terrain_height` formula [method generate_terrain] uses (via
-## the SAME [method _make_terrain_noise] seed setup), scoped to [param
-## chunk_key]'s own [constant CHUNK_SIZE] x [constant CHUNK_SIZE] columns,
-## and fills a fresh [_ChunkBuffer] DIRECTLY -- bypassing [method
-## _apply_write] entirely, so this never marks the chunk dirty and never
-## emits [signal cell_changed]/[signal cells_changed_batch] (page-in must be
-## silent/transparent to consumers, ADR-0015 Decision §1). A column outside
-## the configured world extent (possible only if `world_width_cells`/
-## `world_depth_cells` isn't an exact multiple of [constant CHUNK_SIZE]) is
-## skipped, staying zero-filled/empty -- the same never-write-out-of-bounds
-## discipline [method iterate_occupied]'s doc comment already establishes.
-func _regenerate_chunk_from_seed(chunk_key: Vector2i) -> _ChunkBuffer:
-	var noise: FastNoiseLite = _make_terrain_noise()
-	var buffer := _ChunkBuffer.new(CHUNK_SIZE * CHUNK_SIZE * _chunk_height())
+## Background [WorkerThreadPool] task body (Story vox-011) -- pure disk I/O
+## via the `static` [method VoxelWorldRegionFile.read_payload_at] (touches no
+## shared instance state), writing its result into the MUTEX-GUARDED [member
+## _read_results] -- never returned via [method
+## WorkerThreadPool.wait_for_task_completion] (ADR-0015 Decision §6 engine
+## note, the spike's own bug (i)).
+func _bg_read_from_disk(chunk_key: Vector2i, path: String, offset: int, payload_bytes: int) -> void:
+	var data: PackedByteArray = VoxelWorldRegionFile.read_payload_at(path, offset, payload_bytes)
+	_task_mutex.lock()
+	_read_results[chunk_key] = {"data": data}
+	_task_mutex.unlock()
+
+
+## Background [WorkerThreadPool] task body (Story vox-011, ADR-0015 Decision
+## §5) -- deterministic terrain regen for a pristine (never-persisted) chunk,
+## computing exactly the same `procedural_terrain_height` formula [method
+## generate_terrain]/[method _terrain_height] use ([method
+## _pure_terrain_height], [method _pure_terrain_noise]), scoped to [param
+## chunk_key]'s own [constant CHUNK_SIZE] x [constant CHUNK_SIZE] columns.
+## Deliberately reads NOTHING from [member config] or any other shared
+## instance state -- every value this needs is captured on the MAIN thread
+## and bound in before dispatch (see [method _try_dispatch_read]), so two
+## calls with the same [param terrain_seed] produce byte-identical terrain
+## regardless of which thread runs them (TR-voxel-world-039). Writes its
+## result -- serialized in the SAME flat layout [method
+## _serialize_chunk_buffer] uses (block_type_ids then material_ids) -- into
+## the mutex-guarded [member _read_results]; see [method _bg_read_from_disk]'s
+## doc comment for why. A column outside the configured world extent
+## (possible only if `world_width_cells`/`world_depth_cells` isn't an exact
+## multiple of [constant CHUNK_SIZE]) is skipped, staying zero-filled/empty --
+## the same never-write-out-of-bounds discipline [method iterate_occupied]'s
+## doc comment already establishes. Never marks anything dirty and never
+## emits any signal -- page-in must be silent/transparent to consumers
+## (ADR-0015 Decision §1), and this runs off the main thread besides.
+func _bg_regenerate_from_seed(
+	chunk_key: Vector2i, terrain_seed: int, base_height: int, amplitude: float, frequency: float,
+	min_y: int, max_y: int, world_width_cells: int, world_depth_cells: int
+) -> void:
+	var noise: FastNoiseLite = VoxelWorldGrid._pure_terrain_noise(terrain_seed)
+	var chunk_height: int = max_y - min_y + 1
+	var cell_count: int = CHUNK_SIZE * CHUNK_SIZE * chunk_height
+	var block_type_ids := PackedByteArray()
+	block_type_ids.resize(cell_count)
+	var material_ids := PackedByteArray()
+	material_ids.resize(cell_count)
 	for local_z in CHUNK_SIZE:
 		var global_z: int = chunk_key.y * CHUNK_SIZE + local_z
-		if global_z < 0 or global_z >= config.world_depth_cells:
+		if global_z < 0 or global_z >= world_depth_cells:
 			continue
 		for local_x in CHUNK_SIZE:
 			var global_x: int = chunk_key.x * CHUNK_SIZE + local_x
-			if global_x < 0 or global_x >= config.world_width_cells:
+			if global_x < 0 or global_x >= world_width_cells:
 				continue
-			var height: int = _terrain_height(global_x, global_z, noise)
-			for y in range(config.min_y, height + 1):
-				var offset: int = ((y - config.min_y) * CHUNK_SIZE + local_z) * CHUNK_SIZE + local_x
-				buffer.block_type_ids[offset] = TERRAIN_BLOCK_TYPE_ID
-				buffer.material_ids[offset] = TERRAIN_MATERIAL_ID
-	return buffer
+			var height: int = VoxelWorldGrid._pure_terrain_height(
+				global_x, global_z, noise, base_height, amplitude, frequency, min_y, max_y
+			)
+			for y in range(min_y, height + 1):
+				var offset: int = ((y - min_y) * CHUNK_SIZE + local_z) * CHUNK_SIZE + local_x
+				block_type_ids[offset] = TERRAIN_BLOCK_TYPE_ID
+				material_ids[offset] = TERRAIN_MATERIAL_ID
+	var payload := PackedByteArray()
+	payload.append_array(block_type_ids)
+	payload.append_array(material_ids)
+	_task_mutex.lock()
+	_read_results[chunk_key] = {"data": payload}
+	_task_mutex.unlock()
+
+
+## Best-effort eviction request for [param chunk_key] (Story vox-011, ADR-0015
+## Decision §6 lever 2) -- returns TRUE the instant [param chunk_key] is
+## already non-resident, was evicted immediately (clean -- no I/O needed at
+## all, the exact same zero-I/O contract Story vox-010 already had for a
+## never-dirtied chunk), or had its flush freshly dispatched onto the
+## [WorkerThreadPool] this call (the resident copy is dropped immediately --
+## its bytes live on in [member _write_in_flight_data] until the background
+## write lands, ADR-0015 Decision §3's read-through mechanism, wired by Story
+## 013). Returns FALSE (chunk stays resident, caller retries on a later call)
+## ONLY when dirty AND the shared cap is already saturated -- never a
+## synchronous flush fallback.
+func _request_evict(chunk_key: Vector2i) -> bool:
+	if not _chunks.has(chunk_key):
+		return true
+	if not _dirty_chunks.has(chunk_key):
+		_chunks.erase(chunk_key)
+		return true
+	if not _try_dispatch_write(chunk_key, _serialize_chunk_buffer(_chunks[chunk_key])):
+		return false
+	_dirty_chunks.erase(chunk_key)
+	_chunks.erase(chunk_key)
+	return true
+
+
+## Dispatches a background eviction-flush task for [param chunk_key] carrying
+## the already-serialized [param data] if [member
+## VoxelWorldConfig.max_concurrent_async_tasks] allows -- returns TRUE once
+## dispatched (or if a flush for this key is already in flight), FALSE if the
+## shared cap is already saturated. [VoxelWorldRegionFile.reserve_offset_for_write]
+## is the ONE sanctioned synchronous touch (main-thread bookkeeping + a
+## one-time-per-region file/header creation, ADR-0015 Decision §6) -- the
+## actual payload write ([method _bg_flush_chunk]) runs entirely on the
+## [WorkerThreadPool].
+func _try_dispatch_write(chunk_key: Vector2i, data: PackedByteArray) -> bool:
+	if _write_tasks.has(chunk_key):
+		return true
+	if _in_flight_async_task_count() >= config.max_concurrent_async_tasks:
+		return false
+	var region_key: Vector2i = _region_key_for_chunk(chunk_key)
+	var region_file: VoxelWorldRegionFile = _get_or_create_region_file(region_key)
+	var slot: int = _slot_in_region(chunk_key, region_key)
+	var offset: int = region_file.reserve_offset_for_write(slot)
+	_write_in_flight_data[chunk_key] = data
+	var task_id: int = WorkerThreadPool.add_task(
+		Callable(self, "_bg_flush_chunk").bind(chunk_key, region_file.path, slot, offset, data)
+	)
+	_write_tasks[chunk_key] = task_id
+	return true
+
+
+## Background [WorkerThreadPool] task body (Story vox-011) -- pure disk I/O
+## via the `static` [method VoxelWorldRegionFile.write_payload_at] (touches
+## no shared instance state), writing its `bool` success result into the
+## MUTEX-GUARDED [member _write_results] -- never returned via [method
+## WorkerThreadPool.wait_for_task_completion] (same discipline as [method
+## _bg_read_from_disk]).
+func _bg_flush_chunk(chunk_key: Vector2i, path: String, slot: int, offset: int, data: PackedByteArray) -> void:
+	var ok: bool = VoxelWorldRegionFile.write_payload_at(path, slot, offset, data)
+	_task_mutex.lock()
+	_write_results[chunk_key] = ok
+	_task_mutex.unlock()
+
+
+## Non-blocking bookkeeping (Story vox-011): joins any FINISHED flush tasks --
+## consumed from the MUTEX-GUARDED [member _write_results], never from
+## [method WorkerThreadPool.wait_for_task_completion]'s return value
+## (TR-voxel-world-053 QA AC-3). A failed flush `push_error`s (ADR-0015
+## Decision §3's "never applied to disk blind, and never dropped" principle
+## still applies off-thread) -- this story does not yet re-queue a failed
+## flush for retry, a real, deliberately deferred gap in the same spirit as
+## Story vox-010's documented load-before-write gap. Called at the top of
+## every [method update_residency] call, and by [method
+## wait_for_async_residency_idle].
+func _reap_finished_async_writes() -> void:
+	if _write_tasks.is_empty():
+		return
+	var done: Array[Vector2i] = []
+	for chunk_key: Vector2i in _write_tasks:
+		if WorkerThreadPool.is_task_completed(_write_tasks[chunk_key]):
+			done.append(chunk_key)
+	for chunk_key: Vector2i in done:
+		WorkerThreadPool.wait_for_task_completion(_write_tasks[chunk_key])  # instant join/free; Error return discarded
+		_write_tasks.erase(chunk_key)
+		_task_mutex.lock()
+		var ok: bool = _write_results.get(chunk_key, false)
+		_write_results.erase(chunk_key)
+		_task_mutex.unlock()
+		if not ok:
+			push_error("VoxelWorldGrid._reap_finished_async_writes: background flush failed for chunk %s" % chunk_key)
+		_write_in_flight_data.erase(chunk_key)
+
+
+## Blocks (BOUNDED) until every currently in-flight async page-in/eviction
+## task has settled, or [param max_wait_msec] elapses -- NEVER called from the
+## per-frame residency path (that would reintroduce exactly the synchronous-
+## fallback failure mode ADR-0015 Decision §6 forbids). This exists for tests
+## and other explicit, infrequent synchronization points (mirroring the same
+## "explicit action, not a per-frame path" exception ADR-0015 grants a
+## save-triggered flush) -- each iteration drains whatever has already
+## finished via the SAME non-blocking paths [method update_residency] itself
+## uses ([method _reap_finished_async_writes], [method _try_integrate_read]
+## for every currently in-flight read regardless of whether it is still in
+## the last-requested desired window, plus a re-drive of [method
+## update_residency] with the SAME focus cells to retry any chunk that was
+## cap-missed and never got dispatched at all), with a BOUNDED [method
+## OS.delay_msec] between polls -- never an unbounded spin. Returns as soon as
+## nothing is left in flight.
+##
+## KNOWN LIMITATION (found while implementing this story's own tests): a
+## chunk made resident ONLY via a side-channel dispatch OUTSIDE the currently
+## active desired window (e.g. a bare [method get_cell] call on a chunk
+## [method update_residency] was never asked to keep resident) can get
+## evicted again by this method's OWN re-drive of [method update_residency]
+## before the caller observes it -- this is in fact CORRECT production
+## behavior (a transient page-in that nothing continues to want is not
+## artificially pinned resident forever), but it means this method is the
+## WRONG tool for "wait for a bare get_cell's own dispatch to land." Use
+## [method drain_pending_async_reads] for that narrower case instead -- it
+## never touches [method update_residency] or eviction at all.
+func wait_for_async_residency_idle(max_wait_msec: int = 2000) -> void:
+	var elapsed_msec: int = 0
+	while true:
+		_reap_finished_async_writes()
+		var pending_reads: Array[Vector2i] = _read_tasks.keys()
+		for chunk_key: Vector2i in pending_reads:
+			_try_integrate_read(chunk_key)
+		if _residency_active:
+			update_residency(_last_camera_focus_cell, _last_settlement_anchor_cell)
+		if _in_flight_async_task_count() == 0:
+			return
+		if elapsed_msec >= max_wait_msec:
+			return
+		OS.delay_msec(1)
+		elapsed_msec += 1
+
+
+## Blocks (BOUNDED) until every currently in-flight PAGE-IN (read) task has
+## settled, or [param max_wait_msec] elapses -- narrower than [method
+## wait_for_async_residency_idle]: this NEVER calls [method update_residency]
+## and NEVER evicts anything, so it is the correct settle primitive for a
+## chunk dispatched via a side channel (e.g. a bare [method get_cell] call)
+## OUTSIDE the currently active desired window, which [method
+## wait_for_async_residency_idle]'s own re-drive of [method update_residency]
+## would otherwise evict again before the caller observes it. NEVER called
+## from the per-frame residency path -- tests and other explicit,
+## infrequent synchronization points ONLY, same as [method
+## wait_for_async_residency_idle].
+func drain_pending_async_reads(max_wait_msec: int = 2000) -> void:
+	var elapsed_msec: int = 0
+	while not _read_tasks.is_empty():
+		var pending_reads: Array[Vector2i] = _read_tasks.keys()
+		for chunk_key: Vector2i in pending_reads:
+			_try_integrate_read(chunk_key)
+		if _read_tasks.is_empty():
+			return
+		if elapsed_msec >= max_wait_msec:
+			return
+		OS.delay_msec(1)
+		elapsed_msec += 1
 
 
 ## True if [param chunk_key]'s region file has a persisted entry for it --
@@ -962,8 +1372,11 @@ func _slot_in_region(chunk_key: Vector2i, region_key: Vector2i) -> int:
 ## whole lifetime -- the one-header-load-per-region guarantee, TR-voxel-world-053)
 ## on first touch. Constructing a [VoxelWorldRegionFile] does NOT itself
 ## touch the filesystem -- that happens lazily inside its own [method
-## VoxelWorldRegionFile.has_chunk]/[method VoxelWorldRegionFile.read_chunk]/
-## [method VoxelWorldRegionFile.write_chunk] calls.
+## VoxelWorldRegionFile.has_chunk]/[method VoxelWorldRegionFile.offset_of]/
+## [method VoxelWorldRegionFile.reserve_offset_for_write] calls (Story
+## vox-011: the actual chunk-payload bytes are read/written off the main
+## thread via that class's `static` [method VoxelWorldRegionFile.read_payload_at]/
+## [method VoxelWorldRegionFile.write_payload_at]).
 func _get_or_create_region_file(region_key: Vector2i) -> VoxelWorldRegionFile:
 	if _region_files.has(region_key):
 		return _region_files[region_key]

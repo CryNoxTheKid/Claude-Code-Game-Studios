@@ -79,6 +79,15 @@ const VIEW_RADIUS_CHUNKS_MAX: int = 64
 const SETTLEMENT_RADIUS_CHUNKS_MIN: int = 1
 const SETTLEMENT_RADIUS_CHUNKS_MAX: int = 32
 
+## Safe range for [member max_concurrent_async_tasks] (Story vox-011,
+## ADR-0015 Decision §6's `MAX_CONCURRENT_ASYNC_TASKS` -- "a config knob" the
+## spike measured at 32 and 64 with the worst frame nearly identical between
+## them, i.e. "the exact cap is not load-bearing" -- Story 016 measures/
+## records the tuned production value; this range only guards against a
+## degenerate 0-or-negative or absurdly large value).
+const MAX_CONCURRENT_ASYNC_TASKS_MIN: int = 1
+const MAX_CONCURRENT_ASYNC_TASKS_MAX: int = 128
+
 ## Fallback used by [method validate] when [member region_directory] is
 ## empty (a single-field clamp-to-default, same two-tier policy as every
 ## other ranged knob here).
@@ -157,6 +166,17 @@ const REGION_DIRECTORY_DEFAULT: String = "user://regions"
 ## that story lands. [TR-voxel-world-053]
 @export var settlement_radius_chunks: int = 8
 
+## Maximum number of in-flight [WorkerThreadPool] tasks Voxel World's
+## residency tier will have dispatched at once, SHARED across region-file
+## reads, terrain-gen (Story 011), AND eviction-flush writes (ADR-0015
+## Decision §6's `MAX_CONCURRENT_ASYNC_TASKS`; spike default 32 -- measured
+## at 32 and 64, worst frame nearly identical between them). A chunk that
+## needs paging in/out when this cap is already saturated simply stays
+## queued for a later call -- it is NEVER read/regenerated/flushed
+## synchronously as a fallback (ADR-0015 Decision §6: "a synchronous fallback
+## IS the failure mode"). [TR-voxel-world-053]
+@export var max_concurrent_async_tasks: int = 32
+
 
 ## See [ConfigResource.validate]. Clamps every ranged knob to its
 ## GDD-documented safe bound in place (the sole sanctioned runtime write to
@@ -227,6 +247,12 @@ func validate() -> Array[String]:
 			[SETTLEMENT_RADIUS_CHUNKS_MIN, SETTLEMENT_RADIUS_CHUNKS_MAX, settlement_radius_chunks]
 		)
 		settlement_radius_chunks = clampi(settlement_radius_chunks, SETTLEMENT_RADIUS_CHUNKS_MIN, SETTLEMENT_RADIUS_CHUNKS_MAX)
+	if max_concurrent_async_tasks < MAX_CONCURRENT_ASYNC_TASKS_MIN or max_concurrent_async_tasks > MAX_CONCURRENT_ASYNC_TASKS_MAX:
+		issues.append(
+			"max_concurrent_async_tasks out of range [%s, %s], got %s -- clamped" %
+			[MAX_CONCURRENT_ASYNC_TASKS_MIN, MAX_CONCURRENT_ASYNC_TASKS_MAX, max_concurrent_async_tasks]
+		)
+		max_concurrent_async_tasks = clampi(max_concurrent_async_tasks, MAX_CONCURRENT_ASYNC_TASKS_MIN, MAX_CONCURRENT_ASYNC_TASKS_MAX)
 	if min_y > max_y:
 		issues.append(ConfigResource.format_blocking(
 			"min_y (%s) must be <= max_y (%s)" % [min_y, max_y]
