@@ -1,7 +1,7 @@
 # Story 033: Voxel World write seam — batched bulk-write + self-write exemption + completion signal
 
 > **Epic**: Building System
-> **Status**: Ready
+> **Status: Complete (2026-07-24 — 827/827 suite green 0 orphans, parent-verified)
 > **Layer**: Core
 > **Type**: Integration
 > **Estimate**: 1 day

@@ -527,22 +527,30 @@ func test_race_completion_reported_exactly_once_under_multi_tick_burst() -> void
 	_place(worker, target)
 
 	var cell_changed_count: Array = [0]
+	var batch_count: Array = [0]
 	env.grid.cell_changed.connect(
 		func(_cell: Vector3i, _before: CellContents, _after: CellContents) -> void:
 			cell_changed_count[0] += 1
+	)
+	env.grid.cells_changed_batch.connect(
+		func(_changes: Array[CellChangeRecord]) -> void:
+			batch_count[0] += 1
 	)
 
 	# A burst well past the completion threshold in ONE go (building-029's
 	# own AC25/AC45 burst rule) -- no double-credit, no duplicate completion
 	# signal, even though the villager's own `_tick_working` keeps observing
 	# state every tick of the burst (mirrors production's own per-tick
-	# dispatch, restricted to while it is genuinely still WORKING).
+	# dispatch, restricted to while it is genuinely still WORKING). Story
+	# building-033: the completion write now goes through the batched
+	# `cells_changed_batch` path, never the single-cell `cell_changed` path.
 	for _i in range(loop_config.base_build_ticks_block + 10):
 		tick_source.fire_tick()
 		if worker.get_state() == VillagerAi.State.WORKING:
 			worker._tick_working()
 
-	assert_int(cell_changed_count[0]).is_equal(1)
+	assert_int(cell_changed_count[0]).is_equal(0)
+	assert_int(batch_count[0]).is_equal(1)
 	assert_int(project.cells[target].state).is_equal(BlueprintCell.MicroState.BUILT)
 	assert_int(env.queue.get_available_jobs().size()).is_equal(0)
 	# The villager's own completion path ran exactly once too -- re-entering

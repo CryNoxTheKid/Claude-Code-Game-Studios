@@ -26,14 +26,12 @@
 ##   a REAL villager's own Deciding/F2/claim pass (Story villager-ai-012,
 ##   see below) -> [ConstructionTickLoop]'s real tick-driven completion —
 ##   asserts the completion write lands in real Voxel World grid data AND
-##   fires exactly ONE `cell_changed` for the completion frame. (Deviation
-##   note: the landed `construction_tick_loop.gd`, story building-029,
-##   completes a job via the single-cell `VoxelWorldGrid.set_cell` path —
-##   NOT `bulk_write` — by its own explicit, documented design; batching
-##   same-frame completions into one `bulk_write`/`cells_changed_batch` is
-##   building-033's separate, not-yet-landed scope. This test asserts
-##   against the REAL signal the landed code actually fires, `cell_changed`,
-##   rather than a signal this path does not emit.)
+##   fires exactly ONE `cells_changed_batch` for the completion frame, ZERO
+##   `cell_changed`. (Updated by Story building-033: the landed
+##   `construction_tick_loop.gd` now batches EVERY completion — including a
+##   lone single-cell one — through `VoxelWorldGrid.bulk_write`, never the
+##   single-cell `set_cell` path this test asserted against before that
+##   story landed; see that file's own class doc comment point 5.)
 ## - **AC-VILLAGER-WALKS**: a villager runs a REAL Deciding pass (005/006:
 ##   scheduler dequeue -> priority-list commit to WORK) against a REAL
 ##   [ConstructionJobQueue]/[BuildProject] (Story villager-ai-012 smoke-item
@@ -231,9 +229,14 @@ func test_ac_place_a_block_committed_through_real_pipeline_writes_voxel_world_an
 	loop.setup()
 
 	var cell_changed_count: Array = [0]
+	var batch_count: Array = [0]
 	grid.cell_changed.connect(
 		func(_cell: Vector3i, _before: CellContents, _after: CellContents) -> void:
 			cell_changed_count[0] += 1
+	)
+	grid.cells_changed_batch.connect(
+		func(_changes: Array[CellChangeRecord]) -> void:
+			batch_count[0] += 1
 	)
 
 	# Act 1 -- the real pick pipeline: screen ray (camera.get_world_ray(),
@@ -309,13 +312,14 @@ func test_ac_place_a_block_committed_through_real_pipeline_writes_voxel_world_an
 		tick_source.fire_tick()
 
 	# Assert -- the target cell is Built in REAL Voxel World grid data, and
-	# exactly one cell_changed fired for the completion frame (the landed
-	# building-029 write path -- single-cell set_cell, never bulk_write; see
-	# class doc comment's deviation note). The closed loop also completes:
-	# the claim is released and the villager re-enters Deciding.
+	# exactly one cells_changed_batch fired for the completion frame (Story
+	# building-033's batched-write path -- see class doc comment's own
+	# updated note); zero cell_changed fired. The closed loop also
+	# completes: the claim is released and the villager re-enters Deciding.
 	assert_int(target.state).is_equal(BlueprintCell.MicroState.BUILT)
 	assert_bool(grid.get_cell(target.cell).is_empty()).is_false()
-	assert_int(cell_changed_count[0]).is_equal(1)
+	assert_int(cell_changed_count[0]).is_equal(0)
+	assert_int(batch_count[0]).is_equal(1)
 	# The villager re-enters the decision loop -- whether the exact terminal
 	# snapshot is DECIDING or WANDERING depends on whether Rule 2's own
 	# periodic decision_interval re-check (Story villager-ai-006, unrelated

@@ -105,7 +105,7 @@ stories:
     name: "Voxel World write seam — batched bulk-write + self-write exemption + completion signal"
     file: "production/epics/building-system/story-033-voxel-write-seam.md"
     priority: nice-to-have
-    status: backlog
+    status: complete
     owner: "godot-specialist"
     estimate_days: 1.0
     blocker: "depends on building-029 (DONE), building-032 (in-sprint)"

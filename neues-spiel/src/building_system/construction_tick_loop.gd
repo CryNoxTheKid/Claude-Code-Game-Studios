@@ -63,20 +63,50 @@
 ##    cell, and a villager is never automatically re-assigned a new cell
 ##    within this class (claiming a new cell is Story 030's separate act).
 ## 4. **The Voxel World write + retirement** ([TR-building-system-057]):
-##    completing a job calls [method VoxelWorldGrid.set_cell] with the
-##    blueprint cell's own [member BlueprintCell.contents] (a PLACEHOLDER
-##    pending Story 022's real material-selection wiring -- see
-##    [BlueprintCell]'s own doc comment) and transitions [member
-##    BlueprintCell.state] to [constant BlueprintCell.MicroState.BUILT].
-##    Uses the plain single-cell [method VoxelWorldGrid.set_cell] path
-##    (never [method VoxelWorldGrid.bulk_write]) -- collecting a FRAME's
-##    worth of simultaneous completions into one batched write is
-##    explicitly Story 033's scope ("this story issues the write; 033 owns
-##    batching/signal contract"); [signal VoxelWorldGrid.cell_changed]
-##    still fires with its normal default semantics on every completion,
-##    which is exactly the signal Villager AI's nav-graph patching (story
-##    villager-ai-008) already subscribes to synchronously -- no new
-##    signal, no special flag, no second write path.
+##    completing a job means the cell's contents ([member
+##    BlueprintCell.contents], a PLACEHOLDER pending Story 022's real
+##    material-selection wiring -- see [BlueprintCell]'s own doc comment) get
+##    written to Voxel World and [member BlueprintCell.state] transitions to
+##    [constant BlueprintCell.MicroState.BUILT]. Story building-033 (point 5
+##    below) changed HOW that write is issued -- see that paragraph for the
+##    batched-write mechanics this point used to own entirely on its own.
+## 5. **Batched completion write + self-write tag + Build Validation seam**
+##    (Story building-033, [TR-building-system-072]/[TR-building-system-024]/
+##    [TR-building-system-075]): [method _on_tick] no longer calls [method
+##    VoxelWorldGrid.set_cell] once per completing job -- it collects EVERY
+##    job that reaches its completion threshold in THIS SAME dispatch into
+##    one `Dictionary[Vector3i, CellContents]` and issues exactly ONE
+##    [method VoxelWorldGrid.bulk_write] call at the end via [method
+##    _complete_jobs] (even for a single completion -- there is no "a batch
+##    of one is still single-cell" special case; every completion, always,
+##    goes through the SAME batched path), so [signal
+##    VoxelWorldGrid.cells_changed_batch] fires AT MOST ONCE per tick
+##    regardless of how many jobs completed, and [signal
+##    VoxelWorldGrid.cell_changed] never fires for a completion anymore
+##    (Villager AI's nav-graph patching, story villager-ai-008, already
+##    subscribes to BOTH signals, so this is transparent to it). [member
+##    write_tag] ([BuildingSystemWriteTag]) brackets that single [method
+##    VoxelWorldGrid.bulk_write] call with `begin()`/`end()` -- Godot's
+##    default synchronous signal delivery means [UndoRedoStack]'s own
+##    undo-invalidation listener (a caller sharing the SAME
+##    [BuildingSystemWriteTag] instance) observes `is_active() == true` for
+##    the FULL duration of that call, recognizing every cell this dispatch
+##    just wrote as self-originated and never invalidating an undo entry
+##    over it (AC46). Every cell actually completed this dispatch (the SAME
+##    set the batched write covers) is also collected into [signal
+##    construction_completed] -- fired exactly once, AFTER the write, only
+##    when at least one job completed (never a zero-cell emission) -- the
+##    seam Build Validation (M02, not yet implemented) will consume to avoid
+##    N region re-analyses for N parallel completions in one frame
+##    ([TR-building-system-075]). Per-job state transition (to
+##    [constant BlueprintCell.MicroState.BUILT]) and [member _active_jobs]
+##    retirement still happen AFTER the batched write returns (mirroring the
+##    exact ordering the single-cell path had before this story: the write's
+##    own signal observes every completing cell still
+##    [constant BlueprintCell.MicroState.UNDER_CONSTRUCTION], the state flips
+##    only once the write has landed) -- no consumer of either signal has
+##    ever been able to observe a completing cell's [BlueprintCell] already
+##    flipped to BUILT mid-signal, before or after this story.
 ##
 ## **Explicitly out of scope** (this story's own Out of Scope section, and
 ## the neighbouring stories that own it):
@@ -93,10 +123,12 @@
 ##   seam that layers those concerns on top, calling [method claim_job]/
 ##   [method release_job]/[method set_occupancy_predicate] exactly as any
 ##   other caller would.
-## - Story 033: batching multiple same-frame completions into one
-##   [method VoxelWorldGrid.bulk_write] call, the self-write undo-exemption
-##   tag, and the batched "construction completed" signal to Build
-##   Validation.
+## - Story 009 (demolition / removal writes): this story's batching +
+##   self-write-tag mechanics (Story building-033, point 5 above) are
+##   generic to ANY completion this class issues -- a future demolition-job
+##   completion path is expected to reuse the SAME [BuildingSystemWriteTag]
+##   instance and the SAME batched-write discipline, not invent a second
+##   one. No removal/demolition write path exists in this class yet.
 ## - Story 002/003: the persistent Build Project entity and its cell
 ##   registry/grouping -- this class has no concept of a project; it is
 ##   handed bare [BlueprintCell] references directly (mirrors
@@ -120,7 +152,8 @@ class_name ConstructionTickLoop
 extends Node
 
 ## Injected-tier dependency (ADR-0001) -- the sole mutation path this class
-## ever calls: [method VoxelWorldGrid.set_cell], on job completion only.
+## ever calls: [method VoxelWorldGrid.bulk_write], on job completion only
+## (Story building-033 -- see class doc comment point 5).
 @export var voxel_world: VoxelWorldGrid
 
 ## Tuning config dependency (ADR-0002) -- GDD Formula F3's
@@ -128,6 +161,25 @@ extends Node
 ## production, or assigned directly in a headless test. Never read inside
 ## `_ready()` -- see [method setup].
 @export var config: ConstructionTickLoopConfig
+
+## Story building-033 addition (TR-building-system-024) -- the shared
+## self-write exemption tag [method _complete_jobs]'s own batched completion
+## write brackets with `begin()`/`end()`. Optional; default-constructed in
+## [method setup] if left unwired (see [BuildingSystemWriteTag]'s own class
+## doc comment for why a caller that wants [UndoRedoStack]'s
+## undo-invalidation listener to recognize this class's writes as
+## self-originated MUST wire the identical instance into both). Plain `var`,
+## never `@export` -- `RefCounted` is not an exportable Inspector type
+## (mirrors [member time_tick_system]/[VillagerAi]'s own `job_queue: Object`
+## precedent: a code-assigned collaborator, not an Inspector-wired one).
+var write_tag: BuildingSystemWriteTag = null
+
+## Story building-033 addition ([TR-building-system-075]) -- fires exactly
+## once per [method _on_tick] dispatch that completes at least one job,
+## carrying every cell completed in THIS SAME dispatch (never a zero-cell
+## emission) -- the seam Build Validation (M02) will consume to avoid one
+## region re-analysis per completing cell.
+signal construction_completed(cells: Array[Vector3i])
 
 ## Time & Tick System dependency (ADR-0001 Autoload tier) -- see class doc
 ## comment. Duck-typed against the one member this class depends on:
@@ -139,7 +191,7 @@ var time_tick_system: Object = null
 ## no-rollover guarantees for free. A cell absent from this dictionary is
 ## either not yet claimed (still [constant BlueprintCell.MicroState.PLANNED])
 ## or already retired ([constant BlueprintCell.MicroState.BUILT]) -- [method
-## claim_job]/[method _complete_job] are the sole writer/eraser.
+## claim_job]/[method _complete_jobs] are the sole writer/eraser.
 class _ActiveJob:
 	## The claimed [BlueprintCell] itself -- this class mutates its [member
 	## BlueprintCell.state] directly (a shared [RefCounted] reference, not a
@@ -200,6 +252,8 @@ func setup() -> void:
 	if not tick_already_connected:
 		@warning_ignore("unsafe_property_access")
 		time_tick_system.tick.connect(_on_tick)
+	if write_tag == null:
+		write_tag = BuildingSystemWriteTag.new()
 	_is_set_up = true
 
 
@@ -290,33 +344,53 @@ static func required_ticks_for(category: BlueprintCell.Category, ticks_config: C
 
 ## [signal TimeTickSystem.tick] handler -- see class doc comment point 2 for
 ## why no burst loop/delta/warp handling belongs here. Credits every
-## currently-active job exactly one tick, completing any that reach their
-## `required_ticks_for(...)` total. Iterates a SNAPSHOT of [member
-## _active_jobs]'s keys (never the live [Dictionary] itself) since [method
-## _complete_job] erases entries mid-iteration. Story building-030 (class doc
-## comment point 2b): a job whose cell is currently occupied per [member
-## _occupancy_predicate] is skipped entirely THIS dispatch -- no progress
-## increment, no completion check -- while every other active job in the
-## SAME snapshot still credits normally.
+## currently-active job exactly one tick. Iterates a SNAPSHOT of [member
+## _active_jobs]'s keys (never the live [Dictionary] itself) since a
+## completing job is retired from it only AFTER [method _complete_jobs]'s own
+## batched write below (Story building-033, class doc comment point 5).
+## Story building-030 (class doc comment point 2b): a job whose cell is
+## currently occupied per [member _occupancy_predicate] is skipped entirely
+## THIS dispatch -- no progress increment, no completion check -- while every
+## other active job in the SAME snapshot still credits normally. Every job
+## that reaches its `required_ticks_for(...)` total THIS dispatch is
+## collected (never written individually) and handed to [method
+## _complete_jobs] once the credit pass is done.
 func _on_tick() -> void:
+	var changes: Dictionary[Vector3i, CellContents] = {}
+	var completed_jobs: Array[_ActiveJob] = []
 	for cell: Vector3i in _active_jobs.keys():
 		if _occupancy_predicate.is_valid() and bool(_occupancy_predicate.call(cell)):
 			continue
 		var job: _ActiveJob = _active_jobs[cell]
 		job.progress_ticks += 1
 		if job.progress_ticks >= ConstructionTickLoop.required_ticks_for(job.blueprint_cell.category, config):
-			_complete_job(job)
+			changes[cell] = job.blueprint_cell.contents
+			completed_jobs.append(job)
+	_complete_jobs(changes, completed_jobs)
 
 
-## Completes [param job] (progress requirement reached): issues the Voxel
-## World write ([TR-building-system-057]) with [member
-## BlueprintCell.contents], transitions [member BlueprintCell.state] to
-## [constant BlueprintCell.MicroState.BUILT], and retires the job from
-## [member _active_jobs] -- see class doc comment point 4 for why this is a
-## plain [method VoxelWorldGrid.set_cell] call, never [method
-## VoxelWorldGrid.bulk_write] (Story 033's scope).
-func _complete_job(job: _ActiveJob) -> void:
-	var blueprint_cell: BlueprintCell = job.blueprint_cell
-	voxel_world.set_cell(blueprint_cell.cell, blueprint_cell.contents)
-	blueprint_cell.state = BlueprintCell.MicroState.BUILT
-	_active_jobs.erase(blueprint_cell.cell)
+## Completes every job in [param completed_jobs] (Story building-033, class
+## doc comment point 5) -- issues [param changes] as exactly ONE [method
+## VoxelWorldGrid.bulk_write] call (never one [method VoxelWorldGrid.set_cell]
+## per job, and never conditionally -- a single completion goes through this
+## SAME path), bracketed by [member write_tag]'s self-write exemption tag,
+## then transitions every completed [BlueprintCell] to [constant
+## BlueprintCell.MicroState.BUILT] and retires it from [member _active_jobs]
+## -- AFTER the write, matching this class's pre-033 ordering (the write's
+## own signal always observed a completing cell still UnderConstruction).
+## Fires [signal construction_completed] with every completed cell, but only
+## when [param completed_jobs] is non-empty -- a dispatch with nothing to
+## complete emits neither signal, matching [method VoxelWorldGrid.bulk_write]'s
+## own "nothing changed, nothing emitted" contract.
+func _complete_jobs(changes: Dictionary[Vector3i, CellContents], completed_jobs: Array[_ActiveJob]) -> void:
+	if completed_jobs.is_empty():
+		return
+	write_tag.begin()
+	voxel_world.bulk_write(changes)
+	write_tag.end()
+	var completed_cells: Array[Vector3i] = []
+	for job: _ActiveJob in completed_jobs:
+		job.blueprint_cell.state = BlueprintCell.MicroState.BUILT
+		_active_jobs.erase(job.blueprint_cell.cell)
+		completed_cells.append(job.blueprint_cell.cell)
+	construction_completed.emit(completed_cells)

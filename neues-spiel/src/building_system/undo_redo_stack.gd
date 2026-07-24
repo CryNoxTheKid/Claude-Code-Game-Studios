@@ -38,9 +38,11 @@
 ##   real future caller for [member cancel_cell_callable]: it supplies a
 ##   callable that skips (returns `false`, does nothing) any cell whose
 ##   [member BlueprintCell.state] is already [constant
-##   BlueprintCell.MicroState.BUILT]. Story 033 (the self-write-exemption /
-##   batched-write listener) is a future caller of the same general area.
-##   Until either lands, a caller (a headless test, or a future
+##   BlueprintCell.MicroState.BUILT]. Story building-033 (this revision)
+##   lands the self-write-exemption / undo-invalidation listener directly on
+##   this class -- see the new paragraph below for its shape; Story 011
+##   remains the sole future caller of [member cancel_cell_callable] itself.
+##   Until it lands, a caller (a headless test, or a future
 ##   population-assembly story) wires its own callable directly -- exactly
 ##   how [CommitPipeline]'s own seams are exercised in isolation today.
 ## - Plan-only enforcement itself. This file's own code contains ZERO
@@ -52,6 +54,26 @@
 ##   verified by this story's own grep-guard test). Story 011 constrains
 ##   WHAT those callables do; this class only guarantees WHERE they are
 ##   called from, and that nowhere else in this class reaches further.
+##
+## Story building-033 (this revision, [TR-building-system-071]/
+## [TR-building-system-024]) adds the undo-invalidation listener named above
+## as a "future caller": this class now optionally subscribes to a write
+## source's `cell_changed`/`cells_changed_batch` signals ([member
+## voxel_world_write_source] -- deliberately duck-typed, see that member's
+## own doc comment for why this file's plan-only-invariant grep-guard forces
+## that shape) and tracks which cells a NON-self-originated write touched
+## ([member _invalidated_cells]). [method undo] consults that set to skip
+## [member cancel_cell_callable] for a cell some other system already
+## changed (AC33) -- without ever calling into a write API itself, so this
+## file's own "zero references to any committed-block/Voxel-World write API"
+## invariant (see the "Plan-only enforcement" bullet above, and the
+## grep-guard test that proves it) is completely undisturbed. [member
+## write_tag] ([BuildingSystemWriteTag], shared with whichever collaborator
+## issues this system's own writes -- today, [ConstructionTickLoop]'s batched
+## completion write) is this listener's self-write exemption (AC46): Godot's
+## synchronous signal delivery means a shared tag reads `is_active() ==
+## true` for the FULL duration of the writer's own call, so this listener
+## never invalidates an entry over its own system's writes.
 ##
 ## `Node`, not `RefCounted` -- mirrors [ToolStateMachine]'s exact injected-
 ## tier shape (an OPTIONAL [member game_world] dependency this class itself
@@ -107,6 +129,40 @@ signal redo_no_op()
 ## [ToolStateMachine] node yet either.
 @export var game_world: GameWorld = null
 
+## Optional injected-tier dependency (ADR-0001), Story building-033
+## ([TR-building-system-071]/[TR-building-system-024]) -- the write-signal
+## source this system's own undo-invalidation listener subscribes to.
+## Deliberately duck-typed against `Object` rather than a typed reference to
+## the write-owning class -- this file's own plan-only-invariant grep-guard
+## (`undo_redo_stack_core_test.gd`'s
+## `test_undo_redo_module_never_references_a_built_cell_write_api`) bans
+## referencing that class BY NAME anywhere in this file's CODE (never its
+## doc comments) -- this module only ever LISTENS to two of its signals
+## (`signal cell_changed(cell: Vector3i, before: CellContents, after:
+## CellContents)` / `signal cells_changed_batch(changes:
+## Array[CellChangeRecord])`); it never calls into its write API (see class
+## doc comment's "Plan-only enforcement" bullet, unaffected by this story).
+## Mirrors [ConstructionTickLoop]'s own `time_tick_system: Object`
+## duck-typed precedent exactly. Plain `var`, never `@export` -- `Object` is
+## not an exportable Inspector type either; code-assigned in production
+## (once a future scene-assembly story wires it) or a headless test. A null
+## value (the default) is a complete no-op -- every pre-033 caller/test that
+## never wires this behaves exactly as before this story.
+var voxel_world_write_source: Object = null
+
+## Story building-033 addition ([TR-building-system-024]) -- the shared
+## self-write exemption tag. A caller wanting this listener to correctly
+## IGNORE a same-system write (e.g. [ConstructionTickLoop]'s own batched
+## completion write) MUST assign the IDENTICAL instance to both this field
+## and the writer's own matching field (see [BuildingSystemWriteTag]'s own
+## class doc comment) -- an isolated test of this class alone that never
+## shares its instance anywhere sees every observed write as external,
+## which is the correct behavior for that narrower scope. Default-
+## constructed in [method setup] if left unwired, mirroring [member config]'s
+## own default-construct precedent. Plain `var`, never `@export` --
+## `RefCounted` is not an exportable Inspector type.
+var write_tag: BuildingSystemWriteTag = null
+
 ## Per-cell undo hook (see class doc comment) -- `Callable(cell: Vector3i)
 ## -> bool`. Default `Callable()` (invalid) is a permissive no-op: [method
 ## undo] simply skips calling it, mirroring [CommitPipeline]'s own
@@ -139,20 +195,37 @@ var _redo_stack: Array = []
 ## True once [method setup] has completed at least once.
 var _is_set_up: bool = false
 
+## Cells this listener has observed change via a write [member write_tag]
+## did NOT report as self-originated, since this instance was created (Story
+## building-033, [TR-building-system-071]) -- [method undo] consults this to
+## skip [member cancel_cell_callable] for a cell some other system already
+## touched (AC33: "the stale entry is skipped without error or
+## double-removal"), rather than attempting to cancel/restore a cell whose
+## real Voxel World contents no longer match what this command originally
+## produced. Never cleared once set -- an externally-touched cell stays
+## "stale" for every future [method undo] call that might reference it, not
+## only the first.
+var _invalidated_cells: Dictionary[Vector3i, bool] = {}
+
 
 ## Explicitly callable wiring entry point (ADR-0001). Applies ADR-0002's
 ## clamp+warn `validate()` policy to [member config] (constructing a
 ## default instance if none was wired, mirroring [ConstructionTickLoop]'s
 ## own "config is optional at this story's isolated-test scope" tolerance),
-## and connects to [member game_world]'s transition-COMPLETE signal only
-## (idempotent via [method Signal.is_connected], mirroring
+## default-constructs [member write_tag] if left unwired (Story
+## building-033), and connects to [member game_world]'s transition-COMPLETE
+## signal plus [member voxel_world_write_source]'s write signals (idempotent
+## via [method Signal.is_connected], mirroring
 ## [ToolStateMachine._connect_transition_signals]'s exact guard shape).
 func setup() -> void:
 	if config == null:
 		config = UndoRedoStackConfig.new()
 	for issue: String in config.validate():
 		push_warning(issue)
+	if write_tag == null:
+		write_tag = BuildingSystemWriteTag.new()
 	_connect_transition_signals()
+	_connect_voxel_world_write_source_signals()
 	_is_set_up = true
 
 
@@ -215,14 +288,23 @@ func get_redo_stack_size() -> int:
 ## per cell in the popped command, in order, when a callable is wired (a
 ## no-op skip otherwise) -- see class doc comment for why this is the
 ## story's own "plan-only invariant hook," not full plan-only enforcement.
-## Pushes the popped command onto the redo stack and fires [signal
-## command_undone]. Returns `false` (no-op) if the undo stack is empty.
+## Story building-033 (AC33): a cell already recorded in [member
+## _invalidated_cells] (touched by a non-self-originated write since this
+## instance was created) is skipped entirely -- [member cancel_cell_callable]
+## is never called for it, so a cell some other system already changed is
+## never double-processed or erroneously canceled; every OTHER cell of the
+## SAME command still cancels normally. Pushes the popped command onto the
+## redo stack and fires [signal command_undone] (still carrying the FULL
+## original cell list, including any skipped ones -- unchanged from this
+## story). Returns `false` (no-op) if the undo stack is empty.
 func undo() -> bool:
 	if _undo_stack.is_empty():
 		return false
 	var cells: Array[Vector3i] = _undo_stack.pop_back()
 	if cancel_cell_callable.is_valid():
 		for cell: Vector3i in cells:
+			if _invalidated_cells.has(cell):
+				continue
 			cancel_cell_callable.call(cell)
 	_redo_stack.append(cells)
 	command_undone.emit(cells)
@@ -304,6 +386,57 @@ func _on_transition_ended(success: bool) -> void:
 	if not success:
 		return
 	clear()
+
+
+## Connects to [member voxel_world_write_source]'s two write signals (Story
+## building-033) -- idempotent via [method Signal.is_connected], mirroring
+## [method _connect_transition_signals]'s own exact guard shape. A no-op
+## when [member voxel_world_write_source] is null.
+func _connect_voxel_world_write_source_signals() -> void:
+	if voxel_world_write_source == null:
+		return
+	@warning_ignore("unsafe_property_access")
+	var cell_changed_connected: bool = voxel_world_write_source.cell_changed.is_connected(_on_write_source_cell_changed)
+	if not cell_changed_connected:
+		@warning_ignore("unsafe_property_access")
+		voxel_world_write_source.cell_changed.connect(_on_write_source_cell_changed)
+	@warning_ignore("unsafe_property_access")
+	var batch_connected: bool = (
+		voxel_world_write_source.cells_changed_batch.is_connected(_on_write_source_cells_changed_batch)
+	)
+	if not batch_connected:
+		@warning_ignore("unsafe_property_access")
+		voxel_world_write_source.cells_changed_batch.connect(_on_write_source_cells_changed_batch)
+
+
+## Single-cell write-signal handler (Story building-033,
+## [TR-building-system-071]/[TR-building-system-024]) -- self-write exemption
+## FIRST (AC46): a write [member write_tag] reports as currently active
+## (self-originated) is completely ignored, never invalidating anything.
+## Otherwise [param cell] is recorded as invalidated -- see [member
+## _invalidated_cells].
+func _on_write_source_cell_changed(cell: Vector3i, _before: CellContents, _after: CellContents) -> void:
+	if write_tag != null and write_tag.is_active():
+		return
+	_invalidated_cells[cell] = true
+
+
+## Batched write-signal handler -- the exact same self-write exemption +
+## invalidation as [method _on_write_source_cell_changed], applied to every
+## record in [param changes] in one pass (never one handler dispatch per
+## cell).
+func _on_write_source_cells_changed_batch(changes: Array[CellChangeRecord]) -> void:
+	if write_tag != null and write_tag.is_active():
+		return
+	for record: CellChangeRecord in changes:
+		_invalidated_cells[record.cell] = true
+
+
+## Whether [param cell] has been recorded as invalidated by a non-self write
+## since this instance was created (Story building-033) -- observability for
+## tests/callers.
+func is_cell_invalidated(cell: Vector3i) -> bool:
+	return _invalidated_cells.has(cell)
 
 
 ## Shared push helper for [method record_command] and [method redo]'s own
