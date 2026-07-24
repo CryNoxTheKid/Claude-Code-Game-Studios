@@ -9,134 +9,258 @@
 #   done           ↔  Complete
 #   blocked        ↔  Blocked
 #
-# Active sprint: 6 (THE INTEGRATION SPRINT — make the E2E LOOP live).
-# Sprint 1–5 history retained below the Sprint 6 block.
+# Active sprint: 7 (THE CLOSED-LOOP SPRINT — villagers build what the player draws; criterion #2).
+# Sprint 1–6 history retained below the Sprint 7 block.
 
-sprint: 6
-goal: "Make the build-and-inhabit loop live in one assembled build: stand up the minimal placeable-block path (building-021 commit → building-029 construction-tick Voxel World write) and the minimal walking-villager path (villager-ai-005 deciding scheduler → 006 activity loop; 007 AStar3D graph → 008 incremental patching → 009 traveling state), then assemble grid+mesher+camera+building+villager into GameWorld's injected_tier_modules and land the headless E2E LOOP test (scene-004, THE CROWN) as the commit-gate regression for criterion #8. Capacity-permitting harden the block path (building-022) and close the last ADR-0015 invariants (vox-013 in-flight-write cache, vox-014 load-before-write) + the cross-system tick guarantee the loop test consumes (tick-006)."
+sprint: 7
+goal: "Close the build-and-inhabit loop end-to-end — villagers build what the player draws. Stand up the Building project-lifecycle → release → job-queue chain (building-002 → 004 → 030) and the Villager AI job-selection → claim → on-site-build cycle (villager-ai-010 → 011 → 012), converging on the full claim→build→report crown (villager-ai-012, AC40 against the real Building System — criterion #2 full-depth integration). Capacity-permitting close worker attribution (building-005), stand up the undo/redo stack core (building-032), and land ambient-life wave 1 Sub-scope A (presentation-001, CD-protected, criterion #9). Set up the still-blocked coordinated re-tune (#4) and criterion #12 measurement via villager-ai-025 (Nice) + surfacing the designer value decision + flagging the missing #12 measurement story."
 start: "2026-07-24"
 end: ""
 generated: "2026-07-24"
 updated: "2026-07-24"
 
 stories:
-  - id: "building-021"
-    name: "Commit pipeline — click-vs-drag + bounds clamp; pick→preview→commit blueprint"
-    file: "production/epics/building-system/story-021-commit-pipeline.md"
+  - id: "building-002"
+    name: "Project entity + blueprint-cell lifecycle rollup + persistence"
+    file: "production/epics/building-system/story-002-project-entity-lifecycle.md"
     priority: must-have
-    status: complete
+    status: ready-for-dev
+    owner: "godot-gdscript-specialist"
+    estimate_days: 1.0
+    blocker: ""
+    completed: ""
+  - id: "building-004"
+    name: "Release (Bau starten) + job-eligibility transition"
+    file: "production/epics/building-system/story-004-release-job-eligibility.md"
+    priority: must-have
+    status: ready-for-dev
+    owner: "godot-gdscript-specialist"
+    estimate_days: 1.0
+    blocker: "depends on building-002 (in-sprint)"
+    completed: ""
+  - id: "building-030"
+    name: "Construction job queue — claim/report + on-site + occupied-defer + unreachable feedback"
+    file: "production/epics/building-system/story-030-construction-job-queue.md"
+    priority: must-have
+    status: ready-for-dev
+    owner: "godot-gdscript-specialist"
+    estimate_days: 1.0
+    blocker: "depends on building-029 (DONE), building-004 (in-sprint)"
+    completed: ""
+  - id: "villager-ai-010"
+    name: "F2 job selection — nearest-reachable, bounded candidates"
+    file: "production/epics/villager-ai-behavior/story-010-job-selection-f2.md"
+    priority: must-have
+    status: ready-for-dev
+    owner: "ai-programmer"
+    estimate_days: 1.0
+    blocker: "depends on villager-ai-007 (DONE)"
+    completed: ""
+  - id: "villager-ai-011"
+    name: "Job claim/release pipeline with worker attribution"
+    file: "production/epics/villager-ai-behavior/story-011-job-claim-attribution.md"
+    priority: must-have
+    status: ready-for-dev
+    owner: "ai-programmer"
+    estimate_days: 1.0
+    blocker: "depends on villager-ai-010 (in-sprint), villager-ai-006 (DONE)"
+    completed: ""
+  - id: "villager-ai-012"
+    name: "On-site work & full claim→build→report cycle — THE CROWN (criterion #2)"
+    file: "production/epics/villager-ai-behavior/story-012-onsite-work-build-cycle.md"
+    priority: must-have
+    status: ready-for-dev
+    owner: "ai-programmer"
+    estimate_days: 1.0
+    blocker: "sequenced LAST — depends on villager-ai-011 (in-sprint) + real building-030 (in-sprint) for the AC40 integration test"
+    completed: ""
+  - id: "building-005"
+    name: "Worker attribution on job claim — on_job_claimed records worker_ids"
+    file: "production/epics/building-system/story-005-worker-attribution.md"
+    priority: should-have
+    status: backlog
+    owner: "godot-gdscript-specialist"
+    estimate_days: 1.0
+    blocker: "depends on building-004 (in-sprint)"
+    completed: ""
+  - id: "building-032"
+    name: "Undo/redo stack core — command model, bounded depth, transition-COMPLETE clear"
+    file: "production/epics/building-system/story-032-undo-redo-stack-core.md"
+    priority: should-have
+    status: backlog
     owner: "godot-specialist"
     estimate_days: 1.0
-    blocker: ""
+    blocker: "depends on building-021, building-022 (DONE), scene-003 (DONE)"
     completed: ""
-  - id: "building-029"
-    name: "Construction tick loop — Planned→UnderConstruction→Built; issues the Voxel World write"
-    file: "production/epics/building-system/story-029-construction-tick-loop.md"
-    priority: must-have
-    status: complete
-    owner: "godot-specialist"
-    estimate_days: 1.0
-    blocker: "depends on building-021 (in-sprint)"
-    completed: ""
-  - id: "villager-ai-005"
-    name: "Deciding scheduler — FIFO queue + max_deciding_per_tick budget"
-    file: "production/epics/villager-ai-behavior/story-005-deciding-scheduler-budget.md"
-    priority: must-have
-    status: complete
-    owner: "ai-programmer"
-    estimate_days: 1.0
-    blocker: ""
-    completed: ""
-  - id: "villager-ai-006"
-    name: "Activity priority decision loop — need > work > wander"
-    file: "production/epics/villager-ai-behavior/story-006-activity-priority-loop.md"
-    priority: must-have
-    status: complete
-    owner: "ai-programmer"
-    estimate_days: 1.0
-    blocker: "depends on villager-ai-005 (in-sprint)"
-    completed: ""
-  - id: "villager-ai-007"
-    name: "AStar3D graph build & shortest-path query"
-    file: "production/epics/villager-ai-behavior/story-007-astar-graph-build-query.md"
-    priority: must-have
-    status: complete
-    owner: "ai-programmer"
-    estimate_days: 1.0
-    blocker: ""
-    completed: ""
-  - id: "villager-ai-008"
-    name: "Incremental AStar3D patching on cell writes"
-    file: "production/epics/villager-ai-behavior/story-008-incremental-graph-patching.md"
-    priority: must-have
-    status: complete
-    owner: "ai-programmer"
-    estimate_days: 1.0
-    blocker: "depends on villager-ai-007 (in-sprint)"
-    completed: ""
-  - id: "villager-ai-009"
-    name: "Traveling state — path following + mid-travel re-path"
-    file: "production/epics/villager-ai-behavior/story-009-traveling-state-repath.md"
-    priority: must-have
-    status: complete
-    owner: "ai-programmer"
-    estimate_days: 1.0
-    blocker: "depends on villager-ai-008, villager-ai-006 (in-sprint)"
-    completed: ""
-  - id: "scene-004"
-    name: "GameWorld scene assembly + headless E2E LOOP test — THE CROWN (criterion #8)"
-    file: "production/epics/scene-world-management/story-004-gameworld-assembly-e2e-loop.md"
-    priority: must-have
-    status: complete
+  - id: "presentation-001"
+    name: "Ambient-life wave 1 — Sub-scope A (environmental: smoke/foliage/clutter/flicker) CD-protected (criterion #9)"
+    file: "production/epics/presentation-experience/story-001-ambient-life-wave-1.md"
+    priority: should-have
+    status: backlog
     owner: "godot-specialist"
     estimate_days: 1.5
-    blocker: "sequenced LAST — depends on building-021+029, villager-ai-009 (in-sprint)"
+    blocker: "depends on vox-007 (DONE); Sub-scope B deferred (needs villager-ai-019); AD/CD sign-off is the binding gate"
     completed: ""
-  - id: "building-022"
-    name: "Placement validity checks — hardens the block path"
-    file: "production/epics/building-system/story-022-placement-validity.md"
-    priority: should-have
-    status: complete
+  - id: "building-033"
+    name: "Voxel World write seam — batched bulk-write + self-write exemption + completion signal"
+    file: "production/epics/building-system/story-033-voxel-write-seam.md"
+    priority: nice-to-have
+    status: backlog
     owner: "godot-specialist"
     estimate_days: 1.0
-    blocker: "depends on building-021 (in-sprint)"
+    blocker: "depends on building-029 (DONE), building-032 (in-sprint)"
     completed: ""
-  - id: "vox-013"
-    name: "Read-through in-flight-write cache — closes an ADR-0015 invariant"
-    file: "production/epics/voxel-world/story-013-read-through-inflight-write-cache.md"
-    priority: should-have
-    status: complete
-    owner: "godot-gdscript-specialist"
-    estimate_days: 1.0
-    blocker: "depends on vox-011 (DONE)"
-    completed: ""
-  - id: "vox-014"
-    name: "Load-before-write for far-world mutations — the seam far-world building writes inherit"
-    file: "production/epics/voxel-world/story-014-load-before-write-far-world.md"
-    priority: should-have
-    status: complete
-    owner: "godot-gdscript-specialist"
-    estimate_days: 1.0
-    blocker: "depends on vox-013 (in-sprint)"
-    completed: ""
-  - id: "tick-006"
-    name: "Cross-system integration guarantees — consumed by the E2E LOOP test"
-    file: "production/epics/time-tick-system/story-006-cross-system-integration-guarantees.md"
-    priority: should-have
-    status: complete
-    owner: "godot-gdscript-specialist"
-    estimate_days: 0.5
-    blocker: "depends on tick-003, tick-004 (DONE)"
-    completed: ""
-  - id: "vox-015"
-    name: "Mesh view-window streaming — unlocks the #12 60-FPS-with-culling measurement (parallel-lane fill)"
-    file: "production/epics/voxel-world/story-015-mesh-view-window-streaming.md"
+  - id: "building-003"
+    name: "Grouping/merge (26-neighbourhood) + cell→project reverse index"
+    file: "production/epics/building-system/story-003-grouping-merge-reverse-index.md"
     priority: nice-to-have
-    status: complete
+    status: backlog
     owner: "godot-gdscript-specialist"
     estimate_days: 1.0
-    blocker: "off the crown critical path; all deps DONE (vox-007, vox-010, vox-012)"
+    blocker: "depends on building-002 (in-sprint)"
     completed: ""
+  - id: "villager-ai-025"
+    name: "Perf stress validation (30-villager) — produces the production-load measurement the #4 re-tune needs (Advisory)"
+    file: "production/epics/villager-ai-behavior/story-025-perf-stress-validation.md"
+    priority: nice-to-have
+    status: backlog
+    owner: "ai-programmer"
+    estimate_days: 1.0
+    blocker: "depends on villager-ai-005, villager-ai-009 (DONE), villager-ai-012 (in-sprint)"
+    completed: ""
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SPRINT 6 HISTORY (retained; 13/13 Complete, suite 587→682 green; THE CROWN (scene-004) landed —
+# headless E2E over the assembled GameWorld: real-pipeline block placement AND a villager walks;
+# milestone criterion #8 MET; villager binding lane 005–009 complete; ADR-0015 fully certified
+# (vox-013/014); vox-015 streaming machinery; tick-006 guarantees locked; zero unplanned rework.)
+# ─────────────────────────────────────────────────────────────────────────────
+sprint_6_history:
+  sprint: 6
+  goal: "Make the build-and-inhabit loop live in one assembled build: minimal placeable-block path (building-021 commit → building-029 construction-tick write) + minimal walking-villager path (villager-ai-005→006; 007→008→009), assemble grid+mesher+camera+building+villager into GameWorld and land the headless E2E LOOP test (scene-004, THE CROWN, criterion #8). Capacity-permitting harden the block path (building-022) and close the last ADR-0015 invariants (vox-013/014) + the cross-system tick guarantee (tick-006)."
+  start: "2026-07-24"
+  end: "2026-07-24"
+  generated: "2026-07-24"
+  updated: "2026-07-24"
+  result: "13/13 Complete; suite 587→682 green; THE CROWN (scene-004) landed — criterion #8 MET; villager binding lane 005–009 complete; ADR-0015 fully certified (vox-013/014); vox-015 streaming machinery; tick-006 guarantees locked; zero unplanned rework, zero carryover."
+  stories:
+    - id: "building-021"
+      name: "Commit pipeline — click-vs-drag + bounds clamp; pick→preview→commit blueprint"
+      file: "production/epics/building-system/story-021-commit-pipeline.md"
+      priority: must-have
+      status: complete
+      owner: "godot-specialist"
+      estimate_days: 1.0
+      blocker: ""
+      completed: "2026-07-24"
+    - id: "building-029"
+      name: "Construction tick loop — Planned→UnderConstruction→Built; issues the Voxel World write"
+      file: "production/epics/building-system/story-029-construction-tick-loop.md"
+      priority: must-have
+      status: complete
+      owner: "godot-specialist"
+      estimate_days: 1.0
+      blocker: "depends on building-021 (in-sprint)"
+      completed: "2026-07-24"
+    - id: "villager-ai-005"
+      name: "Deciding scheduler — FIFO queue + max_deciding_per_tick budget"
+      file: "production/epics/villager-ai-behavior/story-005-deciding-scheduler-budget.md"
+      priority: must-have
+      status: complete
+      owner: "ai-programmer"
+      estimate_days: 1.0
+      blocker: ""
+      completed: "2026-07-24"
+    - id: "villager-ai-006"
+      name: "Activity priority decision loop — need > work > wander"
+      file: "production/epics/villager-ai-behavior/story-006-activity-priority-loop.md"
+      priority: must-have
+      status: complete
+      owner: "ai-programmer"
+      estimate_days: 1.0
+      blocker: "depends on villager-ai-005 (in-sprint)"
+      completed: "2026-07-24"
+    - id: "villager-ai-007"
+      name: "AStar3D graph build & shortest-path query"
+      file: "production/epics/villager-ai-behavior/story-007-astar-graph-build-query.md"
+      priority: must-have
+      status: complete
+      owner: "ai-programmer"
+      estimate_days: 1.0
+      blocker: ""
+      completed: "2026-07-24"
+    - id: "villager-ai-008"
+      name: "Incremental AStar3D patching on cell writes"
+      file: "production/epics/villager-ai-behavior/story-008-incremental-graph-patching.md"
+      priority: must-have
+      status: complete
+      owner: "ai-programmer"
+      estimate_days: 1.0
+      blocker: "depends on villager-ai-007 (in-sprint)"
+      completed: "2026-07-24"
+    - id: "villager-ai-009"
+      name: "Traveling state — path following + mid-travel re-path"
+      file: "production/epics/villager-ai-behavior/story-009-traveling-state-repath.md"
+      priority: must-have
+      status: complete
+      owner: "ai-programmer"
+      estimate_days: 1.0
+      blocker: "depends on villager-ai-008, villager-ai-006 (in-sprint)"
+      completed: "2026-07-24"
+    - id: "scene-004"
+      name: "GameWorld scene assembly + headless E2E LOOP test — THE CROWN (criterion #8)"
+      file: "production/epics/scene-world-management/story-004-gameworld-assembly-e2e-loop.md"
+      priority: must-have
+      status: complete
+      owner: "godot-specialist"
+      estimate_days: 1.5
+      blocker: "sequenced LAST — depends on building-021+029, villager-ai-009 (in-sprint)"
+      completed: "2026-07-24"
+    - id: "building-022"
+      name: "Placement validity checks — hardens the block path"
+      file: "production/epics/building-system/story-022-placement-validity.md"
+      priority: should-have
+      status: complete
+      owner: "godot-specialist"
+      estimate_days: 1.0
+      blocker: "depends on building-021 (in-sprint)"
+      completed: "2026-07-24"
+    - id: "vox-013"
+      name: "Read-through in-flight-write cache — closes an ADR-0015 invariant"
+      file: "production/epics/voxel-world/story-013-read-through-inflight-write-cache.md"
+      priority: should-have
+      status: complete
+      owner: "godot-gdscript-specialist"
+      estimate_days: 1.0
+      blocker: "depends on vox-011 (DONE)"
+      completed: "2026-07-24"
+    - id: "vox-014"
+      name: "Load-before-write for far-world mutations — the seam far-world building writes inherit"
+      file: "production/epics/voxel-world/story-014-load-before-write-far-world.md"
+      priority: should-have
+      status: complete
+      owner: "godot-gdscript-specialist"
+      estimate_days: 1.0
+      blocker: "depends on vox-013 (in-sprint)"
+      completed: "2026-07-24"
+    - id: "tick-006"
+      name: "Cross-system integration guarantees — consumed by the E2E LOOP test"
+      file: "production/epics/time-tick-system/story-006-cross-system-integration-guarantees.md"
+      priority: should-have
+      status: complete
+      owner: "godot-gdscript-specialist"
+      estimate_days: 0.5
+      blocker: "depends on tick-003, tick-004 (DONE)"
+      completed: "2026-07-24"
+    - id: "vox-015"
+      name: "Mesh view-window streaming — unlocks the #12 60-FPS-with-culling measurement (parallel-lane fill)"
+      file: "production/epics/voxel-world/story-015-mesh-view-window-streaming.md"
+      priority: nice-to-have
+      status: complete
+      owner: "godot-gdscript-specialist"
+      estimate_days: 1.0
+      blocker: "off the crown critical path; all deps DONE (vox-007, vox-010, vox-012)"
+      completed: "2026-07-24"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SPRINT 5 HISTORY (retained; 8/8 Complete, suite →524 green; Building opens through building-020
