@@ -200,6 +200,43 @@ func demolish_cell(cell: Vector3i) -> bool:
 	return true
 
 
+## Releases this project ("Bau starten", GDD Rule 14f, Story building-004,
+## [TR-building-system-109]/AC57) -- ADR-0016's Key Interfaces name this
+## action `release_project(project_id: int) -> void` at the future
+## REGISTRY level (Story building-003's cell->project reverse-index
+## registry, not yet landed); this method is the per-instance seam that
+## registry will call into once it exists (`self` is already the resolved
+## project -- no id lookup needed here), mirroring [method add_cell]/
+## [method cancel_cell]/[method demolish_cell]'s own established "plain
+## instance method, a future caller resolves/supplies the project" pattern.
+##
+## Transitions every currently-tracked cell into job-eligible BUILDING work
+## by flipping [member state] from DRAFT to BUILDING. [method
+## get_building_eligible_cells] already gates its ENTIRE return on
+## `state == BUILDING` (Story building-002) -- so this one state flip alone
+## satisfies AC57's "every one of its cells becomes job-eligible... and
+## none of them were claimable before that action": pre-release, [method
+## get_building_eligible_cells] returns empty for a DRAFT project
+## structurally; post-release, every still-PLANNED cell is included,
+## ordered by commit time ([TR-building-system-106]).
+##
+## Valid ONLY while [member state] is DRAFT and [member cells] is non-empty
+## -- returns `false` (no-op, nothing mutated) otherwise: an
+## already-BUILDING/PAUSED/DONE project is left untouched (resuming a
+## PAUSED project back to BUILDING is Story building-006's own action,
+## never this one; re-releasing an already-BUILDING project is meaningless),
+## and releasing a project with no cells at all is a no-op too (QA Edge
+## Case: "releasing an empty project is a no-op, no error, no phantom
+## jobs") -- there is nothing to make job-eligible.
+func release() -> bool:
+	if state != ProjectState.DRAFT:
+		return false
+	if cells.is_empty():
+		return false
+	state = ProjectState.BUILDING
+	return true
+
+
 ## `true` once [member cells] has become empty -- per Rule 14i/AC61, "A
 ## project disappears only when it becomes empty." This class does not
 ## delete/free ITSELF (a `RefCounted` has no such operation) -- "the project

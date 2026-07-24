@@ -1,7 +1,7 @@
 # Story 004: Release ("Bau starten") + job-eligibility transition
 
 > **Epic**: Building System
-> **Status**: Ready
+> **Status: Complete (2026-07-24 — 711/711 suite green, parent-verified)
 > **Layer**: Core
 > **Type**: Logic
 > **Estimate**: 1 day
