@@ -94,6 +94,25 @@ const WORLD_MAX_Y := 32
 ## this measurement's own stated methodology.
 const VIEW_RADIUS_CHUNKS := 24
 
+## Story vox-019 DIAGNOSTIC ONLY (not the official AC4 methodology -- the
+## official re-measurement runs with the engine's own default vsync
+## behavior, unchanged from vox-018, so the two evidence docs stay directly
+## comparable). Set true for a ONE-OFF diagnostic run to test the hypothesis
+## that the razor-thin post-AC1 miss is a vsync presentation-wait floor
+## (~16.667 ms at a 60Hz panel, marginally ABOVE the 16.6 ms gate by the
+## display's own refresh arithmetic, independent of compute cost) rather than
+## a remaining compute problem -- never left true for an evidence-producing
+## run.
+const DIAGNOSTIC_DISABLE_VSYNC := false
+
+## Story vox-019 AC3 -- the re-tuned per-frame MESH BUILD budget, restated
+## explicitly here (same "never rely on the class default silently matching"
+## rationale as [constant VIEW_RADIUS_CHUNKS]) so this measurement always
+## reflects whatever value this story's evidence doc records, not whatever
+## [VoxelWorldConfig.mesh_build_budget_ms]'s class-level default happens to
+## be at the time this tool is run.
+const MESH_BUILD_BUDGET_MS := 4.0
+
 ## Sweep endpoints -- a long diagonal (696*sqrt(2) =~ 984 world units),
 ## larger than the view window's own world-space diameter
 ## ((2*24+1) * 16 = 784 units) and inset from the world bounds with margin
@@ -138,9 +157,18 @@ const DRAW_CALL_CEILING := 2000
 const FRAME_TIME_BUDGET_MS := 16.6
 
 const EVIDENCE_DIR := "res://../production/qa/evidence"
-const TOPDOWN_PNG := "vox-018-topdown-20260725.png"
-const LOW_OBLIQUE_PNG := "vox-018-low-oblique-20260725.png"
-const RAW_LOG_CSV := "vox-018-60fps-culling-raw-20260725.csv"
+## Story vox-019 re-measurement note: ONLY these 3 output-filename constants
+## were changed from vox-018's own literal `vox-018-...-20260725` names -- the
+## re-measurement happens to land on the SAME calendar date as vox-018's own
+## run, so re-running this tool 100% verbatim would silently overwrite that
+## original evidence (screenshots + raw log), destroying the before/after
+## comparison this story's own AC4 requires. No other line in this file
+## changed -- same config, same world extent/seed, same camera sweep, same
+## sampling/verdict methodology, per this story's own "reuse the tool
+## verbatim" instruction.
+const TOPDOWN_PNG := "vox-019-topdown-20260725.png"
+const LOW_OBLIQUE_PNG := "vox-019-low-oblique-20260725.png"
+const RAW_LOG_CSV := "vox-019-60fps-culling-raw-20260725.csv"
 
 var _grid: VoxelWorldGrid
 var _mesher: VoxelWorldMesher
@@ -171,6 +199,9 @@ var _draw_call_samples: Array[int] = []
 
 
 func _ready() -> void:
+	if DIAGNOSTIC_DISABLE_VSYNC:
+		DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
+		print("vox018: DIAGNOSTIC -- vsync disabled for this run (not the official AC4 methodology)")
 	_boot_start_usec = Time.get_ticks_usec()
 	_build_world_grid_and_mesh_window()
 	_setup_lighting_and_sky()
@@ -194,6 +225,7 @@ func _build_world_grid_and_mesh_window() -> void:
 	world_config.amplitude = 6.0
 	world_config.frequency = 0.04
 	world_config.view_radius_chunks = VIEW_RADIUS_CHUNKS
+	world_config.mesh_build_budget_ms = MESH_BUILD_BUDGET_MS
 	_grid.config = world_config
 
 	var terrain_start_usec: int = Time.get_ticks_usec()

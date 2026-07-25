@@ -237,6 +237,33 @@ class _ChunkBuffer:
 		# "zero-filled = air" comment).
 
 
+## Read-only bulk chunk-snapshot handed out by [method get_chunk_snapshot]
+## (Story vox-019, the profile-confirmed fix for [method
+## VoxelWorldMesher._build_chunk_arrays]'s ~8,448-call-per-chunk [method
+## get_cell] read loop -- root cause measured in
+## `production/qa/evidence/voxel-world-60fps-culling-evidence-20260725.md`).
+## Exposes the SAME two [PackedByteArray]s [_ChunkBuffer] stores for one
+## chunk -- NOT a defensive copy (see [method get_chunk_snapshot]'s own doc
+## comment for why that is safe) -- plus the vertical-extent metadata
+## ([member min_y]/[member height]) a bulk consumer needs to translate
+## `(local_x, local_y, local_z)` into the SAME flat offset [method
+## local_offset] computes, without re-deriving [CHUNK_SIZE]-layout math of
+## its own. Deliberately a PLAIN value holder (unlike [_ChunkBuffer], never
+## itself mutated) -- public (no underscore prefix), unlike [_ChunkBuffer],
+## since this IS the class's sanctioned cross-file bulk-read surface.
+class ChunkSnapshot:
+	var block_type_ids: PackedByteArray
+	var material_ids: PackedByteArray
+	var min_y: int
+	var height: int
+
+	func _init(p_block_type_ids: PackedByteArray, p_material_ids: PackedByteArray, p_min_y: int, p_height: int) -> void:
+		block_type_ids = p_block_type_ids
+		material_ids = p_material_ids
+		min_y = p_min_y
+		height = p_height
+
+
 ## One queued far-world write (Story vox-014, ADR-0015 Decision §3) -- see
 ## [member _pending_writes]. A plain value holder, not a [Resource]/
 ## [RefCounted]-with-getters like [CellChangeRecord] -- this is purely
@@ -819,6 +846,53 @@ func get_cell(cell: Vector3i) -> CellContents:
 	return CellContents.new(buffer.block_type_ids[offset], buffer.material_ids[offset])
 
 
+## Read-only BULK chunk-snapshot accessor (Story vox-019, ADR-0014 Decision
+## §2 optimization-reserve note / §5 GDExtension-escalation note;
+## TR-voxel-world-025/052) -- the measured fix for [method
+## VoxelWorldMesher._build_chunk_arrays]'s ~8,448-call-per-chunk [method
+## get_cell] read loop (root cause,
+## `production/qa/evidence/voxel-world-60fps-culling-evidence-20260725.md`).
+## Hands a bulk consumer direct index access to [param chunk_key]'s two
+## packed [_ChunkBuffer] arrays via a [ChunkSnapshot], instead of one [method
+## get_cell] call (bounds check + chunk-dict lookup + a fresh [CellContents]
+## allocation) PER CELL.
+##
+## Returns `null` if [param chunk_key] is not CURRENTLY resident ([member
+## _chunks] has no entry for it) -- the caller treats this exactly like
+## [method get_cell] returning [method CellContents.empty] for every cell in
+## the chunk (an explicit "all air, nothing built yet" result), never a
+## crash and never an implicit page-in.
+##
+## Read-purity (TR-voxel-world-047, matching [method get_cell]'s OWN
+## contract): this method NEVER mutates [member _chunks], NEVER allocates a
+## fresh [_ChunkBuffer], and -- deliberately SIMPLER than [method get_cell]'s
+## own opportunistic async-dispatch-on-miss behavior -- NEVER triggers a
+## residency page-in request for a non-resident chunk either. A bulk
+## mesh-build consumer ([VoxelWorldMeshStreamer]) only ever asks for chunks
+## its own membership logic already considers desired; a chunk that is not
+## resident yet is exactly the "not built this frame" case that caller's own
+## build/unload bookkeeping already handles by simply not calling [method
+## VoxelWorldMesher.build_chunk] (and therefore this accessor) for it yet.
+##
+## The returned [ChunkSnapshot] exposes the SAME two [PackedByteArray]
+## instances [_ChunkBuffer] stores internally -- NOT a defensive copy.
+## [PackedByteArray] is a Godot copy-on-write value type, so handing out this
+## reference costs nothing extra for a caller that only reads/indexes it;
+## this class's own write path ([method _apply_write_to_resident_chunk])
+## always assigns element-by-index on ITS OWN already-resident
+## [_ChunkBuffer] instance and never replaces the packed-array object itself
+## mid-flight, so a caller holding a snapshot never observes a write torn
+## mid-read (the same "mutating state is brief, no concurrent writes"
+## invariant [method iterate_occupied]'s own doc comment already relies on).
+## Callers MUST NOT write through the returned arrays -- read-only by
+## convention, not engine-enforced.
+func get_chunk_snapshot(chunk_key: Vector2i) -> ChunkSnapshot:
+	if not _chunks.has(chunk_key):
+		return null
+	var buffer: _ChunkBuffer = _chunks[chunk_key]
+	return ChunkSnapshot.new(buffer.block_type_ids, buffer.material_ids, config.min_y, _chunk_height())
+
+
 ## Occupied-cell iteration API (Story vox-005, ADR-0014 primary / ADR-0012
 ## secondary; TR-voxel-world-021/048/033) -- the sole interface the future
 ## Save/Load orchestrator (VS-tier) needs to serialize this grid's cell data;
@@ -1076,11 +1150,31 @@ func _chunk_key(cell: Vector3i) -> Vector2i:
 ## `(local_y * CHUNK_SIZE + local_z) * CHUNK_SIZE + local_x` layout used by
 ## the reference `prototypes/last-seal-vertical-slice/voxel_world.gd`
 ## mesher -- keeping the same layout here means Story 007's production
-## mesher can walk these buffers with the same indexing scheme.
+## mesher can walk these buffers with the same indexing scheme. Delegates to
+## [method local_offset] (Story vox-019 extraction, behavior-preserving --
+## the exact formula this method always computed inline before this story)
+## so both this instance method and a [ChunkSnapshot] bulk consumer share the
+## ONE formula rather than two independently-maintained copies.
 func _local_offset(cell: Vector3i, key: Vector2i) -> int:
 	var local_x: int = cell.x - key.x * CHUNK_SIZE
 	var local_z: int = cell.z - key.y * CHUNK_SIZE
 	var local_y: int = cell.y - config.min_y
+	return VoxelWorldGrid.local_offset(local_x, local_y, local_z)
+
+
+## Public, `static` counterpart of [method _local_offset]'s flat-offset
+## formula (Story vox-019) -- `(local_y * CHUNK_SIZE + local_z) * CHUNK_SIZE
+## + local_x`, the SAME layout [_ChunkBuffer] stores and [method
+## _local_offset] has always computed inline. Public + static specifically so
+## a [ChunkSnapshot] bulk consumer (e.g. [VoxelWorldMesher]'s optimized read
+## loop) shares this ONE formula rather than re-deriving it -- the same "the
+## rule lives in ONE place" discipline [method _apply_write]'s doc comment
+## already established for the write side. Does not bounds-check any
+## argument -- the caller is responsible for supplying in-range `local_*`
+## values (both this class's own [method _local_offset] and a bulk consumer
+## walking a [ChunkSnapshot] whose extent it already knows already guarantee
+## this).
+static func local_offset(local_x: int, local_y: int, local_z: int) -> int:
 	return (local_y * CHUNK_SIZE + local_z) * CHUNK_SIZE + local_x
 
 

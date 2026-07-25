@@ -2,9 +2,12 @@
 ## ADR-0014 Decision Section 2; TR-voxel-world-025/052) -- the production
 ## redemption of the vertical slice's "missing faces" winding saga.
 ##
-## Consumes [VoxelWorldGrid]'s read API only ([method VoxelWorldGrid.get_cell])
-## -- never mutates the grid, and issues zero physics API calls of any kind
-## (ADR-0014 Decision Section 4 / ADR-0004 carryover).
+## Consumes [VoxelWorldGrid]'s read API only ([method
+## VoxelWorldGrid.get_chunk_snapshot] -- Story vox-019's bulk read-loop
+## optimization seam, [method VoxelWorldGrid.get_cell] retained only for the
+## chunk-border/world-edge minority, see [method _build_chunk_arrays]'s doc
+## comment) -- never mutates the grid, and issues zero physics API calls of
+## any kind (ADR-0014 Decision Section 4 / ADR-0004 carryover).
 ##
 ## THE ONE mesher construction site in this codebase (sprint QA requirement,
 ## Control Manifest "never a second mesher code path"): every [ArrayMesh.new]
@@ -318,24 +321,54 @@ func _get_or_create_chunk_node(chunk_coord: Vector2i) -> MeshInstance3D:
 
 
 ## Face-culled geometry pass for one chunk (ADR-0014 Decision Section 2:
-## "faces emitted only where a cell borders air"). Walks every cell in
-## [param chunk_coord]'s full configured vertical extent
-## ([VoxelWorldConfig.min_y]..[VoxelWorldConfig.max_y], inclusive) via
-## [method VoxelWorldGrid.get_cell] (the grid's O(1) read API -- never
-## [VoxelWorldGrid]'s internal storage directly). For every non-empty cell,
-## tests each of the 6 [constant FACE_NORMALS] directions via [method
-## _is_air] -- solid cells touching an empty OR OUT-OF-BOUNDS neighbor (world
-## edge; [method VoxelWorldGrid.get_cell] returns `null` there) emit that
-## face, so the world's outer boundary renders its outward-facing surface
-## exactly like any other air-adjacent face. Returns an empty [Array] (never
-## a populated-but-zero-length arrays [Array]) when the chunk has zero
-## exposed faces -- [method build_chunk]'s empty-mesh contract depends on
-## this exact return shape.
+## "faces emitted only where a cell borders air") -- Story vox-019's
+## profile-confirmed READ-LOOP OPTIMIZATION of what used to be ~8,448
+## per-cell [method VoxelWorldGrid.get_cell] calls (root cause,
+## `production/qa/evidence/voxel-world-60fps-culling-evidence-20260725.md`;
+## before/after cost captured in
+## `production/qa/evidence/voxel-world-60fps-culling-evidence-[date].md`).
+##
+## Consumes [method VoxelWorldGrid.get_chunk_snapshot]'s bulk, read-only
+## [VoxelWorldGrid.ChunkSnapshot] ONCE per chunk and walks it via DIRECT
+## array indexing ([method VoxelWorldGrid.local_offset]) instead of one
+## [method VoxelWorldGrid.get_cell] call (bounds check + chunk-dict lookup +
+## a fresh [CellContents] allocation) per cell -- both for the cell's own
+## solid/air test AND for its +Y/-Y and WITHIN-chunk +X/-X/+Z/-Z neighbor
+## tests. A chunk with no [VoxelWorldGrid.ChunkSnapshot] (never touched, or
+## not currently resident) short-circuits to the empty-mesh contract
+## immediately -- the exact "all air" result [method VoxelWorldGrid.get_cell]
+## itself would have produced for every one of that chunk's cells, just
+## without walking a single one of them.
+##
+## The only remaining [method VoxelWorldGrid.get_cell] calls are [method
+## _is_air]'s, retained EXCLUSIVELY for a face whose neighbor steps OUTSIDE
+## this chunk's own local bounds (a genuine chunk-border crossing into a
+## NEIGHBORING chunk, or a world X/Z edge) -- a small minority of the total
+## face tests, and the one case this method cannot resolve from its own
+## snapshot alone. [method _is_chunk_local_air] is the single dispatch point
+## deciding, per face, which of the two paths applies -- see its own doc
+## comment for the full case breakdown and why each case is provably
+## equivalent to the pre-optimization per-cell behavior (TR-voxel-world-052
+## regression guard: `tests/unit/voxel_world/mesher_bulk_read_equivalence_test.gd`
+## asserts old-vs-new byte-identical output on a fixture chunk that exercises
+## BOTH paths, including a chunk-border cell).
+##
+## Emission order is UNCHANGED from the pre-optimization loop -- local_x ->
+## local_z -> local_y -> face_index, fan-triangulated `(0,1,2)+(0,2,3)` via
+## the SAME [method _append_face] -- this is load-bearing for the
+## equivalence test's byte-for-byte array comparison. Returns an empty
+## [Array] (never a populated-but-zero-length arrays [Array]) when the chunk
+## has zero exposed faces -- [method build_chunk]'s empty-mesh contract
+## depends on this exact return shape, unchanged from before this story.
 ##
 ## THE ONE mesher geometry-assembly site (class doc comment) -- no other
 ## method in this class or file builds triangle data.
 func _build_chunk_arrays(chunk_coord: Vector2i) -> Array:
 	var chunk_size: int = VoxelWorldGrid.CHUNK_SIZE
+	var snapshot: VoxelWorldGrid.ChunkSnapshot = grid.get_chunk_snapshot(chunk_coord)
+	if snapshot == null:
+		return []
+	var block_type_ids: PackedByteArray = snapshot.block_type_ids
 	var verts := PackedVector3Array()
 	var normals := PackedVector3Array()
 	var colors := PackedColorArray()
@@ -344,14 +377,16 @@ func _build_chunk_arrays(chunk_coord: Vector2i) -> Array:
 		var global_x: int = chunk_coord.x * chunk_size + local_x
 		for local_z in chunk_size:
 			var global_z: int = chunk_coord.y * chunk_size + local_z
-			for global_y in range(grid.config.min_y, grid.config.max_y + 1):
-				var cell := Vector3i(global_x, global_y, global_z)
-				var contents: CellContents = grid.get_cell(cell)
-				if contents == null or contents.is_empty():
+			for local_y in snapshot.height:
+				var offset: int = VoxelWorldGrid.local_offset(local_x, local_y, local_z)
+				var block_type_id: int = block_type_ids[offset]
+				if block_type_id == CellContents.EMPTY_BLOCK_TYPE_ID:
 					continue
-				var color: Color = DEBUG_BLOCK_COLORS.get(contents.block_type_id, DEBUG_UNKNOWN_COLOR)
+				var global_y: int = snapshot.min_y + local_y
+				var cell := Vector3i(global_x, global_y, global_z)
+				var color: Color = DEBUG_BLOCK_COLORS.get(block_type_id, DEBUG_UNKNOWN_COLOR)
 				for face_index in FACE_NORMALS.size():
-					if _is_air(cell + FACE_NORMALS[face_index]):
+					if _is_chunk_local_air(snapshot, block_type_ids, chunk_size, local_x, local_y, local_z, cell, face_index):
 						_append_face(verts, normals, colors, indices, cell, face_index, color)
 	if verts.is_empty():
 		return []
@@ -364,9 +399,61 @@ func _build_chunk_arrays(chunk_coord: Vector2i) -> Array:
 	return arrays
 
 
+## Story vox-019's per-face air/solid dispatch: resolves [param face_index]'s
+## neighbor of the cell at chunk-local `(local_x, local_y, local_z)`
+## (chunk-local coordinate; [param cell] is the SAME cell's already-computed
+## GLOBAL coordinate, passed through only for the border-fallback case
+## below) via exactly one of three provably-equivalent paths:
+##
+## 1. **Vertical neighbor steps outside [param snapshot]'s own [member
+##    VoxelWorldGrid.ChunkSnapshot.height]** (`local_y + FACE_NORMALS[i].y`
+##    below `0` or `>= height`) -- this chunk spans the world's FULL
+##    configured vertical extent (no vertical chunking, class doc comment),
+##    so stepping outside `[0, height)` here means stepping outside
+##    `[min_y, max_y]` -- a genuine world Y-bound miss. [method
+##    VoxelWorldGrid.get_cell] would return `null` for that global cell
+##    (Core Rule 1) -- treated as air. Resolved directly as air, with ZERO
+##    [method VoxelWorldGrid.get_cell] calls.
+## 2. **Horizontal neighbor (+X/-X/+Z/-Z) stays WITHIN [param chunk_size]'s
+##    local bounds** -- the overwhelming majority of face tests (every
+##    interior cell, every face). Read directly from [param
+##    block_type_ids] via [method VoxelWorldGrid.local_offset] -- the EXACT
+##    same buffer element [method VoxelWorldGrid.get_cell] would have read
+##    for that global cell (same chunk, same offset formula), so this is
+##    byte-identical BY CONSTRUCTION, not merely "usually the same result."
+## 3. **Horizontal neighbor steps OUTSIDE [param chunk_size]'s local
+##    bounds** -- a genuine chunk-border crossing into a NEIGHBORING chunk,
+##    or a world X/Z edge. Falls back to [method _is_air] (unchanged,
+##    [method VoxelWorldGrid.get_cell]-based) -- the ONE remaining per-face
+##    [method VoxelWorldGrid.get_cell] call site in this class, deliberately
+##    retained because it is a small minority of the total face-test volume
+##    (only cells on a chunk's outer local-x/local-z edge ever reach it) and
+##    because it is EXACTLY the pre-optimization code path, so its behavior
+##    (including any residency page-in [method VoxelWorldGrid.get_cell]
+##    itself may trigger) is unchanged, not reimplemented.
+func _is_chunk_local_air(
+		snapshot: VoxelWorldGrid.ChunkSnapshot, block_type_ids: PackedByteArray, chunk_size: int,
+		local_x: int, local_y: int, local_z: int, cell: Vector3i, face_index: int
+) -> bool:
+	var normal: Vector3i = FACE_NORMALS[face_index]
+	var neighbor_local_y: int = local_y + normal.y
+	if neighbor_local_y < 0 or neighbor_local_y >= snapshot.height:
+		return true
+	var neighbor_local_x: int = local_x + normal.x
+	var neighbor_local_z: int = local_z + normal.z
+	if neighbor_local_x < 0 or neighbor_local_x >= chunk_size or neighbor_local_z < 0 or neighbor_local_z >= chunk_size:
+		return _is_air(cell + normal)
+	var offset: int = VoxelWorldGrid.local_offset(neighbor_local_x, neighbor_local_y, neighbor_local_z)
+	return block_type_ids[offset] == CellContents.EMPTY_BLOCK_TYPE_ID
+
+
 ## Air/solid predicate for face-culling (ADR-0014 Decision Section 2): a cell
 ## OUTSIDE the configured world bounds ([method VoxelWorldGrid.get_cell]
-## returns `null`) counts as air.
+## returns `null`) counts as air. Story vox-019: retained EXCLUSIVELY as the
+## chunk-border/world-X/Z-edge fallback [method _is_chunk_local_air] calls --
+## no longer called for every cell's own solid test or for a within-chunk
+## neighbor (both now resolved directly from the bulk [VoxelWorldGrid.ChunkSnapshot]
+## -- see that method's doc comment).
 func _is_air(cell: Vector3i) -> bool:
 	var contents: CellContents = grid.get_cell(cell)
 	return contents == null or contents.is_empty()

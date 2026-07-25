@@ -230,11 +230,28 @@ const REGION_DIRECTORY_DEFAULT: String = "user://regions"
 ## chunks-per-frame streaming count" rule applies here exactly as it does to
 ## [member page_budget_ms]/[member evict_budget_ms]'s own data-tier budgets).
 ## Distinct from those two: this bounds a MESH build (an [ArrayMesh] rebuild
-## on the MAIN thread, ~1.1 ms measured per chunk, ADR-0014 Measurements),
-## never disk/regen I/O. Spike-validated 4.0 ms is reused as the initial
-## value pending Story 016's own dedicated mesh-tier tuning pass -- see
-## [VoxelWorldMeshStreamer] for the consuming per-frame streaming step.
-## [TR-voxel-world-025]
+## on the MAIN thread), never disk/regen I/O -- see [VoxelWorldMeshStreamer]
+## for the consuming per-frame streaming step.
+##
+## Story vox-019 re-tune rationale (`production/qa/evidence/voxel-world-60fps-
+## culling-evidence-20260725-vox019.md`): [method
+## VoxelWorldMesher._build_chunk_arrays]'s read-loop optimization dropped the
+## MEASURED real per-chunk build cost from ~40.4 ms (vox-018's own root-cause
+## figure, 961 chunks / 38,821 ms) to ~7.7 ms (this story's own re-measurement,
+## 961 chunks / 7,395.9 ms at the SAME 896-cell/`view_radius_chunks=24` scale)
+## -- a ~5.2x reduction. Empirically re-tested at 2.0 ms, 4.0 ms (unchanged),
+## and 8.0 ms with the SAME windowed re-measurement tool: the measured p95/avg
+## frame time did NOT improve at either alternative (8.0 ms measured WORSE:
+## p95 19.490 ms vs 4.0 ms's 16.947 ms) -- confirms this budget knob's own
+## progress-guarantee (the first item in any batch always integrates
+## regardless of budget) means the per-frame cost is dominated by the
+## guaranteed single chunk build during a continuous camera sweep, not by
+## this knob's exact value, as long as it stays below the real per-chunk
+## cost (true both before AND after vox-019's read-loop fix -- the knob
+## "mattered" in neither state, per that story's own AC3 caveat). Kept at the
+## spike-validated 4.0 ms default rather than changed to a value this
+## story's own measurements showed was no better (and, at 8.0 ms, measurably
+## worse). [TR-voxel-world-025]
 @export var mesh_build_budget_ms: float = 4.0
 
 ## Per-frame TIME budget (milliseconds) for MESH UNLOAD work -- staggering

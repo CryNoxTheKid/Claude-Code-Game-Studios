@@ -16,3 +16,4 @@ region_directory = "user://regions"
 region_size_chunks = 32
 view_radius_chunks = 24
 settlement_radius_chunks = 8
+mesh_build_budget_ms = 4.0

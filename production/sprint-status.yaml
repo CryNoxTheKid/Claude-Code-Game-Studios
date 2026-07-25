@@ -34,7 +34,7 @@ stories:
     name: "Mesher read-loop optimization + budget re-tune + re-measure (vox-018 MISS remediation #1) — buffer consumed by planned remediation"
     file: "production/epics/voxel-world/story-019-mesher-read-loop-optimization.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete
     owner: "godot-gdscript-specialist"
     estimate_days: 2.0
     blocker: "vox-018 returned honest MISS (p95 51.5ms; measured cause = per-cell get_cell read loop ~40ms/chunk); consumes the reserved buffer as planned; deps vox-018/015/007/002 all DONE; radius-tighten held as fallback lever, GDExtension escalation if still miss; criterion #12 stays OPEN until re-measure PASS"
