@@ -70,7 +70,7 @@ stories:
     name: "Floor tool (F2) — drag→rectangle fill on the locked plane (criterion #6)"
     file: "production/epics/building-system/story-025-floor-tool.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete
     owner: "godot-specialist"
     estimate_days: 0.5
     blocker: "deps building-020/021/022 all DONE; independent leaf tool"

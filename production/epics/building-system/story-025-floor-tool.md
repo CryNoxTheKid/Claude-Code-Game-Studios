@@ -1,12 +1,12 @@
 # Story 025: Floor tool — drag→rectangle fill (F2)
 
 > **Epic**: Building System
-> **Status**: Ready
+> **Status: Complete (2026-07-25 — 881/881 suite green, parent-verified)
 > **Layer**: Core
 > **Type**: Logic
 > **Estimate**: 0.5 day
 > **Manifest Version**: 2026-07-23
-> **Last Updated**: —
+> **Last Updated**: 2026-07-25
 
 ## Context
 
