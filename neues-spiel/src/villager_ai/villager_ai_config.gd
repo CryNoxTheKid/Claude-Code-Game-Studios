@@ -119,9 +119,19 @@ const NAV_REGION_SIZE_MAX: int = 200
 @export var move_speed: float = 3.0
 
 ## How often, in ticks, an urgent need can preempt long activities (GDD
-## default: 2, Rule 2). Consumed by the Deciding periodic re-check
-## (story 005/006, out of scope here).
-@export var decision_interval: int = 2
+## default: 2 ticks, Rule 2; re-tuned to 4 ticks, Sprint 8 coordinated
+## re-tune -- `design/quick-specs/tick-rate-retune-2026-07-25.md` §1/§7:
+## restores the ORIGINAL 1.0s-at-1x real-time cadence the 2.0->4.0
+## `ticks_per_second` slice revision silently halved to 0.5s, and directly
+## reduces Rule 2's periodic-recheck queue pressure -- `villager-ai-025`'s
+## stress evidence found the OLD value (2) sustained a chronic near-full
+## Deciding queue at population 30 regardless of `max_deciding_per_tick`;
+## at the new pairing (4, with `max_deciding_per_tick=5` below) supply
+## (20/cycle) exceeds demand (~8/cycle), so the queue is expected to reach
+## quiescence between recheck cycles instead (quick-spec §4 F-retune-2).
+## Consumed by the Deciding periodic re-check (story 005/006, out of scope
+## here).
+@export var decision_interval: int = 4
 
 ## Retry cadence, in ticks, for unreachable jobs (GDD default: 20, Rule 6).
 ## Consumed by story 006's unreachable-job retry, out of scope here.
@@ -158,11 +168,19 @@ const NAV_REGION_SIZE_MAX: int = 200
 @export var starting_villager_count: int = 1
 
 ## Per-tick budget on how many NEW Deciding passes may START in a single
-## tick (ADR-0008 Decision §2, spike-tuned default: 1). Caps worst-case
-## per-tick Deciding-pass cost; never interrupts an in-progress pass.
-## Consumed by story 005's Deciding-pass staggering queue, out of scope
-## here.
-@export var max_deciding_per_tick: int = 1
+## tick (ADR-0008 Decision §2, spike-tuned initial default: 1; re-tuned to
+## 5, Story villager-ai-022 / Sprint 8 coordinated re-tune --
+## `design/quick-specs/tick-rate-retune-2026-07-25.md` §1/§4/§5, ratified
+## against `villager-ai-025`'s production-code stress evidence, not the
+## pre-VS GDScript-stand-in spike). Cuts the worst-case Deciding-queue wait
+## at population 30 from 30 ticks (7.5s @ 1x, TPS=4.0) to 6 ticks (1.5s), an
+## 80% reduction (quick-spec F-retune-1), while keeping the estimated
+## worst-case per-tick Deciding cost at roughly a third of the 16.6ms frame
+## budget (~5.47ms estimated, re-measured by `stress_30_villager_test.gd`'s
+## Sprint 8 additions). Caps worst-case per-tick Deciding-pass cost; never
+## interrupts an in-progress pass. Consumed by story 005's Deciding-pass
+## staggering queue, out of scope here.
+@export var max_deciding_per_tick: int = 5
 
 ## Ticks of continuous stuckness (zero legal step, or a non-standable
 ## current cell) before the Unstuck Watchdog's rescue teleport fires (GDD

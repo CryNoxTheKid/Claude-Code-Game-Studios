@@ -447,8 +447,9 @@ func test_structural_stagger_holds_under_full_population_synchronized_mass_decid
 	# The load-bearing invariant, checked EVERY tick of the drain window
 	# (ADR-0008's own Validation Criteria, extended from a small unit-test
 	# population to this story's full 30-population stress scale): at most
-	# `max_deciding_per_tick` (1, spike-tuned default) villager ids are ever
-	# runnable in a single tick, however many are queued.
+	# `max_deciding_per_tick` (read LIVE from a fresh config -- Sprint 8
+	# re-tune, Story villager-ai-022: 5, was 1) villager ids are ever runnable
+	# in a single tick, however many are queued.
 	var max_deciding_per_tick: int = VillagerAIConfig.new().max_deciding_per_tick
 	var drain_costs_ms: Array[float] = []
 	var queue_depth_samples: Array[float] = []
@@ -475,25 +476,181 @@ func test_structural_stagger_holds_under_full_population_synchronized_mass_decid
 		queue_depth_samples.append(float(scheduler.queue_length()))
 		ticks_used += 1
 
-	# Honest finding, not the originally-assumed "drains to zero and goes
-	# quiet": at these DEFAULTS (`decision_interval` = 2, `max_deciding_per_tick`
-	# = 1, population = 30), Rule 2's own perpetual periodic recheck
-	# re-enqueues roughly population/decision_interval villagers per tick on
-	# average (~15/tick here) against a drain rate of only 1/tick -- the
-	# queue reaches a CHRONICALLY BUSY, bounded (never unbounded, per the
-	# dedup guard above) steady state, not quiescence. The safety property
-	# ADR-0008 actually names (bounded per-tick Deciding cost, never a
-	# synchronized all-at-once spike) held throughout regardless -- this is
-	# the load-bearing result, not "the queue goes to zero." Recorded here
-	# for the Sprint 8 re-tune conversation: the REAL Rule 2 recheck load is
-	# a genuine, sustained source of Deciding-queue pressure the pre-VS
-	# GDScript stand-in spike likely did not model.
+	# Sprint 8 re-tune re-run (Story villager-ai-022, quick-spec
+	# design/quick-specs/tick-rate-retune-2026-07-25.md §4 F-retune-2): the
+	# ORIGINAL Sprint 7 run of this exact test, at the OLD defaults
+	# (`decision_interval = 2`, `max_deciding_per_tick = 1`), found the queue
+	# reached a CHRONICALLY BUSY, bounded-but-never-quiet steady state (S7
+	# baseline: avg 29.5 / p95 30.0 / max 30.0 of 30) -- demand
+	# (~population/decision_interval ≈ 15/tick) far outpaced supply (1/tick).
+	# At the NEW defaults (`decision_interval = 4`, `max_deciding_per_tick =
+	# 5`, read LIVE above), supply_per_cycle (5*4=20) now exceeds
+	# demand_per_cycle (ceil(30/4)=8) -- the queue is expected to reach
+	# quiescence BETWEEN periodic-recheck cycles instead of sitting
+	# chronically near-full. Asserted below as a measurably-lower average,
+	# not merely "still bounded" (that safety property -- never a
+	# synchronized all-at-once spike -- held at BOTH old and new values, and
+	# is unaffected by this re-tune; it is the STANDING queue depth that
+	# changes).
 	var queue_depth_stats: Dictionary = _stats(queue_depth_samples)
 	print(
-		"[villager-ai-025] synchronized-mass-deciding-spike pop=30 queue-depth -- "
-		+ "avg=%.1f p95=%.1f max=%.1f (of 30) over %d ticks" %
+		"[villager-ai-022] synchronized-mass-deciding-spike pop=30 queue-depth (AFTER re-tune) -- "
+		+ "avg=%.1f p95=%.1f max=%.1f (of 30) over %d ticks -- BEFORE (S7 baseline, k=1/interval=2): avg=29.5 p95=30.0 max=30.0" %
 		[queue_depth_stats.avg, queue_depth_stats.p95, queue_depth_stats.max, queue_depth_stats.n]
+	)
+	assert_float(queue_depth_stats.avg).is_less(29.5).override_failure_message(
+		"expected the re-tuned queue-depth average to be measurably below the S7 chronic-backlog "
+		+ "baseline of 29.5 (quiescence per F-retune-2), got %.2f" % queue_depth_stats.avg
 	)
 	var drain_stats: Dictionary = _stats(drain_costs_ms)
 	_report("synchronized-mass-deciding-spike pop=30 per-tick-cost", drain_stats)
 	_assert_sanity_ceiling(drain_stats)
+
+
+# ---------------------------------------------------------------------------
+# Sprint 8 coordinated re-tune re-run (Story villager-ai-022, quick-spec
+# design/quick-specs/tick-rate-retune-2026-07-25.md) -- the specific NEW
+# measurements the quick-spec's own Acceptance Criteria (§9) require against
+# production code, replacing its [ESTIMATED] figures with measured ones.
+# ---------------------------------------------------------------------------
+
+## Quick-spec AC1/F-retune-1 -- worst-case Deciding-queue wait for the
+## pathological synchronized mass-event case, measured against the SAME real
+## production environment as Scenario 3 above (real job cycle, real
+## `decision_interval=4` cadence -- no artificial isolation), per the QA
+## plan's own framing ("Measured worst-case ticks-to-decide at pop 30,
+## synchronized mass-Deciding (Scenario 3)"). Tracks the specific 30 villager
+## ids force-enqueued by THIS test's own mass event -- not "when does the
+## shared queue as a whole go empty," since real background traffic (the
+## periodic recheck, job-cycle transitions) legitimately keeps adding
+## unrelated entries to the same FIFO queue throughout the drain window;
+## the quick-spec's F-retune-1 bound is about how long the mass-event's OWN
+## members wait, which FIFO ordering keeps well-defined regardless of what
+## joins behind them. The clean, fully isolated ceil(population/budget)=6
+## bound (zero contention) is separately proven exactly in
+## `tests/unit/villager_ai/deciding_scheduler_test.gd`'s own
+## `test_synchronized_mass_deciding_scenario_run_twice_at_k5_produces_identical_dequeue_order`
+## -- this test instead reports the REAL, contention-inclusive number.
+func test_measured_worst_case_ticks_to_decide_synchronized_mass_deciding_pop30_k5() -> void:
+	var tick_source: MockTimeTickSystem = auto_free(MockTimeTickSystem.new())
+	var env := _make_environment(tick_source, 15)
+	var job_targets: Array[Vector3i] = _reachable_job_targets(60, 15)
+	var project: BuildProject = _released_project(1, job_targets)
+	env.queue.add_project(project)
+
+	var nav_graph: VillagerNavGraph = _build_nav_graph(env.grid, Vector3i(25, 1, 25), 50)
+	var scheduler := VillagerDecidingScheduler.new()
+	var spawn_cells: Array[Vector3i] = _spawn_cells(30)
+	var villagers: Array[VillagerAi] = []
+	for i in range(30):
+		villagers.append(_make_full_villager(env, nav_graph, scheduler, tick_source, i, spawn_cells[i]))
+
+	# Let the initial at-setup() enqueue drain naturally first (mirrors
+	# Scenario 3's own warmup above).
+	for _i in range(40):
+		for villager: VillagerAi in villagers:
+			if villager.is_moving():
+				villager.advance_travel_progress(1000.0)
+		tick_source.fire_tick()
+
+	# The synthetic mass event (GDD Rule 10c): every villager force-re-enqueued
+	# in the SAME tick. Tracked by id, independent of the shared queue's other
+	# (real-behavior-driven) traffic.
+	for villager: VillagerAi in villagers:
+		villager.request_deciding_pass()
+	var pending_ids: Dictionary = {}
+	for villager: VillagerAi in villagers:
+		pending_ids[villager.get_villager_id()] = true
+	assert_int(pending_ids.size()).is_equal(30)
+
+	var max_deciding_per_tick: int = VillagerAIConfig.new().max_deciding_per_tick
+	var ticks_used: int = 0
+	while not pending_ids.is_empty() and ticks_used < 60:
+		for villager: VillagerAi in villagers:
+			if villager.is_moving():
+				villager.advance_travel_progress(1000.0)
+		tick_source.fire_tick()
+		ticks_used += 1
+		for villager: VillagerAi in villagers:
+			var id: int = villager.get_villager_id()
+			if pending_ids.has(id) and scheduler.is_runnable_this_tick(id):
+				pending_ids.erase(id)
+
+	var isolated_bound: int = int(ceil(30.0 / max_deciding_per_tick))
+	print(
+		"[villager-ai-022] worst-case-ticks-to-decide (real env, contention-inclusive) pop=30 "
+		+ "max_deciding_per_tick=%d -- measured=%d ticks (isolated bound=%d, quick-spec F-retune-1) -- " %
+		[max_deciding_per_tick, ticks_used, isolated_bound]
+		+ "BEFORE (k=1, S7 baseline, own isolated measure): 30 ticks"
+	)
+	assert_int(pending_ids.size()).is_equal(0)
+	# Generous, non-flaky sanity bound (this file's own convention) -- real
+	# background contention (periodic recheck + job-cycle re-enqueues) can
+	# legitimately push this above the zero-contention isolated bound of 6,
+	# but must stay well clear of the OLD k=1 worst case (30 ticks).
+	assert_int(ticks_used).is_less_equal(20)
+
+
+## Quick-spec §8 Risk 2 / QA plan Call-out 4 -- measures the burst-frame
+## amplification case instead of leaving it [ESTIMATED]: a
+## `max_ticks_per_frame=12` catch-up frame at the new `max_deciding_per_tick=5`
+## can drain up to 12*5=60 Deciding passes in ONE frame -- more than the
+## 30-villager population ceiling, so this single frame fully clears any
+## mass-Deciding backlog. Measures the actual one-off cost AND confirms the
+## pattern is a single isolated frame event, never recurring on consecutive
+## frames (the quick-spec's own escalation trigger for further profiling, if
+## it were ever observed recurring -- checked here as an explicit negative
+## case).
+func test_measured_burst_frame_12_tick_catchup_amplification_is_isolated_not_recurring() -> void:
+	var tick_source: MockTimeTickSystem = auto_free(MockTimeTickSystem.new())
+	var env := _make_environment(tick_source, 15)
+	var job_targets: Array[Vector3i] = _reachable_job_targets(60, 15)
+	var project: BuildProject = _released_project(1, job_targets)
+	env.queue.add_project(project)
+
+	var nav_graph: VillagerNavGraph = _build_nav_graph(env.grid, Vector3i(25, 1, 25), 50)
+	var scheduler := VillagerDecidingScheduler.new()
+	var spawn_cells: Array[Vector3i] = _spawn_cells(30)
+	var villagers: Array[VillagerAi] = []
+	for i in range(30):
+		villagers.append(_make_full_villager(env, nav_graph, scheduler, tick_source, i, spawn_cells[i]))
+
+	# Let the initial at-setup() enqueue drain first, at normal cadence.
+	for _i in range(10):
+		for villager: VillagerAi in villagers:
+			if villager.is_moving():
+				villager.advance_travel_progress(1000.0)
+		tick_source.fire_tick()
+
+	# Simulate a post-stall resume: force-re-enqueue the full population (a
+	# mass-event, matching Scenario 3 above), then drive ONE frame's worth of
+	# `max_ticks_per_frame=12` catch-up ticks inside a SINGLE timed sample --
+	# reuses `_measure_samples_ms`'s own "N ticks land in the same frame"
+	# methodology (`ticks_per_sample=12` for exactly one sample).
+	for villager: VillagerAi in villagers:
+		villager.request_deciding_pass()
+	assert_int(scheduler.queue_length()).is_equal(30)
+
+	var burst_costs: Array[float] = _measure_samples_ms(tick_source, villagers, 1, 12)
+	var burst_cost_ms: float = burst_costs[0]
+
+	# Follow-up frames at normal cadence (1 tick each) -- must NOT reproduce
+	# the same elevated cost, proving the burst is a single, isolated frame
+	# event, never a sustained/recurring pattern.
+	var followup_costs: Array[float] = _measure_samples_ms(tick_source, villagers, 10, 1)
+	var followup_stats: Dictionary = _stats(followup_costs)
+
+	print(
+		"[villager-ai-022] burst-frame-amplification pop=30 max_ticks_per_frame=12 max_deciding_per_tick=5 -- "
+		+ "burst_cost=%.3fms followup_avg=%.3fms followup_max=%.3fms (quick-spec estimate: ~37ms one-off)" %
+		[burst_cost_ms, followup_stats.avg, followup_stats.max]
+	)
+	_assert_sanity_ceiling({"max": burst_cost_ms})
+	# Isolation: every follow-up frame's cost stays well under the single
+	# burst frame's own cost -- an elevated burst cost, IF it recurred on the
+	# very next frames, would be the quick-spec's own documented signal to
+	# profile further; this asserts it does NOT recur.
+	assert_float(followup_stats.max).is_less(burst_cost_ms).override_failure_message(
+		"burst-frame cost did not stay isolated -- follow-up frames measured "
+		+ "max=%.3fms against the burst's own %.3fms" % [followup_stats.max, burst_cost_ms]
+	)

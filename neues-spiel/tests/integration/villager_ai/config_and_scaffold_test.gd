@@ -51,7 +51,11 @@ func test_config_defaults_match_gdd_tuning_knobs() -> void:
 	# Assert — design/gdd/villager-ai-behavior.md Tuning Knobs section
 	# (max_deciding_per_tick per ADR-0008's spike-tuned value).
 	assert_float(config.move_speed).is_equal_approx(3.0, 0.0001)
-	assert_int(config.decision_interval).is_equal(2)
+	# decision_interval: GDD default 2, re-tuned to 4 -- Sprint 8 coordinated
+	# re-tune (design/quick-specs/tick-rate-retune-2026-07-25.md), restoring
+	# the original 1.0s-at-1x real-time cadence and reducing periodic-recheck
+	# queue pressure. See villager_ai_config.gd's own doc comment.
+	assert_int(config.decision_interval).is_equal(4)
 	assert_int(config.unreachable_retry_ticks).is_equal(20)
 	assert_int(config.wander_radius).is_equal(8)
 	assert_int(config.wander_interval).is_equal(6)
@@ -60,7 +64,10 @@ func test_config_defaults_match_gdd_tuning_knobs() -> void:
 	assert_int(config.jobs_before_break).is_equal(4)
 	assert_int(config.breather_duration_ticks).is_equal(90)
 	assert_int(config.starting_villager_count).is_equal(1)
-	assert_int(config.max_deciding_per_tick).is_equal(1)
+	# max_deciding_per_tick: ADR-0008 spike-tuned default 1, re-tuned to 5 --
+	# Story villager-ai-022 / Sprint 8 coordinated re-tune (same quick-spec),
+	# ratified against villager-ai-025's production-code stress evidence.
+	assert_int(config.max_deciding_per_tick).is_equal(5)
 	assert_int(config.unstuck_watchdog_threshold_ticks).is_equal(12)
 	assert_int(config.unstuck_rescue_search_radius).is_equal(6)
 	assert_int(config.unstuck_rescue_max_radius).is_equal(24)
@@ -76,7 +83,8 @@ func test_villager_ai_config_tres_loads_and_matches_script_defaults() -> void:
 	# Assert
 	assert_object(config).is_not_null()
 	assert_float(config.move_speed).is_equal_approx(3.0, 0.0001)
-	assert_int(config.max_deciding_per_tick).is_equal(1)
+	# Sprint 8 re-tune (villager-ai-022): 1 -> 5, see villager_ai_config.gd.
+	assert_int(config.max_deciding_per_tick).is_equal(5)
 	assert_int(config.seal_prevention_abandon_limit).is_equal(3)
 
 

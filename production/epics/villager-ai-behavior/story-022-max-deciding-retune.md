@@ -1,7 +1,7 @@
 # Story 022: max_deciding_per_tick production re-tune (TECH DEBT 2)
 
 > **Epic**: Villager AI & Behavior
-> **Status**: Ready
+> **Status: Complete (2026-07-25 — 849/849 suite + 7/7 perf green, parent-verified; criterion #4 AI half, coordinated with tick-007)
 > **Layer**: Core
 > **Type**: Config/Data
 > **Estimate**: ~1 agent-day

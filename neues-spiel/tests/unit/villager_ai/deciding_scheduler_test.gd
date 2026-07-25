@@ -28,6 +28,12 @@
 ##    [VillagerAi._tick_deciding] is invoked exactly when (and only when) the
 ##    scheduler marks that villager runnable — never more than once per
 ##    runnable tick (AC5: "Deciding is instantaneous within a tick").
+## 7. **Sprint 8 re-tune determinism (Story villager-ai-022, quick-spec
+##    AC5)** — the synchronized-mass-Deciding scenario (30 villagers,
+##    `max_deciding_per_tick=5`) run twice from independent populations
+##    produces an IDENTICAL per-tick dequeue-order sequence both times, and
+##    the drain completes in exactly `ceil(30/5) = 6` ticks (quick-spec
+##    F-retune-1's worst-case bound).
 class_name DecidingSchedulerTest
 extends GdUnitTestSuite
 
@@ -389,6 +395,82 @@ func test_request_deciding_pass_is_the_generic_reusable_enqueue_entry_point() ->
 
 	# Assert — the villager is queued again via the one shared entry point.
 	assert_bool(scheduler.is_queued(0)).is_true()
+
+
+# ---------------------------------------------------------------------------
+# Sprint 8 coordinated re-tune (Story villager-ai-022, quick-spec AC5,
+# ADR-0009) — determinism at the new max_deciding_per_tick=5 budget: the
+# same synchronized-mass-Deciding scenario (all N villagers force-re-enqueued
+# in the same tick, GDD Rule 10c) run TWICE, from two structurally identical
+# but fully independent populations/schedulers, must dequeue in IDENTICAL
+# order both times. This is not a new mechanism -- [VillagerDecidingScheduler]
+# uses a plain `Array`/`Dictionary` FIFO with no randomness anywhere, so this
+# is a regression guard (a future change introducing e.g. hash-order
+# iteration would be caught here), not a change to the scheduler itself.
+# `decision_interval` is pushed far outside this test's short tick window
+# (this file's own isolation convention, see `_make_villager`) so only the
+# one-off mass-event trigger is exercised, matching the quick-spec's own
+# framing of F-retune-1 as independent of `decision_interval`.
+# ---------------------------------------------------------------------------
+
+## Runs the full 30-villager synchronized-mass-Deciding scenario at
+## `max_deciding_per_tick=5` against a FRESH scheduler/population and returns
+## the per-tick sequence of runnable villager ids (one inner Array per tick,
+## in stable-order-within-tick form) across the whole drain -- the exact
+## shape two independent runs must match identically.
+func _run_synchronized_mass_deciding_and_record_dequeue_order(budget: int, population: int) -> Array:
+	var scheduler: VillagerDecidingScheduler = _make_scheduler()
+	var mock_tick: MockTimeTickSystem = auto_free(MockTimeTickSystem.new())
+	var villagers: Array[VillagerAi] = []
+	for villager_id in range(population):
+		var villager: VillagerAi = _make_villager(villager_id, scheduler, mock_tick)
+		villager.config = VillagerAIConfig.new()
+		villager.config.max_deciding_per_tick = budget
+		villager.setup()
+		# Set AFTER setup() -- setup()'s own config.validate() call clamps
+		# decision_interval to its GDD safe range (max 10), so a "push far
+		# outside this test's tick window" isolation value must be assigned
+		# only once validate() has already run (matches this file's own
+		# _make_full_villager precedent in stress_30_villager_test.gd).
+		villager.config.decision_interval = 1000
+		villagers.append(villager)
+
+	# Drain the initial at-setup() enqueue first, so the recorded sequence
+	# below reflects ONLY the synthetic mass-event spike, not boot ordering.
+	while scheduler.queue_length() > 0:
+		mock_tick.fire_tick()
+
+	# The synthetic mass event: every villager force-re-enqueued in the SAME
+	# tick (GDD Rule 10c's own worked scenario).
+	for villager: VillagerAi in villagers:
+		villager.request_deciding_pass()
+
+	var dequeue_order_per_tick: Array = []
+	while scheduler.queue_length() > 0:
+		mock_tick.fire_tick()
+		var runnable_this_tick: Array[int] = []
+		for villager: VillagerAi in villagers:
+			if scheduler.is_runnable_this_tick(villager.get_villager_id()):
+				runnable_this_tick.append(villager.get_villager_id())
+		dequeue_order_per_tick.append(runnable_this_tick)
+	return dequeue_order_per_tick
+
+
+func test_synchronized_mass_deciding_scenario_run_twice_at_k5_produces_identical_dequeue_order() -> void:
+	var first_run: Array = _run_synchronized_mass_deciding_and_record_dequeue_order(5, 30)
+	var second_run: Array = _run_synchronized_mass_deciding_and_record_dequeue_order(5, 30)
+
+	assert_int(first_run.size()).is_equal(second_run.size())
+	for tick_index in range(first_run.size()):
+		var first_tick_ids: Array = first_run[tick_index]
+		var second_tick_ids: Array = second_run[tick_index]
+		assert_array(first_tick_ids).override_failure_message(
+			"tick %d: dequeue order diverged between runs -- first=%s second=%s" %
+			[tick_index, first_tick_ids, second_tick_ids]
+		).is_equal(second_tick_ids)
+
+	# Worst-case ticks-to-decide bound (quick-spec F-retune-1): ceil(30/5) = 6.
+	assert_int(first_run.size()).is_equal(6)
 
 
 func test_check_decision_interval_trigger_re_enqueues_on_cadence() -> void:

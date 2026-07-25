@@ -5,7 +5,7 @@
 [resource]
 script = ExtResource("1_villagerai")
 move_speed = 3.0
-decision_interval = 2
+decision_interval = 4
 unreachable_retry_ticks = 20
 wander_radius = 8
 wander_interval = 6
@@ -14,7 +14,7 @@ max_selection_candidates = 15
 jobs_before_break = 4
 breather_duration_ticks = 90
 starting_villager_count = 1
-max_deciding_per_tick = 1
+max_deciding_per_tick = 5
 unstuck_watchdog_threshold_ticks = 12
 unstuck_rescue_search_radius = 6
 unstuck_rescue_max_radius = 24

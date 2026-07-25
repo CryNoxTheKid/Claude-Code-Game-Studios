@@ -52,7 +52,7 @@ stories:
     name: "Per-tick re-tune — Deciding half (max_deciding_per_tick 1→5) + decision_interval 2→4 (scope home here) + story-025 stress re-run (criterion #4)"
     file: "production/epics/villager-ai-behavior/story-022-max-deciding-retune.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete
     owner: "ai-programmer"
     estimate_days: 1.0
     blocker: "PENDING USER RATIFICATION of the decided values; villager-ai-025 DONE (S7 basis); coordinated ONE change with tick-007; folds the story-025 stress re-run as evidence"
