@@ -1,7 +1,7 @@
 # Story 024: Wall tool — drag→line rasterization + wall-height extrude (F1)
 
 > **Epic**: Building System
-> **Status**: Ready
+> **Status: Complete (2026-07-25 — 871/871 suite green, parent-verified)
 > **Layer**: Core
 > **Type**: Logic
 > **Estimate**: 1 day

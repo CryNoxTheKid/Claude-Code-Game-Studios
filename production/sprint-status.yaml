@@ -61,7 +61,7 @@ stories:
     name: "Wall tool (F1) — drag→line rasterization + wall-height extrude (criterion #6)"
     file: "production/epics/building-system/story-024-wall-tool.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete
     owner: "godot-specialist"
     estimate_days: 1.0
     blocker: "deps building-020/021/022 all DONE (S5/S6); independent leaf tool"
