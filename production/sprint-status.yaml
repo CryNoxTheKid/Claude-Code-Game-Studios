@@ -88,7 +88,7 @@ stories:
     name: "Block tool — single-cell place/replace, PLACE MODE ONLY in M01 (criterion #6)"
     file: "production/epics/building-system/story-027-block-tool.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete
     owner: "godot-specialist"
     estimate_days: 0.5
     blocker: "deps building-020/021/022 all DONE; remove mode OUT of M01 (routes to 031 → M02)"

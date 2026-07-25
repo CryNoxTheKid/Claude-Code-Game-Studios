@@ -1,7 +1,7 @@
 # Story 027: Block tool — single-cell place / replace
 
 > **Epic**: Building System
-> **Status**: Ready
+> **Status: Complete — place mode (2026-07-25 — 900/900 suite green, parent-verified; remove mode deferred to story-031 routing per sprint scope)
 > **Layer**: Core
 > **Type**: Logic
 > **Estimate**: 0.5 day
