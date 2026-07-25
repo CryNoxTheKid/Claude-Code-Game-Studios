@@ -1,12 +1,12 @@
 # Story 014: Rescue-target BFS (F5 expanding-ring search)
 
 > **Epic**: Villager AI & Behavior
-> **Status**: Ready
+> **Status: Complete (2026-07-25 — 910/910 suite green, parent-verified)
 > **Layer**: Core
 > **Type**: Logic
 > **Estimate**: ~1 agent-day
 > **Manifest Version**: 2026-07-23
-> **Last Updated**: —
+> **Last Updated**: 2026-07-25
 
 ## Context
 
@@ -31,10 +31,10 @@
 
 *From GDD `design/gdd/villager-ai-behavior.md`, scoped to this story:*
 
-- [ ] `rescue_target = nearest(cell)` such that `cell` is standable (Rule 8) and unoccupied (no other villager's `current_cell`), found by an expanding-ring BFS from `current_cell` out to `unstuck_rescue_search_radius`; tie-break lexicographic (y, x, z).
-- [ ] Given no standable, unoccupied cell within `unstuck_rescue_search_radius`, the radius doubles (up to `unstuck_rescue_max_radius`) before a rescue defers to the next tick (AC53, Edge Case 14).
-- [ ] Given the search still finds no cell at `unstuck_rescue_max_radius`, the rescue defers to the next tick and a `villager_unstuck_search_failed` event fires exactly once for the stuck episode (not once per tick).
-- [ ] Occupancy for "unoccupied" is derived from other villagers' discrete `current_cell`, not `_visual_position`.
+- [x] `rescue_target = nearest(cell)` such that `cell` is standable (Rule 8) and unoccupied (no other villager's `current_cell`), found by an expanding-ring BFS from `current_cell` out to `unstuck_rescue_search_radius`; tie-break lexicographic (y, x, z). — `VillagerRescueTargetSearch.find_rescue_target`
+- [x] Given no standable, unoccupied cell within `unstuck_rescue_search_radius`, the radius doubles (up to `unstuck_rescue_max_radius`) before a rescue defers to the next tick (AC53, Edge Case 14). — `find_rescue_target`'s doubling loop; integration test `rescue_search_expansion_test.gd`
+- [x] Given the search still finds no cell at `unstuck_rescue_max_radius`, the rescue defers to the next tick and a `villager_unstuck_search_failed` event fires exactly once for the stuck episode (not once per tick). — `RescueSearchFailureGate` (flag owned here; watchdog Story 015 owns episode reset + actual event emission)
+- [x] Occupancy for "unoccupied" is derived from other villagers' discrete `current_cell`, not `_visual_position`. — body-column overlap check against caller-supplied `current_cell` values, never `_visual_position`
 
 ---
 
@@ -70,7 +70,7 @@
 **Story Type**: Logic
 **Required evidence**: `tests/unit/villager_ai/rescue_target_bfs_test.gd` — must exist and pass. (AC53 radius-expansion may use `tests/integration/villager_ai/rescue_search_expansion_test.gd` for the multi-cell fixture.)
 
-**Status**: [ ] Not yet created
+**Status**: [x] Created — both files present and passing (6 unit + 3 integration test functions)
 
 ---
 

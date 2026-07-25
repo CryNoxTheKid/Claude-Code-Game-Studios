@@ -97,7 +97,7 @@ stories:
     name: "Rescue-target BFS (F5 expanding-ring) — anti-stuck base (criterion #7)"
     file: "production/epics/villager-ai-behavior/story-014-rescue-target-bfs-f5.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete
     owner: "ai-programmer"
     estimate_days: 1.0
     blocker: "sequenced FIRST on the anti-stuck chain; deps villager-ai-002/003 DONE; unlocks 015"
