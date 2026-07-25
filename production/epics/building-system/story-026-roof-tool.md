@@ -1,7 +1,7 @@
 # Story 026: Roof tool — Flat formation (MVP) + formation picker seam
 
 > **Epic**: Building System
-> **Status**: Ready
+> **Status: Complete — Flat MVP (2026-07-25 — 893/893 suite green, parent-verified; Gable/Hip/Shed deferred per sprint scope)
 > **Layer**: Core
 > **Type**: Logic
 > **Estimate**: 1 day

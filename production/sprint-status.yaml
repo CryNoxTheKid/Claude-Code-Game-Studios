@@ -79,7 +79,7 @@ stories:
     name: "Roof tool — Flat formation MVP + formation-picker seam (criterion #6) — NAMED RELEASE VALVE"
     file: "production/epics/building-system/story-026-roof-tool.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete
     owner: "godot-specialist"
     estimate_days: 1.0
     blocker: "deps building-020/021/022 all DONE; Flat ONLY (no Gable/Hip/Shed). CD-ruling cut lever — drops to M02 if S8 runs tight"
