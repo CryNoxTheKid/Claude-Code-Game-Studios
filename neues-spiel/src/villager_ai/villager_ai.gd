@@ -272,6 +272,78 @@
 ## path -- need-preemption, pathing failure, and this story's own
 ## completion/revocation handling -- already funnels through, so it never
 ## goes stale).
+##
+## Story villager-ai-015 (this revision) implements the Unstuck Watchdog's
+## TRIGGER, rescue teleport, and F3 telemetry (GDD Rule 15/15b/F5,
+## [TR-villager-ai-behavior-099]/[TR-villager-ai-behavior-104]/
+## [TR-villager-ai-behavior-080], ADR-0009 slice propagation's "second
+## sanctioned discrete `current_cell` mutation"). [method
+## _update_unstuck_watchdog] runs every tick (called from [method _on_tick]
+## right after arrival-crediting, before [method _tick_state] dispatches) and
+## implements GDD F5's `stuck_tick_count` formula via [method
+## _is_stuck_at_current_cell] -- itself delegating to the ALREADY-shared
+## [method is_standable]/[method is_step_legal] predicates plus
+## [VillagerNavGraph]'s own established [constant
+## VillagerNavGraph.HORIZONTAL_FULL_OFFSETS]/[constant
+## VillagerNavGraph.VERTICAL_STEP_OFFSETS] neighbor-candidate constants
+## (Story villager-ai-008's patch-pass reuses the identical pair -- this
+## story does not invent a second, locally-derived neighbor set). Scoped
+## STRICTLY to `State.TRAVELING`/`State.WORKING` -- every other state
+## ([member _distressed] is still updated for observability, this story's
+## AC32/Edge Case 2 complement) never accumulates [member stuck_tick_count]
+## and is never rescued.
+##
+## On reaching [member VillagerAIConfig.unstuck_watchdog_threshold_ticks],
+## [method _attempt_watchdog_rescue] calls the F5 BFS
+## ([VillagerRescueTargetSearch.find_rescue_target], Story villager-ai-014) --
+## a miss (search exhausted at `unstuck_rescue_max_radius`) reports through
+## [member _search_failure_gate] (a per-villager [RescueSearchFailureGate]
+## instance, Story villager-ai-014's own once-per-episode gate primitive;
+## THIS story owns calling it and firing the actual [signal
+## unstuck_search_failed]) and defers to the next tick, retrying every tick
+## thereafter (GDD Edge Case 14) since [member stuck_tick_count] keeps
+## incrementing past the threshold with nothing to reset it. A hit performs
+## the rescue itself ([method _perform_watchdog_rescue]): releases any held
+## job claim via the SAME [method _release_job_claim] helper every other
+## claim-relinquishing path already funnels through (AC52 -- "no
+## double-release, no orphaned claim"; a `NEED`-pursuing villager, e.g.
+## traveling to a bed, holds no claim, so this is a no-op with zero bed-
+## ownership side effect, exactly AC52's second half), sets [member
+## current_cell] atomically AND snaps [member _visual_position] to match (NO
+## lerp -- ADR-0009's "the watchdog is the one deliberate exception" to
+## "never snap/teleport"), resets [member stuck_tick_count] to `0` and
+## [member _search_failure_gate] for a fresh future episode, increments both
+## [member _unstuck_count] (this villager's own F3 counter) and the shared
+## [member unstuck_telemetry]'s world total (Story villager-ai-015's own new
+## shared, population-wide, non-`@export`, nil-safe collaborator --
+## [VillagerUnstuckTelemetry] -- mirrors [member scheduler]/[member
+## nav_graph]'s own "one shared instance, not a duplicated-per-villager
+## copy" precedent), emits [signal unstuck_rescued], transitions to
+## `State.DECIDING`, and re-enters the Deciding queue via the SAME [method
+## request_deciding_pass] -> [VillagerDecidingScheduler.enqueue] path every
+## OTHER Deciding-eligibility trigger uses -- deliberately NOT a bonus
+## immediate decide bypassing [member scheduler]'s budget (this story's own
+## QA-defined "no double-decide" assertion): because [member scheduler]'s own
+## per-tick budget drain ([method VillagerDecidingScheduler.advance_tick],
+## wired via [method connect_to_tick_source] during [method setup]) always
+## fires BEFORE any villager's own [signal TimeTickSystem.tick] handler in
+## the SAME global tick (connection order, story villager-ai-005's own
+## established ordering), a rescue's own [method request_deciding_pass] call
+## can only ever land a villager in the FIFO queue for a tick whose budget
+## was already computed -- it is never granted an extra, unbudgeted slot the
+## same tick it fires, and [method VillagerDecidingScheduler.enqueue]'s own
+## idempotency guard means a villager already queued at rescue time (e.g.
+## from an earlier `decision_interval` trigger) is never double-enqueued.
+##
+## [member population] is a new duck-typed, nil-safe, mocked-boundary
+## dependency (mirrors [member needs_provider]/[member job_queue]'s own
+## established precedent exactly -- a real population registry is a future
+## spawner story's job, same as those two systems) exposing exactly one
+## member, `func get_other_villager_cells(villager_id: int) ->
+## Array[Vector3i]`, supplying [VillagerRescueTargetSearch.find_rescue_target]'s
+## own `other_villager_cells` parameter (that function's own doc comment:
+## "the watchdog's responsibility to assemble... never queries a
+## population/registry itself").
 class_name VillagerAi
 extends Node
 
@@ -282,6 +354,22 @@ extends Node
 ## 009's concern; this story's own contract is purely "did the filter fire,
 ## and exactly how many times" (AC18/AC49's call-count assertions).
 signal repath_evaluation_requested()
+
+## Fires when the Unstuck Watchdog rescues this villager (Story
+## villager-ai-015, GDD Rule 15/F5, AC51) -- carries the chosen rescue cell
+## for observability/telemetry consumers (e.g. a future F3 debug overlay).
+## Fired AFTER every rescue side effect below has already been applied
+## ([member current_cell]/[member _visual_position] snapped, claim released,
+## [member _state] transitioned to `State.DECIDING`) -- a listener never
+## observes a half-applied rescue.
+signal unstuck_rescued(rescue_cell: Vector3i)
+
+## Fires when the watchdog's rescue search is exhausted at
+## `unstuck_rescue_max_radius` with no eligible cell found (GDD Edge Case 14,
+## AC53) -- gated by [member _search_failure_gate] to fire exactly once per
+## stuck episode, never once per tick (the search itself keeps retrying every
+## tick, per that Edge Case's own wording).
+signal unstuck_search_failed()
 
 ## The six-state agent machine (GDD "States and Transitions" table; ADR-0008
 ## Decision §1 Architecture Diagram). Exactly these six and no others
@@ -399,6 +487,33 @@ var needs_provider: Object = null
 ## as [member _pursued_activity] == `PursuedActivity.WORK`; Story 011
 ## introduces the real claim record this stands in for.
 var job_queue: Object = null
+
+## Population dependency (Story villager-ai-015, mocked boundary -- see this
+## class's own doc comment's villager-ai-015 paragraph). Duck-typed, nil-safe
+## default (see [method _get_other_villager_cells]) -- exposes exactly one
+## member: `func get_other_villager_cells(villager_id: int) ->
+## Array[Vector3i]`, the caller-supplied occupancy snapshot
+## [VillagerRescueTargetSearch.find_rescue_target] needs to reject an
+## already-occupied rescue candidate. A villager with this left `null` (no
+## population registry wired) simply searches as though no other villager
+## exists -- a safe, conservative default, never a crash.
+var population: Object = null
+
+## Shared unstuck-rescue telemetry dependency (Story villager-ai-015, GDD
+## Rule 15/F5's "a per-villager counter and a world total counter"). Unlike
+## [member needs_provider]/[member job_queue] (mocked boundaries standing in
+## for a NOT-YET-BUILT external system), [VillagerUnstuckTelemetry] is a
+## small, fully-owned-by-this-story concrete class (see its own doc comment)
+## -- a REAL shared, population-wide, non-`@export` [RefCounted] collaborator,
+## mirroring [member scheduler]/[member nav_graph]'s own "one instance shared
+## across the whole population" precedent (never one telemetry object per
+## villager -- the world-total half of its job requires a single shared
+## accumulator). Deliberately nil-safe rather than [method setup]-asserted
+## (mirrors [member nav_graph]'s own "not every earlier story's test wires
+## this" precedent): a villager with this left `null` still rescues/resets/
+## re-decides correctly, it simply records no telemetry anywhere -- see
+## [method _perform_watchdog_rescue].
+var unstuck_telemetry: VillagerUnstuckTelemetry = null
 
 ## Shared travel-pathfinding graph dependency (Story villager-ai-009,
 ## ADR-0007 Decision Section 2) -- the SAME single, population-wide
@@ -584,6 +699,47 @@ var _unreachable_retry_after_tick: Dictionary[Vector3i, int] = {}
 ## lifecycle.
 var _claimed_blueprint_cell: BlueprintCell = null
 
+## GDD F5's own named variable (Story villager-ai-015) -- consecutive ticks
+## [member _state] has been `TRAVELING`/`WORKING` with [method
+## _is_stuck_at_current_cell] true. Public (not `_`-prefixed), matching
+## [member current_cell]'s own "field named exactly like the GDD variable,
+## still read via a getter by outside consumers" precedent -- see [method
+## get_stuck_tick_count]. Reset to `0` the instant relief is available (a
+## legal step or standable [member current_cell] becomes available again),
+## on leaving `TRAVELING`/`WORKING` entirely, AND after a successful rescue
+## (this story's own interpretation of "the instant relief is available":
+## exiting the two rescuable states is itself relief, since the counter is
+## meaningless outside them) -- see [method _update_unstuck_watchdog].
+var stuck_tick_count: int = 0
+
+## Edge Case 2's distress cue flag (Story villager-ai-015, AC32 -- the scope
+## boundary complement this story also implements): `true` whenever [method
+## _is_stuck_at_current_cell] is true, for EVERY state, not only
+## `TRAVELING`/`WORKING` -- an Idle/Wandering/Sleeping/Breather villager with
+## no legal step sets this and stays put, never rescued (only
+## `TRAVELING`/`WORKING` ever drive [member stuck_tick_count] toward a
+## rescue). The exact visual treatment is explicitly deferred to the art
+## bible (GDD Open Question 6) -- this field is the data seam a future
+## presentation-layer story reads, not a rendering call of its own.
+var _distressed: bool = false
+
+## This villager's own F5 rescue counter (Story villager-ai-015, GDD Rule 15:
+## "incrementing a per-villager counter"). Read via [method
+## get_unstuck_count] -- see [member unstuck_telemetry] for the companion
+## world-total counter this class does not itself hold (a single villager
+## has no way to sum every OTHER villager's own rescue count).
+var _unstuck_count: int = 0
+
+## This villager's own per-stuck-episode instance of Story villager-ai-014's
+## [RescueSearchFailureGate] (that class's own doc comment: "one instance per
+## villager... each villager's stuck episode is its own independent
+## history" -- deliberately NOT shared population-wide, unlike [member
+## scheduler]/[member nav_graph]/[member unstuck_telemetry]). Constructed
+## once, up front, exactly like [member _travel_remaining_path]'s own
+## literal-default precedent -- no injection, no [method setup] wiring, since
+## it depends on nothing but itself.
+var _search_failure_gate: RescueSearchFailureGate = RescueSearchFailureGate.new()
+
 
 ## Explicitly callable wiring/validation entry point (ADR-0001). Asserts
 ## [member config], [member voxel_world], and a
@@ -673,6 +829,24 @@ func get_claimed_job_cell() -> Variant:
 ## [member villager_id]'s own doc comment).
 func get_villager_id() -> int:
 	return villager_id
+
+
+## Read-only observability seam (Story villager-ai-015) -- see [member
+## stuck_tick_count]'s own doc comment.
+func get_stuck_tick_count() -> int:
+	return stuck_tick_count
+
+
+## Read-only observability seam (Story villager-ai-015, AC32) -- see [member
+## _distressed]'s own doc comment.
+func is_distressed() -> bool:
+	return _distressed
+
+
+## Read-only observability seam (Story villager-ai-015) -- this villager's
+## own F5 rescue count, see [member _unstuck_count]'s own doc comment.
+func get_unstuck_count() -> int:
+	return _unstuck_count
 
 
 ## Marks this villager Deciding-eligible (ADR-0008 Decision §2 -- "a villager
@@ -999,6 +1173,13 @@ func _on_tick() -> void:
 	_tick_count += 1
 	if _travel_complete():
 		current_cell = _to_cell
+	# Story villager-ai-015: the Unstuck Watchdog's own per-tick check runs
+	# HERE -- after arrival-crediting (so `current_cell` already reflects any
+	# just-completed step) but BEFORE `was_deciding` is captured below, so a
+	# rescue firing THIS tick (which transitions `_state` to `State.DECIDING`)
+	# is correctly seen by that capture -- see this method's own class-doc
+	# "no double-decide" paragraph for the full ordering rationale.
+	_update_unstuck_watchdog()
 	_check_decision_interval_trigger()
 	var was_deciding: bool = _state == State.DECIDING
 	_tick_state()
@@ -1532,6 +1713,201 @@ func _tick_breather() -> void:
 ## Wandering-state tick body -- stub (story 004 wander/idle micro-behaviours).
 func _tick_wandering() -> void:
 	pass
+
+
+# =============================================================================
+# Story villager-ai-015 -- Unstuck Watchdog (GDD Rule 15/15b/F5)
+# =============================================================================
+
+## Rule 15/F5's own "zero legal step from `current_cell`" predicate half.
+## Reuses the SAME horizontal x vertical neighbor-candidate set
+## [VillagerNavGraph.HORIZONTAL_FULL_OFFSETS]/[VillagerNavGraph.
+## VERTICAL_STEP_OFFSETS] already establishes as this codebase's one
+## neighbor-candidate convention (Story villager-ai-008's own patch-pass
+## reuses the identical pair) -- never a second, locally re-derived neighbor
+## set (Control Manifest: "never duplicate walkability rules or constants",
+## extended here to the neighbor-candidate set every consumer of [method
+## is_standable]/[method is_step_legal] walks). `true` iff ANY candidate
+## neighbor is both standable and a legal step FROM [member current_cell] --
+## population/occupancy is deliberately NOT considered here (GDD F5's own
+## trigger formula names only standability/step-legality; occupancy against
+## other villagers is exclusively [VillagerRescueTargetSearch]'s own
+## RESCUE-TARGET eligibility filter, a distinct concern from "is this
+## villager stuck").
+func _has_any_legal_step_from_current_cell() -> bool:
+	for offset: Vector2i in VillagerNavGraph.HORIZONTAL_FULL_OFFSETS:
+		for dy: int in VillagerNavGraph.VERTICAL_STEP_OFFSETS:
+			var neighbor: Vector3i = current_cell + Vector3i(offset.x, dy, offset.y)
+			if is_standable(neighbor) and is_step_legal(current_cell, neighbor):
+				return true
+	return false
+
+
+## Rule 15/F5's full "stuck" predicate: [member current_cell] fails
+## standability, OR has zero legal step to any neighbor (GDD F5 Formulas:
+## "`stuck_tick_count` increments... a Traveling/Working villager has zero
+## legal step from `current_cell` OR `current_cell` fails the standability
+## check"). Used both by [method _update_unstuck_watchdog]'s
+## `TRAVELING`/`WORKING` counter and by [member _distressed]'s own
+## all-states read (AC32) -- ONE predicate, not two independently-maintained
+## copies.
+func _is_stuck_at_current_cell() -> bool:
+	if not is_standable(current_cell):
+		return true
+	return not _has_any_legal_step_from_current_cell()
+
+
+## The Unstuck Watchdog's own per-tick entry point (Story villager-ai-015;
+## GDD Rule 15/F5; ADR-0008/Control Manifest Feature Layer's "cheap
+## O(villagers) per-tick check"), called from [method _on_tick] every tick
+## for every villager -- see that method's own doc comment for exactly WHERE
+## in tick ordering this runs and why.
+##
+## Every state updates [member _distressed] (AC32, Edge Case 2's complement:
+## an Idle/Wandering/Sleeping/Breather villager with no legal step shows the
+## distress cue and stays put, never rescued) -- but only `State.TRAVELING`/
+## `State.WORKING` ever touch [member stuck_tick_count] or can trigger
+## [method _attempt_watchdog_rescue] (Rule 15's own explicit scope
+## boundary). Leaving either rescuable state -- including via this SAME
+## tick's own rescue, since dispatch order guarantees [method _tick_state]
+## has not yet run for THIS tick when this runs -- resets [member
+## stuck_tick_count] to `0` and [member _search_failure_gate] for a fresh
+## future episode (this story's own interpretation of GDD F5's "resets to 0
+## the instant relief is available": exiting the two rescuable states is
+## itself relief, the counter having no meaning outside them).
+func _update_unstuck_watchdog() -> void:
+	# Nil-safe against a villager fixture that has no [member voxel_world]
+	# wired at all, or one wired but not yet given its own
+	# [member VoxelWorldGrid.config] (several earlier stories' own tests
+	# drive [method _on_tick] directly without either, since walkability
+	# queries were never on THEIR call path before this story) -- mirrors
+	# [member nav_graph]'s own "not every earlier story's test wires this"
+	# nil-safe precedent, extended here to "not yet fully wired for
+	# walkability queries": nothing to check yet is a harmless no-op, never
+	# a crash. Every REAL production villager has both wired via [method
+	# setup]'s own assert + the boot sequence's config wiring, so this guard
+	# never masks anything in production.
+	if voxel_world == null or voxel_world.config == null:
+		return
+	var stuck: bool = _is_stuck_at_current_cell()
+	_distressed = stuck
+	if _state != State.TRAVELING and _state != State.WORKING:
+		_reset_stuck_episode()
+		return
+	if not stuck:
+		_reset_stuck_episode()
+		return
+	stuck_tick_count += 1
+	if stuck_tick_count >= config.unstuck_watchdog_threshold_ticks:
+		_attempt_watchdog_rescue()
+
+
+## Shared "relief" reset (Story villager-ai-015) -- used by [method
+## _update_unstuck_watchdog]'s own two relief paths (no longer
+## Traveling/Working; still Traveling/Working but no longer stuck) AND by
+## [method _perform_watchdog_rescue] (a successful rescue is relief too). A
+## harmless no-op when [member stuck_tick_count] is already `0` and [member
+## _search_failure_gate] already fresh -- [method
+## RescueSearchFailureGate.reset_episode]'s own doc comment: "idempotent".
+func _reset_stuck_episode() -> void:
+	stuck_tick_count = 0
+	_search_failure_gate.reset_episode()
+
+
+## Rule 15's rescue attempt (Story villager-ai-015, AC51) -- called once
+## [member stuck_tick_count] has reached [member VillagerAIConfig.
+## unstuck_watchdog_threshold_ticks]. Delegates target selection entirely to
+## the F5 BFS ([VillagerRescueTargetSearch.find_rescue_target], Story
+## villager-ai-014) -- this method never re-derives an equivalent search of
+## its own. A miss (search exhausted at `unstuck_rescue_max_radius`, GDD Edge
+## Case 14) reports through [member _search_failure_gate]'s own
+## once-per-episode gate and defers -- [member stuck_tick_count] is
+## deliberately NOT reset here, so [method _update_unstuck_watchdog] keeps
+## incrementing it and re-attempts this SAME search on every subsequent tick
+## (Edge Case 14: "the search retries every tick until a cell is found"),
+## with [member _search_failure_gate] guaranteeing [signal
+## unstuck_search_failed] still fires only once across that whole retry
+## run. A hit performs the actual rescue via [method
+## _perform_watchdog_rescue].
+func _attempt_watchdog_rescue() -> void:
+	var other_cells: Array[Vector3i] = _get_other_villager_cells()
+	var result: RescueSearchResult = VillagerRescueTargetSearch.find_rescue_target(
+		current_cell,
+		self,
+		other_cells,
+		config.unstuck_rescue_search_radius,
+		config.unstuck_rescue_max_radius,
+	)
+	if not result.has_target():
+		if _search_failure_gate.should_report_failure():
+			unstuck_search_failed.emit()
+		return
+	_perform_watchdog_rescue(result.cell)
+
+
+## The rescue itself (Story villager-ai-015, AC51/AC52; ADR-0009 slice
+## propagation's second sanctioned discrete `current_cell` mutation). Order
+## of operations, all within this single synchronous call (no tick spans
+## mid-rescue):
+## 1. Release any held job claim via the SAME [method _release_job_claim]
+##    helper every OTHER claim-relinquishing path already funnels through
+##    (AC52: "releases back to the queue exactly as Rule 6's unreachable-job
+##    flow -- no double-release, no orphaned claim") -- ONLY when [member
+##    _pursued_activity] is `WORK`; a `NEED`-pursuing villager (e.g. mid-travel
+##    to a bed) holds no claim, so this is skipped entirely, exactly AC52's
+##    "no claim-release side effect... bed ownership unaffected" half.
+##    Deliberately does NOT also call [method _report_job_unreachable]/record
+##    an unreachable-retry cooldown -- unlike Rule 6's own pathing-failure
+##    flow, the claimed CELL itself was never unreachable here; this
+##    villager was stuck, a distinct fact Rule 6's job-unreachable reporting
+##    would mislabel (this story's own interpretation of AC52's "exactly as
+##    Rule 6's unreachable-job flow" -- read as "reuses the same release
+##    HELPER/no-double-release guarantee", not "replays every one of Rule
+##    6's side effects").
+## 2. Clears travel bookkeeping and sets [member current_cell] atomically to
+##    [param rescue_cell], snapping [member _visual_position] to match via
+##    the SAME [method VoxelWorldGrid.cell_to_world] conversion [method
+##    _process] already uses -- NO lerp (ADR-0009: "the watchdog is the one
+##    deliberate exception" to "never snap/teleport").
+## 3. Resets the stuck episode ([method _reset_stuck_episode]) and [member
+##    _distressed] -- relief.
+## 4. Records telemetry: this villager's own [member _unstuck_count], plus
+##    [member unstuck_telemetry]'s shared world total when wired (nil-safe,
+##    see that field's own doc comment).
+## 5. Emits [signal unstuck_rescued], transitions to `State.DECIDING`, and
+##    re-enters the Deciding queue via the SAME [method request_deciding_pass]
+##    every OTHER eligibility trigger uses -- see this class's own
+##    villager-ai-015 doc-comment paragraph for why this is never a bonus,
+##    unbudgeted immediate decide.
+func _perform_watchdog_rescue(rescue_cell: Vector3i) -> void:
+	if _pursued_activity == PursuedActivity.WORK:
+		_release_job_claim()
+	_pursued_activity = PursuedActivity.NONE
+	_travel_remaining_path = []
+	current_cell = rescue_cell
+	_from_cell = rescue_cell
+	_to_cell = rescue_cell
+	_intra_tick_progress = 0.0
+	_visual_position = VoxelWorldGrid.cell_to_world(rescue_cell)
+	_reset_stuck_episode()
+	_distressed = false
+	_unstuck_count += 1
+	if unstuck_telemetry != null:
+		unstuck_telemetry.record_rescue(villager_id)
+	_state = State.DECIDING
+	unstuck_rescued.emit(rescue_cell)
+	request_deciding_pass()
+
+
+## [member population]'s nil-safe read (Story villager-ai-015). Nil-safe,
+## same rationale as [method _has_urgent_need]/[method _has_available_job] --
+## a villager with no population registry wired searches as though no other
+## villager exists.
+func _get_other_villager_cells() -> Array[Vector3i]:
+	if population == null:
+		return []
+	@warning_ignore("unsafe_method_access")
+	return population.get_other_villager_cells(villager_id)
 
 
 # =============================================================================

@@ -1,7 +1,7 @@
 # Story 015: Unstuck watchdog trigger, rescue teleport & telemetry
 
 > **Epic**: Villager AI & Behavior
-> **Status**: Ready
+> **Status: Complete (2026-07-25 — 920/920 suite green, parent-verified)
 > **Layer**: Core
 > **Type**: Logic
 > **Estimate**: ~1 agent-day

@@ -106,7 +106,7 @@ stories:
     name: "Unstuck watchdog trigger, rescue teleport & F3 telemetry — anti-stuck base (criterion #7)"
     file: "production/epics/villager-ai-behavior/story-015-unstuck-watchdog-telemetry.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete
     owner: "ai-programmer"
     estimate_days: 1.0
     blocker: "depends on villager-ai-014 (in-sprint), 003/011 DONE; carries the criterion's named F3 telemetry"
