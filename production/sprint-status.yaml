@@ -92,7 +92,7 @@ stories:
     name: "F1 decay, per-need state machine & edge-triggered urgent signal — carries the TD-canonized has_urgent_need(villager_id) seam"
     file: "production/epics/needs-mood-system/story-002-decay-state-machine-and-urgent-signal.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete
     owner: "systems-designer"
     estimate_days: 1.5
     blocker: "depends on needs-mood-001 (in-sprint). BLOCKING TD-owned precondition (NM-6): architecture.md must document has_urgent_need(villager_id) -> bool BEFORE this story starts"

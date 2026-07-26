@@ -1,7 +1,7 @@
 # Story 002: F1 decay, per-need state machine & edge-triggered urgent signal
 
 > **Epic**: Needs & Mood System
-> **Status**: Ready
+> **Status: Complete (2026-07-26 — 1130/1130 suite green 0 orphans, agent-verified; parent re-verifies with the concurrent building-023)
 > **Layer**: Feature
 > **Type**: Logic
 > **Estimate**: ~1.5 agent-days
