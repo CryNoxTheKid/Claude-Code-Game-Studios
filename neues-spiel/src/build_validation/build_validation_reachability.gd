@@ -53,6 +53,24 @@
 ## detection, shelter classification of furniture, and the warning/info
 ## signal tiers -- this class supplies only the per-region trace + verdict
 ## those stories consume.
+##
+## Story build-validation-010 (this revision) adds [method is_reachable]: the
+## SAME BFS trace shape as [method is_outside_connected] -- identical [method
+## _standable_neighbors] neighbor generation over the identical shared
+## predicates -- generalized from "seeded from a region's interior cells,
+## stops at ANY open-sky cell" to "seeded from ONE start cell, stops at ONE
+## specific target cell." This is the "Build Validation reachability verdict"
+## half of AC36's property corpus
+## (`tests/integration/build_validation/reachability_property_corpus_test.gd`),
+## cross-checked per (start, target) pair against Villager AI's independent
+## `AStar3D` shortest-path query ([method VillagerNavGraph.find_path]) -- the
+## ADR-0007 guard against the two traversal implementations silently
+## diverging ("Reachable" is the agreement axis; path COST is never compared,
+## per the story's own Implementation Notes). Not a second, duplicated
+## traversal algorithm: both [method is_outside_connected] and [method
+## is_reachable] delegate every neighbor-candidate decision to the identical
+## private [method _standable_neighbors] helper below -- only the seed set
+## and the stop condition differ.
 class_name BuildValidationReachability
 extends RefCounted
 
@@ -149,6 +167,42 @@ static func classify_region(
 	if is_outside_connected(voxel_world, region, max_room_height):
 		return Verdict.ROOM
 	return Verdict.SEALED
+
+
+## Point-to-point reachability query (Story build-validation-010's AC36
+## property corpus) -- see this class's own doc comment for why this is a
+## generalization of [method is_outside_connected]'s trace, not a second
+## traversal implementation. `[param from_cell] == [param to_cell]` returns
+## `true` immediately without running a BFS at all -- a villager already
+## standing on its own target cell is trivially "there," matching [method
+## VillagerNavGraph.find_path]'s own same-cell single-element-path contract
+## (AStar3D's `get_id_path(id, id)` returns `[id]`, not empty), so the two
+## sides' zero-length-path convention agrees by construction rather than by
+## coincidence.
+##
+## Neither endpoint's own standability is re-verified here -- same contract
+## as [method is_outside_connected]'s region-cell seeding: the caller is
+## responsible for supplying already-standable cells (AC36's own corpus
+## samples pairs "drawn from that world's standable cells"). Reads only
+## [param voxel_world] via the shared predicates; no mutation, no cached
+## state (same purity guarantee as every other method in this class).
+static func is_reachable(voxel_world: VoxelWorldGrid, from_cell: Vector3i, to_cell: Vector3i) -> bool:
+	assert(voxel_world != null, "BuildValidationReachability.is_reachable requires voxel_world")
+	if from_cell == to_cell:
+		return true
+	var visited: Dictionary[Vector3i, bool] = {}
+	var frontier: Array[Vector3i] = [from_cell]
+	while not frontier.is_empty():
+		var current: Vector3i = frontier.pop_back()
+		if visited.has(current):
+			continue
+		visited[current] = true
+		if current == to_cell:
+			return true
+		for neighbor: Vector3i in _standable_neighbors(voxel_world, current):
+			if not visited.has(neighbor):
+				frontier.append(neighbor)
+	return false
 
 
 ## Movement-graph neighbor candidates for [param current] (Implementation

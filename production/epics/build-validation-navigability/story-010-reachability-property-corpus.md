@@ -1,12 +1,12 @@
 # Story 010: AC36 reachability property corpus (milestone criterion #2)
 
 > **Epic**: Build Validation & Navigability
-> **Status**: Ready
+> **Status: Complete (2026-07-26 — 1198/1198 suite green 0 orphans, parent-verified; corpus shipped at 5 pairs/seed per its own Cut-Lever Policy, escalated to TD)
 > **Layer**: Feature
 > **Type**: Integration
 > **Estimate**: ~1.5 agent-days
 > **Manifest Version**: 2026-07-23
-> **Last Updated**: —
+> **Last Updated**: 2026-07-26
 
 ## Context
 
@@ -35,7 +35,8 @@ failure here means one of two **already-shipped** implementations is wrong.
 
 *From GDD `design/gdd/build-validation-navigability.md`, scoped to this story:*
 
-- [ ] **AC36 [Integration — property test]**: **GIVEN** the checked-in property-test corpus — a fixed list of **100 seeds** committed to `tests/integration/build-validation/`, each seed generating a bounded **32×32×16** world (documented generator: procedural terrain per Voxel World's formula + random wall/floor/roof placement at **10–40% solid-fill density**) and **50 sampled (start, target) pairs** drawn from that world's standable cells — **WHEN** this system's reachability verdict and Villager AI's pathfinder evaluate every pair, **THEN** all **5,000 verdicts agree**; any disagreement fails the test **naming the seed and pair**; total corpus runtime **≤ 60 s in CI**. [TR-063]
+- [x] **AC36 [Integration — property test]**: **GIVEN** the checked-in property-test corpus — a fixed list of **100 seeds** committed to `tests/integration/build-validation/`, each seed generating a bounded **32×32×16** world (documented generator: procedural terrain per Voxel World's formula + random wall/floor/roof placement at **10–40% solid-fill density**) and **50 sampled (start, target) pairs** drawn from that world's standable cells — **WHEN** this system's reachability verdict and Villager AI's pathfinder evaluate every pair, **THEN** all **5,000 verdicts agree**; any disagreement fails the test **naming the seed and pair**; total corpus runtime **≤ 60 s in CI**. [TR-063]
+  **Implemented with the Cut-Lever Policy applied** (see `production/qa/evidence/build-validation-010-reachability-corpus-runtime-20260726.md`): the full 50-pairs/seed spec measured 183.55s (3x over the 60s ceiling; 5,000/5,000 verdicts agreed, zero disagreements — a pure performance breach). Per the story's own Implementation Notes, pairs were reduced (never seed count) to **5 pairs/seed (500 pairs, 1,000 verdicts)**, measuring 44.52s (74% of budget) — **escalated to technical-director** in the evidence doc, since the ceiling breach is dominated by fixed per-seed setup cost (world gen + standable scan + one full `VillagerNavGraph` build), not pair count, so full 5,000-verdict fidelity may need a faster CI runner or an AC-level change to land safely.
 - [ ] The corpus guards **algorithmic divergence between the two independent implementations of the movement rules**, complementing AC24's constants-only check — the two sides must remain two implementations, never one calling the other. [TR-008]
 - [ ] Generation parameters (seed list, world dimensions, fill density, pair count) are **test fixtures, not gameplay values** — they live with the test, never in a gameplay config resource.
 - [ ] The corpus is deterministic: the same checked-in seed list produces the same 5,000 verdicts on every run, on every machine — no live RNG, no wall-clock dependence, no execution-order dependence.
@@ -82,7 +83,7 @@ failure here means one of two **already-shipped** implementations is wrong.
 **Story Type**: Integration
 **Required evidence**: `neues-spiel/tests/integration/build_validation/reachability_property_corpus_test.gd` — must exist and pass, with recorded runtime in `production/qa/evidence/`.
 
-**Status**: [ ] Not yet created
+**Status**: [x] Created and passing — 7 tests, 0 failures, 0 orphans; runtime recorded in `production/qa/evidence/build-validation-010-reachability-corpus-runtime-20260726.md` (44.52s at the shipped 5-pairs/seed configuration; see that doc for the Cut-Lever Policy applied and the technical-director escalation).
 
 ---
 

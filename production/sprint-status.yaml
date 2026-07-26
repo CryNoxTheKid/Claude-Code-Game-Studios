@@ -173,7 +173,7 @@ stories:
     name: "AC36 reachability property corpus (criterion #2) — THE MILESTONE'S RISKIEST SINGLE TEST ARTIFACT (R3)"
     file: "production/epics/build-validation-navigability/story-010-reachability-property-corpus.md"
     priority: should-have
-    status: backlog
+    status: complete
     owner: "ai-programmer"
     estimate_days: 1.5
     blocker: "depends on build-validation-004 + 002 (in-sprint); villager-ai-002/007 Complete. Runnable in parallel with 005–009. Time-boxed, buffer's secondary consumer. 100 seeds x 50 pairs = 5000 verdicts, ≤ 60s CI. On MISS: REDUCE SAMPLED PAIRS BEFORE SEEDS, re-measure once, then escalate to technical-director"
