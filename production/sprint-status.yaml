@@ -110,7 +110,7 @@ stories:
     name: "Mesh invalidation — dirty-marking + budgeted rebuild drain (drained FIRST, inside the EXISTING mesh_build_budget_ms) + chunk_became_resident (TD Addendum D / D7)"
     file: "production/epics/voxel-world/story-020-mesh-invalidation-dirty-set-and-budgeted-rebuild.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete
     owner: "godot-gdscript-specialist"
     estimate_days: 1.5
     blocker: "ADDED 2026-07-26 by TD Addendum D (PROVISIONAL pending user ratification). Blocked on nothing — vox-007/015/019 and the residency tier are all landed. SEQUENCES BEFORE scene-005 (it corrects scene-005's Guardrail and closes its Open Decision #4); PARALLEL-SAFE with building-023 (disjoint files). MUST BE SERIALIZED WITH vox-021 — both edit voxel_world_mesh_streamer.gd; vox-020 runs FIRST. Corrects a FALSE premise: the mesher DOES subscribe (voxel_world_mesher.gd:163) — the real defects are the unbudgeted synchronous in-handler rebuild (~69ms for a 9-chunk edit at 7.7ms/chunk) and residency page-in emitting no signal. NO NEW BUDGET KNOB: a separate rebuild budget would allow 7.7+7.7ms in one 16.6ms frame and regress vox-019's measured p95 of 16.947ms. 9 ACs. Evidence: tests/integration/voxel_world/mesh_invalidation_budget_test.gd"

@@ -345,6 +345,22 @@ signal cell_changed(cell: Vector3i, before: CellContents, after: CellContents)
 ## whose every cell is out of bounds) -- "nothing changed" emits nothing.
 signal cells_changed_batch(changes: Array[CellChangeRecord])
 
+## Fires exactly once per chunk that TRANSITIONS to resident (Story vox-020,
+## ADR-0015 amendment; TR-voxel-world-053) -- emitted from [method
+## _integrate_one_finished_read] and [method _try_serve_from_in_flight_write],
+## the two places [member _chunks] gains a NEW entry for a chunk that was not
+## already resident, immediately AFTER that assignment (emit-after-assign is
+## load-bearing: a synchronous handler must observe the now-resident chunk --
+## [method get_chunk_snapshot] must not return `null` inside the handler).
+## This closes the "mesh window outruns the async, budgeted residency window"
+## hole ([VoxelWorldMesher] subscribes and marks a tracked chunk dirty so it
+## re-meshes once real data has landed) -- see those two methods' own doc
+## comments for why THESE two call sites, specifically, are the complete set
+## of residency-transition points. Never fires on eviction ([method
+## _request_evict] only ever erases [member _chunks], never assigns into it) --
+## page-in is the only transition this signal reports.
+signal chunk_became_resident(chunk_key: Vector2i)
+
 ## Tuning config dependency (ADR-0002). Wired via a scene file's Inspector in
 ## production, or assigned directly in a headless test. Never read inside
 ## `_ready()` -- see [method setup].
@@ -1554,6 +1570,7 @@ func _try_serve_from_in_flight_write(chunk_key: Vector2i) -> bool:
 	if not _write_in_flight_data.has(chunk_key):
 		return false
 	_chunks[chunk_key] = _deserialize_chunk_buffer(_write_in_flight_data[chunk_key])
+	chunk_became_resident.emit(chunk_key)  # Story vox-020: emit-after-assign, see signal doc comment
 	_apply_pending_writes(chunk_key)  # Story vox-014: apply any far write that queued while this chunk paged in
 	return true
 
@@ -1649,6 +1666,7 @@ func _integrate_one_finished_read(chunk_key: Vector2i) -> void:
 	_read_results.erase(chunk_key)
 	_task_mutex.unlock()
 	_chunks[chunk_key] = _deserialize_chunk_buffer(result["data"])
+	chunk_became_resident.emit(chunk_key)  # Story vox-020: emit-after-assign, see signal doc comment
 	_apply_pending_writes(chunk_key)  # Story vox-014: apply any far write that queued while this chunk paged in
 
 

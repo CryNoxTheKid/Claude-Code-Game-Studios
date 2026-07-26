@@ -1,7 +1,7 @@
 # Story 020: Mesh invalidation — dirty-marking + budgeted rebuild drain + `chunk_became_resident` (TD ruling D7)
 
 > **Epic**: Voxel World / Grid Data
-> **Status**: Ready
+> **Status: Complete (2026-07-26 — 1042/1042 suite green 0 orphans, parent-verified)
 > **Layer**: Presentation (mesher/streamer tier) + Foundation (one additive residency signal)
 > **Type**: Integration (invalidation lifecycle + per-frame budget discipline)
 > **Estimate**: **M** *(relative-complexity anchor, not a calendar prediction — sprint-09.md sizing convention)*

@@ -39,10 +39,12 @@
 ##   Management's boot sequence) calls this once per session, before the
 ##   transition overlay lifts.
 ## - [method update_view_window]: budgeted -- [member
-##   VoxelWorldConfig.mesh_build_budget_ms] / [member
-##   VoxelWorldConfig.mesh_unload_budget_ms] each bound their own phase,
-##   re-checked after every single processed item (never before the first --
-##   the same "progress guaranteed" contract [method
+##   VoxelWorldConfig.mesh_build_budget_ms] bounds a SINGLE shared drain
+##   covering BOTH the rebuild phase and the build-new phase (Story vox-020,
+##   TD ruling Addendum D §D7 -- see below), [member
+##   VoxelWorldConfig.mesh_unload_budget_ms] bounds its own separate unload
+##   phase, each re-checked after every single processed item (never before
+##   the first -- the same "progress guaranteed" contract [method
 ##   VoxelWorldGrid._drain_budgeted] established) -- the per-frame streaming
 ##   step a live game loop calls every frame with the current camera focus
 ##   cell. Wiring this into `Valley`'s live per-frame loop (an actual
@@ -54,6 +56,28 @@
 ##   job (story header Engine Notes / Dependencies), not this one's -- the
 ##   mechanism proven correct by this class's own tests IS this story's
 ##   scope.
+##
+## Story vox-020 (this revision, TD ruling Addendum D §D7; ADR-0014 amendment
+## Decision §3): [method _sync_window] gains a REBUILD phase -- draining
+## [method VoxelWorldMesher.get_dirty_chunk_keys] (filtered to keys still
+## tracked) -- drained FIRST, strictly before the build-new phase and strictly
+## before the unload phase (the player's own edit is always the most
+## recently-relevant geometry on screen; a window-edge chunk they are driving
+## toward is not). The rebuild phase and the build-new phase are drained
+## through ONE COMBINED item list and ONE shared `(start_usec, budget_usec)`
+## window -- rebuild keys first, build keys after -- rather than two
+## independent [method _drain_budgeted] calls: two independent calls would
+## each carry their OWN "first item always integrates" progress guarantee,
+## which at the measured ~7.7 ms/chunk cost against the 4.0 ms budget would
+## integrate one chunk in EACH phase (worst case 7.7 + 7.7 = 15.4 ms, a
+## regression of vox-019's measured 16.947 ms p95). ONE combined list makes the
+## progress guarantee fire exactly ONCE per call, so the worst case stays
+## exactly one chunk meshed per frame -- today's measured profile -- while
+## still giving a dirty chunk priority ordering over a newly-desired one. NO
+## NEW BUDGET KNOB exists for the rebuild phase -- it reuses [member
+## VoxelWorldConfig.mesh_build_budget_ms] exactly as named above; the unload
+## phase's separate window is unaffected (a different work class,
+## `queue_free`, not meshing).
 class_name VoxelWorldMeshStreamer
 extends Node
 
@@ -157,28 +181,39 @@ func get_desired_window_keys(camera_focus_cell: Vector3i) -> Array[Vector2i]:
 ## VoxelWorldConfig.view_radius_chunks] (the SAME radius knob [VoxelWorldGrid]
 ## itself reads for data residency's own camera-near half, per that config
 ## field's own reconciliation note), then:
-## 1. Builds every desired chunk NOT already tracked by [member mesher]
-##    ([method VoxelWorldMesher.build_chunk]), bounded by [param
-##    build_budget_ms] (microsecond-converted, re-checked after every single
-##    build -- never before the first, the same progress-guaranteed contract
-##    [VoxelWorldGrid._drain_budgeted] established). Sets [member
-##    MeshInstance3D.visibility_range_end] on each newly-built chunk's
-##    [MeshInstance3D] (ADR-0014 Decision Section 3, Control Manifest
-##    Required: "visibility_range_end on chunk instances") via [method
-##    _visibility_range_end] -- a value DERIVED from [member
-##    VoxelWorldConfig.view_radius_chunks], never a hardcoded literal.
+## 1. Rebuilds every dirty, still-tracked chunk ([method
+##    VoxelWorldMesher.get_dirty_chunk_keys], filtered) and builds every
+##    desired chunk NOT already tracked ([method VoxelWorldMesher.build_chunk]
+##    for both), as ONE combined list -- rebuild keys first (AC-REBUILD-FIRST)
+##    -- drained through ONE shared `(start_usec, budget_usec)` window derived
+##    from [param build_budget_ms] (see class doc comment's vox-020 paragraph
+##    for why this must be one combined drain, not two independent ones).
+##    [method VoxelWorldMesher.clear_dirty] is called immediately after a
+##    rebuilt key's [method VoxelWorldMesher.build_chunk] returns (a key the
+##    budget does not reach THIS call stays dirty for a later one). A newly
+##    built (not rebuilt) chunk's [MeshInstance3D] gets [member
+##    MeshInstance3D.visibility_range_end] set (ADR-0014 Decision Section 3,
+##    Control Manifest Required) via [method _visibility_range_end] -- a value
+##    DERIVED from [member VoxelWorldConfig.view_radius_chunks], never a
+##    hardcoded literal; a rebuilt chunk's [member
+##    MeshInstance3D.visibility_range_end] is left untouched (already set the
+##    call it was first built).
 ## 2. Unloads every chunk [member mesher] currently tracks that is NOT in the
 ##    desired set ([method VoxelWorldMesher.unload_chunk]), bounded by [param
-##    unload_budget_ms] with the identical per-item re-check discipline --
-##    this IS the staggering the Control Manifest's "never a queue_free
-##    burst" Forbidden rule requires: at most as many `unload_chunk` calls as
-##    the budget allows land in a single call to this method; any excess is
-##    left tracked, untouched, and simply retried the NEXT call (exactly
-##    [VoxelWorldGrid]'s own "excess defers to a later frame" contract).
+##    unload_budget_ms] in its OWN separate window, with the identical
+##    per-item re-check discipline -- this IS the staggering the Control
+##    Manifest's "never a queue_free burst" Forbidden rule requires: at most
+##    as many `unload_chunk` calls as the budget allows land in a single call
+##    to this method; any excess is left tracked, untouched, and simply
+##    retried the NEXT call (exactly [VoxelWorldGrid]'s own "excess defers to
+##    a later frame" contract).
 ##
 ## [param build_budget_ms] / [param unload_budget_ms] `< 0.0` means UNBOUNDED
 ## -- every item is processed regardless of elapsed time (see [method
-## build_initial_window]).
+## build_initial_window]) -- the rebuild-then-build combined list included,
+## so [method build_initial_window]'s boot contract covers both (AC-BOOT-
+## UNBOUNDED); harmless in practice since the dirty set is always empty at
+## boot (nothing has been marked dirty yet).
 func _sync_window(camera_focus_cell: Vector3i, build_budget_ms: float, unload_budget_ms: float) -> void:
 	assert(grid != null, "VoxelWorldMeshStreamer.grid not wired")
 	assert(mesher != null, "VoxelWorldMeshStreamer.mesher not wired")
@@ -188,16 +223,30 @@ func _sync_window(camera_focus_cell: Vector3i, build_budget_ms: float, unload_bu
 	_collect_window(desired, _center_key(camera_focus_cell))
 	var range_end: float = _visibility_range_end()
 
+	var to_rebuild: Array[Vector2i] = []
+	for key: Vector2i in mesher.get_dirty_chunk_keys():
+		if mesher.is_chunk_tracked(key):
+			to_rebuild.append(key)
 	var to_build: Array[Vector2i] = []
 	for key: Vector2i in desired:
 		if not mesher.is_chunk_tracked(key):
 			to_build.append(key)
+	# ONE combined list, rebuild keys first -- see this method's own doc
+	# comment / class doc comment's vox-020 paragraph for why this must not be
+	# two independent _drain_budgeted calls.
+	var to_mesh: Array[Vector2i] = []
+	to_mesh.append_array(to_rebuild)
+	to_mesh.append_array(to_build)
 	var build_start_usec: int = _now_usec()
-	_drain_budgeted(to_build, build_start_usec, _budget_usec(build_budget_ms), func(key: Vector2i) -> void:
+	_drain_budgeted(to_mesh, build_start_usec, _budget_usec(build_budget_ms), func(key: Vector2i) -> void:
+		var is_rebuild: bool = mesher.is_chunk_tracked(key)
 		mesher.build_chunk(key)
-		var mesh_instance: MeshInstance3D = mesher.get_chunk_mesh_instance(key)
-		if mesh_instance != null:
-			mesh_instance.visibility_range_end = range_end
+		if is_rebuild:
+			mesher.clear_dirty(key)
+		else:
+			var mesh_instance: MeshInstance3D = mesher.get_chunk_mesh_instance(key)
+			if mesh_instance != null:
+				mesh_instance.visibility_range_end = range_end
 	)
 
 	var to_unload: Array[Vector2i] = []

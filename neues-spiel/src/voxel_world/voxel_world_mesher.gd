@@ -31,14 +31,33 @@
 ## Scope (vox-007 -- explicitly excludes Story 015's view-window streaming):
 ## this class does NOT decide WHICH chunks are meshed as the camera moves --
 ## it only (a) builds/rebuilds one chunk's [ArrayMesh] on demand via [method
-## build_chunk], and (b) automatically rebuilds an ALREADY-tracked chunk when
-## [signal VoxelWorldGrid.cell_changed] / [signal
-## VoxelWorldGrid.cells_changed_batch] reports a change inside it -- or across
-## its border into a tracked neighbor, since a solid/air change at a chunk's
-## edge changes the NEIGHBORING chunk's own border-face culling too. A cell
-## change in a chunk this class was never asked to [method build_chunk] is
-## left alone; Story 015 owns chunk-membership decisions, this class only
-## reacts within whatever membership already exists.
+## build_chunk], and (b) MARKS an ALREADY-tracked chunk dirty when [signal
+## VoxelWorldGrid.cell_changed] / [signal VoxelWorldGrid.cells_changed_batch]
+## reports a change inside it -- or across its border into a tracked
+## neighbor, since a solid/air change at a chunk's edge changes the
+## NEIGHBORING chunk's own border-face culling too. A cell change in a chunk
+## this class was never asked to [method build_chunk] is left alone; Story
+## 015 owns chunk-membership decisions, this class only reacts within
+## whatever membership already exists.
+##
+## Story vox-020 (this revision, TD ruling Addendum D §D7): the two change
+## handlers no longer call [method build_chunk] synchronously inside signal
+## dispatch (the ~69 ms 9-chunk frame-spike defect D7 named) -- they mark the
+## touched, tracked chunk(s) dirty instead ([member _dirty_chunks]), exposed
+## via [method get_dirty_chunk_keys]/[method clear_dirty]. Draining the dirty
+## set through a time budget is [VoxelWorldMeshStreamer]'s job (its new
+## rebuild phase, drained FIRST, sharing [member
+## VoxelWorldConfig.mesh_build_budget_ms]'s window with the build-new phase --
+## no independent rebuild budget, see that class's own doc comment for why).
+## This class also subscribes to [signal VoxelWorldGrid.chunk_became_resident]
+## (Story vox-020, ADR-0015 amendment) and marks a tracked chunk dirty the
+## instant its data pages in -- closing the "mesh window outruns the async
+## residency window" hole (D7's Defect 2) through the SAME dirty-set
+## machinery, no second mechanism. [method unload_chunk] erases a chunk's
+## dirty entry along with its tracking entry -- no dirty-set bookkeeping
+## survives past a chunk's own tracked lifetime (D7's explicit "do not build
+## bookkeeping for this" ruling); a re-entering chunk is built fresh from
+## current grid state by construction, correct with zero carried state.
 ##
 ## Story vox-015 (this revision, ADR-0014 Decision Section 3 / ADR-0015
 ## Decision Section 1; TR-voxel-world-025/026) lands the chunk-membership
@@ -150,18 +169,29 @@ var _material: ShaderMaterial = _build_shared_material()
 ## class doc comment's Scope note.
 var _chunk_nodes: Dictionary[Vector2i, MeshInstance3D] = {}
 
+## Tracked chunks awaiting a rebuild (Story vox-020) -- populated ONLY for
+## keys already present in [member _chunk_nodes] (the same "tracked" gate
+## [method is_chunk_tracked] exposes; AC-UNTRACKED-NO-BOOKKEEPING: a change to
+## an untracked chunk records nothing here). Drained by
+## [VoxelWorldMeshStreamer]'s budgeted rebuild phase via [method
+## get_dirty_chunk_keys]/[method clear_dirty] -- this class itself never
+## drains or budgets it, matching [method build_chunk]/[method unload_chunk]'s
+## own "no staggering of its own" precedent.
+var _dirty_chunks: Dictionary[Vector2i, bool] = {}
+
 
 ## Explicitly callable wiring entry point (ADR-0001). Asserts [member grid]
-## (and its wired [VoxelWorldConfig]) are present, then subscribes to both of
-## [VoxelWorldGrid]'s change signals so an already-[method build_chunk]'d
-## chunk rebuilds automatically on any write inside (or bordering) it
-## (TR-voxel-world-025) -- a chunk never asked for is left alone (Scope
-## note).
+## (and its wired [VoxelWorldConfig]) are present, then subscribes to all
+## three of [VoxelWorldGrid]'s change/residency signals so an already-[method
+## build_chunk]'d chunk is marked dirty on any write inside (or bordering) it,
+## or the instant its data pages in (TR-voxel-world-025/053) -- a chunk never
+## asked for is left alone (Scope note).
 func setup() -> void:
 	assert(grid != null, "VoxelWorldMesher.grid not wired")
 	assert(grid.config != null, "VoxelWorldMesher.grid.config not wired")
 	grid.cell_changed.connect(_on_cell_changed)
 	grid.cells_changed_batch.connect(_on_cells_changed_batch)
+	grid.chunk_became_resident.connect(_on_chunk_became_resident)
 	_is_set_up = true
 
 
@@ -200,8 +230,8 @@ func get_chunk_mesh_instance(chunk_coord: Vector2i) -> MeshInstance3D:
 
 
 ## Whether [param chunk_coord] has ever been passed to [method build_chunk]
-## -- the "already tracked" gate the change-signal handlers check before
-## auto-rebuilding (Scope note).
+## -- the "already tracked" gate the change/residency-signal handlers check
+## before marking dirty (Scope note; Story vox-020).
 func is_chunk_tracked(chunk_coord: Vector2i) -> bool:
 	return _chunk_nodes.has(chunk_coord)
 
@@ -245,6 +275,7 @@ func unload_chunk(chunk_coord: Vector2i) -> void:
 		return
 	var mesh_instance: MeshInstance3D = _chunk_nodes[chunk_coord]
 	_chunk_nodes.erase(chunk_coord)
+	_dirty_chunks.erase(chunk_coord)  # Story vox-020, AC-UNLOAD-CLEARS-DIRTY: no dirty-set persistence across unload
 	mesh_instance.queue_free()
 
 
@@ -255,36 +286,66 @@ func get_shared_material() -> ShaderMaterial:
 	return _material
 
 
-## Single-cell change reaction (TR-voxel-world-025): rebuilds [param cell]'s
-## own chunk if tracked, and its chunk-boundary neighbor(s) if [param cell]
+## Every chunk key CURRENTLY marked dirty (Story vox-020) -- snapshotted into
+## a plain array, mirroring [method get_tracked_chunk_keys]'s identical
+## "current key set" shape. [VoxelWorldMeshStreamer]'s rebuild phase drains
+## this (filtered to keys still tracked) via [method build_chunk] + [method
+## clear_dirty], under its own shared, budgeted drain -- this class performs
+## no draining or budgeting of its own.
+func get_dirty_chunk_keys() -> Array[Vector2i]:
+	var keys: Array[Vector2i] = []
+	for key: Vector2i in _dirty_chunks:
+		keys.append(key)
+	return keys
+
+
+## Erases [param chunk_coord] from the dirty set (Story vox-020) -- called by
+## [VoxelWorldMeshStreamer]'s rebuild-phase drain action immediately after
+## [method build_chunk] returns, so a key the budget did not reach THIS call
+## stays dirty for a later one. A no-op if [param chunk_coord] was not dirty.
+func clear_dirty(chunk_coord: Vector2i) -> void:
+	_dirty_chunks.erase(chunk_coord)
+
+
+## Single-cell change reaction (TR-voxel-world-025): marks [param cell]'s own
+## chunk dirty if tracked, and its chunk-boundary neighbor(s) if [param cell]
 ## sits on a chunk edge and that neighboring chunk is ALSO tracked (a
 ## solid/air change at a chunk's border changes the adjacent chunk's own
 ## face-culling at that shared boundary -- class doc comment Scope note).
+## Story vox-020: marks dirty instead of rebuilding synchronously (D7 Defect
+## 1) -- [VoxelWorldMeshStreamer]'s budgeted rebuild phase does the actual
+## [method build_chunk] call, later.
 func _on_cell_changed(cell: Vector3i, _before: CellContents, _after: CellContents) -> void:
-	_rebuild_tracked_chunks_touched_by(cell)
+	_mark_tracked_chunks_touched_by(cell)
 
 
 ## Batched-write change reaction (TR-voxel-world-042/025): the same per-cell
 ## chunk-touching logic as [method _on_cell_changed], applied once per
-## changed cell in [param changes], with each touched-and-tracked chunk
-## rebuilt exactly once even if multiple changed cells map to it.
+## changed cell in [param changes] -- marking [member _dirty_chunks] is
+## naturally idempotent, so no separate per-batch dedup pass is needed (unlike
+## the pre-vox-020 rebuild-now version this replaces).
 func _on_cells_changed_batch(changes: Array[CellChangeRecord]) -> void:
-	var touched: Dictionary[Vector2i, bool] = {}
 	for record: CellChangeRecord in changes:
-		for key: Vector2i in _chunk_keys_touched_by(record.cell):
-			touched[key] = true
-	for key: Vector2i in touched:
-		if _chunk_nodes.has(key):
-			build_chunk(key)
+		_mark_tracked_chunks_touched_by(record.cell)
 
 
-## Rebuilds every tracked chunk [param cell] touches (its own chunk, plus a
-## chunk-boundary neighbor if applicable) -- the single-cell path's version of
-## [method _on_cells_changed_batch]'s dedup loop.
-func _rebuild_tracked_chunks_touched_by(cell: Vector3i) -> void:
+## Residency page-in reaction (Story vox-020, TR-voxel-world-053, D7 Defect 2):
+## marks [param chunk_key] dirty if (and only if) it is already tracked -- a
+## chunk this class was never asked to [method build_chunk] gets no
+## bookkeeping (AC-UNTRACKED-NO-BOOKKEEPING), and is simply built fresh, with
+## correct data, whenever [VoxelWorldMeshStreamer] first tracks it.
+func _on_chunk_became_resident(chunk_key: Vector2i) -> void:
+	if _chunk_nodes.has(chunk_key):
+		_dirty_chunks[chunk_key] = true
+
+
+## Marks every tracked chunk [param cell] touches (its own chunk, plus a
+## chunk-boundary neighbor if applicable) dirty -- the single-cell path's
+## version of [method _on_cells_changed_batch]'s per-record loop.
+func _mark_tracked_chunks_touched_by(cell: Vector3i) -> void:
 	for key: Vector2i in _chunk_keys_touched_by(cell):
 		if _chunk_nodes.has(key):
-			build_chunk(key)
+			_dirty_chunks[key] = true
 
 
 ## Returns every chunk coordinate [param cell] can affect the MESH of: its

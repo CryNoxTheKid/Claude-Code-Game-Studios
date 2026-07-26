@@ -12,11 +12,17 @@
 ## 2. AC-1 (TR-voxel-world-025, "faces only where a cell borders air"): a
 ##    fully-buried cell (solid on all 6 sides) emits zero faces.
 ## 3. AC-2 (TR-voxel-world-025, "whole-chunk rebuild on cell_changed /
-##    cells_changed_batch"): a tracked chunk automatically rebuilds when a
-##    cell inside it changes (single write and batched write), and a change
-##    at a chunk's border also rebuilds an already-tracked neighbor chunk. A
-##    chunk vox-007 was never asked to [method VoxelWorldMesher.build_chunk]
-##    is left alone (Scope: Story 015 owns chunk-membership decisions).
+##    cells_changed_batch"): a tracked chunk is marked DIRTY (Story vox-020,
+##    TD ruling Addendum D §D7 -- no longer rebuilt synchronously inside
+##    signal dispatch) when a cell inside it changes (single write and batched
+##    write), and a change at a chunk's border also marks an already-tracked
+##    neighbor chunk dirty. A chunk vox-007 was never asked to [method
+##    VoxelWorldMesher.build_chunk] is left alone (Scope: Story 015 owns
+##    chunk-membership decisions). Draining the dirty set into an actual
+##    rebuild is [VoxelWorldMeshStreamer]'s job (`mesh_invalidation_budget_
+##    test.gd` covers the budgeted-drain/ordering contract); this file proves
+##    only that the mesher marks the RIGHT keys dirty and does not itself
+##    rebuild during dispatch.
 class_name ChunkedMesherFaceCullingTest
 extends GdUnitTestSuite
 
@@ -179,7 +185,7 @@ func test_empty_chunk_produces_null_mesh() -> void:
 # AC-2 (TR-voxel-world-025) -- whole-chunk rebuild on cell_changed
 # ---------------------------------------------------------------------------
 
-func test_cell_changed_rebuilds_already_tracked_chunk() -> void:
+func test_cell_changed_marks_already_tracked_chunk_dirty_not_rebuilt_immediately() -> void:
 	# Arrange -- build the (empty) chunk once so it becomes "tracked".
 	var grid: VoxelWorldGrid = _make_grid()
 	var mesher: VoxelWorldMesher = _make_mesher(grid)
@@ -189,20 +195,34 @@ func test_cell_changed_rebuilds_already_tracked_chunk() -> void:
 	# Act -- place a block inside the tracked chunk.
 	grid.set_cell(Vector3i(5, 5, 5), CellContents.new(1, 0))
 
-	# Assert -- the mesh updated automatically (no manual build_chunk call).
+	# Assert -- Story vox-020: marked dirty, NOT rebuilt synchronously inside
+	# signal dispatch (the mesh is still the stale, pre-write null).
+	assert_array(mesher.get_dirty_chunk_keys()).contains([Vector2i(0, 0)])
+	assert_object(mesher.get_chunk_mesh_instance(Vector2i(0, 0)).mesh).is_null()
+
+	# Act -- drain the dirty set (what [VoxelWorldMeshStreamer]'s rebuild phase
+	# does every call).
+	mesher.build_chunk(Vector2i(0, 0))
+	mesher.clear_dirty(Vector2i(0, 0))
+
+	# Assert -- now correctly reflects the write.
 	var mesh: ArrayMesh = mesher.get_chunk_mesh_instance(Vector2i(0, 0)).mesh
 	assert_object(mesh).is_not_null()
 	var verts: PackedVector3Array = mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
 	assert_int(verts.size()).is_equal(24)
+	assert_array(mesher.get_dirty_chunk_keys()).is_empty()
 
-	# Act -- remove it again.
+	# Act -- remove it again (marks dirty again).
 	grid.clear_cell(Vector3i(5, 5, 5))
+	assert_array(mesher.get_dirty_chunk_keys()).contains([Vector2i(0, 0)])
+	mesher.build_chunk(Vector2i(0, 0))
+	mesher.clear_dirty(Vector2i(0, 0))
 
-	# Assert -- back to an empty mesh.
+	# Assert -- back to an empty mesh once drained.
 	assert_object(mesher.get_chunk_mesh_instance(Vector2i(0, 0)).mesh).is_null()
 
 
-func test_cells_changed_batch_rebuilds_already_tracked_chunk_exactly_once() -> void:
+func test_cells_changed_batch_marks_already_tracked_chunk_dirty_exactly_once() -> void:
 	# Arrange
 	var grid: VoxelWorldGrid = _make_grid()
 	var mesher: VoxelWorldMesher = _make_mesher(grid)
@@ -213,6 +233,17 @@ func test_cells_changed_batch_rebuilds_already_tracked_chunk_exactly_once() -> v
 		Vector3i(1, 0, 1): CellContents.new(1, 0),
 		Vector3i(2, 0, 1): CellContents.new(1, 0),
 	})
+
+	# Assert -- Story vox-020: exactly ONE dirty key (deduped), mesh not yet
+	# rebuilt.
+	var dirty: Array[Vector2i] = mesher.get_dirty_chunk_keys()
+	assert_int(dirty.size()).is_equal(1)
+	assert_array(dirty).contains([Vector2i(0, 0)])
+	assert_object(mesher.get_chunk_mesh_instance(Vector2i(0, 0)).mesh).is_null()
+
+	# Act -- drain.
+	mesher.build_chunk(Vector2i(0, 0))
+	mesher.clear_dirty(Vector2i(0, 0))
 
 	# Assert -- both cells' faces are present (adjacent along +X, so 10
 	# faces = 40 verts, matching the two-adjacent-cells case above).
@@ -234,7 +265,7 @@ func test_cell_changed_in_untracked_chunk_does_not_build_it() -> void:
 	assert_bool(mesher.is_chunk_tracked(Vector2i(5, 5))).is_false()
 
 
-func test_change_at_chunk_border_also_rebuilds_tracked_neighbor_chunk() -> void:
+func test_change_at_chunk_border_also_marks_tracked_neighbor_chunk_dirty() -> void:
 	# Arrange -- two ADJACENT tracked chunks (0,0) and (1,0), CHUNK_SIZE=16:
 	# chunk (0,0) covers local x 0..15, chunk (1,0) covers x 16..31.
 	var grid: VoxelWorldGrid = _make_grid()
@@ -244,15 +275,30 @@ func test_change_at_chunk_border_also_rebuilds_tracked_neighbor_chunk() -> void:
 	# A solid cell just inside chunk (1,0)'s border (x=16) so chunk (0,0)'s
 	# border cell at x=15 has a solid neighbor across the boundary.
 	grid.set_cell(Vector3i(16, 0, 0), CellContents.new(1, 0))
+	mesher.build_chunk(Vector2i(1, 0))
+	mesher.clear_dirty(Vector2i(1, 0))
 	assert_object(mesher.get_chunk_mesh_instance(Vector2i(1, 0)).mesh).is_not_null()
 	assert_object(mesher.get_chunk_mesh_instance(Vector2i(0, 0)).mesh).is_null()  # nothing solid in chunk 0 yet
 
 	# Act -- place a solid cell at x=15 (chunk (0,0)'s edge, touching x=16).
 	grid.set_cell(Vector3i(15, 0, 0), CellContents.new(1, 0))
 
-	# Assert -- BOTH chunks' meshes reflect the shared boundary being culled:
-	# each of the two cells has 5 exposed faces (their mutual +X/-X face is
-	# hidden), not 6 -- 20 verts each, not 24.
+	# Assert -- Story vox-020: BOTH the owning chunk AND the seam neighbor are
+	# marked dirty, NEITHER mesh is rebuilt yet.
+	var dirty: Array[Vector2i] = mesher.get_dirty_chunk_keys()
+	assert_int(dirty.size()).is_equal(2)
+	assert_array(dirty).contains([Vector2i(0, 0), Vector2i(1, 0)])
+	assert_object(mesher.get_chunk_mesh_instance(Vector2i(0, 0)).mesh).is_null()
+
+	# Act -- drain both (what the streamer's rebuild phase does).
+	mesher.build_chunk(Vector2i(0, 0))
+	mesher.clear_dirty(Vector2i(0, 0))
+	mesher.build_chunk(Vector2i(1, 0))
+	mesher.clear_dirty(Vector2i(1, 0))
+
+	# Assert -- BOTH chunks' meshes now reflect the shared boundary being
+	# culled: each of the two cells has 5 exposed faces (their mutual +X/-X
+	# face is hidden), not 6 -- 20 verts each, not 24.
 	var mesh0: ArrayMesh = mesher.get_chunk_mesh_instance(Vector2i(0, 0)).mesh
 	var mesh1: ArrayMesh = mesher.get_chunk_mesh_instance(Vector2i(1, 0)).mesh
 	assert_object(mesh0).is_not_null()
@@ -261,3 +307,4 @@ func test_change_at_chunk_border_also_rebuilds_tracked_neighbor_chunk() -> void:
 	var verts1: PackedVector3Array = mesh1.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
 	assert_int(verts0.size()).is_equal(20)
 	assert_int(verts1.size()).is_equal(20)
+	assert_array(mesher.get_dirty_chunk_keys()).is_empty()
