@@ -347,13 +347,24 @@ func test_gameworld_boot_initial_mesh_window_uses_boot_radius_not_steady_state_r
 	var steady_radius: int = voxel_world.config.view_radius_chunks
 	assert_int(boot_radius).is_less(steady_radius)  # sanity -- the shipped config actually narrows at boot
 
-	# Assert -- the initial window's key count equals the BOOT radius window
-	# (CameraInput's default Vector3.ZERO orbit target is a world corner, so
-	# only the +x/+z quadrant survives the lower-bound clip: (radius+1)^2),
-	# strictly LESS than get_desired_window_keys' own steady-state window.
-	var expected_boot_count: int = (boot_radius + 1) * (boot_radius + 1)
+	# Assert -- the initial window's key count equals the BOOT radius window.
+	# Story scene-005 (World genesis in the boot sequence, AC-ONE-START-FOCUS)
+	# changed the PRECONDITION this assertion was written against: world
+	# genesis now calls CameraInput.set_target() with the config-derived
+	# world-CENTER cell (VillagerRosterSpawner.world_center_cell) BEFORE this
+	# initial mesh window ever builds -- the camera's default Vector3.ZERO
+	# "world corner" starting orbit target (this test's own former precondition,
+	# the exact bug AC-ONE-START-FOCUS names and fixes) no longer holds by the
+	# time build_initial_window runs. The window is therefore now centered on
+	# that interior cell, comfortably clear of every world edge at this
+	# radius, and survives with NO lower-bound clipping at all -- a full
+	# (2*radius+1)^2 square, not the former clipped-corner (radius+1)^2.
+	# Updated consciously, not incidentally, per scene-005's own dev-story
+	# instructions to flag this file.
+	var focus_cell: Vector3i = VillagerRosterSpawner.world_center_cell(voxel_world.config)
+	var expected_boot_count: int = (2 * boot_radius + 1) * (2 * boot_radius + 1)
 	assert_int(mesher.get_tracked_chunk_keys().size()).is_equal(expected_boot_count)
-	var steady_window: Array[Vector2i] = streamer.get_desired_window_keys(Vector3i.ZERO)
+	var steady_window: Array[Vector2i] = streamer.get_desired_window_keys(focus_cell)
 	assert_int(steady_window.size()).is_greater(expected_boot_count)
 
 

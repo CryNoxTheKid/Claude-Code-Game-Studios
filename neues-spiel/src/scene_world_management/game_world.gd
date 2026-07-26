@@ -221,6 +221,25 @@ var _boot_state: BootState = BootState.WAITING_FOR_DATABASE
 ## never wired. See [method get_valley].
 var _valley: Node = null
 
+## Story scene-005 (World genesis in the boot sequence) tuning config
+## (ADR-0002) -- [member GameWorldConfig.genesis_wall_clock_ceiling_ms] bounds
+## [method _run_world_genesis]'s residency-drive loop. Deliberately optional,
+## like [member valley_scene]: this class predates having any config Resource
+## at all, and dozens of pre-existing DI/boot-gate-only tests construct
+## [code]GameWorld.new()[/code] directly without ever wiring this field -- see
+## [method _run_world_genesis]'s own null-tolerant fallback (mirrors [method
+## Valley.spawn_starting_roster]'s established "config-optional, in-code
+## default fallback" precedent for exactly this situation).
+@export var config: GameWorldConfig = null
+
+## Fallback ceiling (milliseconds) used ONLY when [member config] is unwired
+## -- the one place this literal is allowed to live, matching [member
+## config]'s own doc comment. Equal to [member
+## GameWorldConfig.genesis_wall_clock_ceiling_ms]'s own shipped `.tres`
+## default so an unwired [GameWorld] behaves identically to the production-
+## wired one.
+const DEFAULT_GENESIS_WALL_CLOCK_CEILING_MS: float = 1000.0
+
 
 func _ready() -> void:
 	if resource_item_database == null:
@@ -231,6 +250,10 @@ func _ready() -> void:
 		+ " a mock in tests; the real Autoload is registered since rid-002) before"
 		+ " the boot gate can run"
 	)
+	if config != null:
+		for issue: String in config.validate():
+			if not issue.begins_with(ConfigResource.BLOCKING_PREFIX):
+				push_warning(issue)
 	_boot_state = BootState.WAITING_FOR_DATABASE
 	@warning_ignore("unsafe_method_access")
 	var database_already_ready: bool = resource_item_database.is_ready()
@@ -303,6 +326,8 @@ func _on_database_settled(success: bool, issues: Array) -> void:
 	_gather_valley_tier_modules()
 	_setup_injected_tier()
 	if _boot_state != BootState.HALTED:
+		_run_world_genesis()
+	if _boot_state != BootState.HALTED:
 		_build_initial_voxel_mesh_window()
 	if _boot_state != BootState.HALTED:
 		_boot_state = BootState.ACTIVE
@@ -360,6 +385,145 @@ func _build_initial_voxel_mesh_window() -> void:
 			focus_cell = VoxelWorldGrid.world_to_cell(target)
 	@warning_ignore("unsafe_method_access")
 	streamer.build_initial_window(focus_cell)
+
+
+## Story scene-005 (World genesis in the boot sequence -- ADR-0005 primary,
+## the one call site the story adds; ADR-0015 primary for the residency
+## shape; ADR-0014 secondary for the mesh-window ordering it now precedes;
+## ADR-0001 secondary). Runs during WIRING, strictly AFTER [method
+## _setup_injected_tier] returns and STRICTLY BEFORE [method
+## _build_initial_voxel_mesh_window] -- the one new phase this story inserts
+## into [method _on_database_settled]'s existing sequence, called from that
+## SAME sole orchestration site, never a second one. Duck-typed against the
+## Valley exactly like [method _gather_valley_tier_modules]/[method
+## _build_initial_voxel_mesh_window] (guards with [code]_valley == null[/code]
+## and [method Object.has_method]), so every pre-existing DI/boot-gate-only
+## test Valley stand-in that predates this story -- which never wires a
+## Valley exposing these methods -- remains completely unaffected: this
+## method is a no-op for every one of them, exactly as the two existing
+## seams already are.
+##
+## Order inside genesis is load-bearing (the story's own Implementation
+## Notes): the camera's start-focus target is established FIRST (so [method
+## _build_initial_voxel_mesh_window] -- unchanged by this story, still reads
+## the camera's CURRENT target -- automatically centers the initial mesh
+## window on the SAME cell genesis anchors everything else on,
+## AC-ONE-START-FOCUS), THEN the boot-window residency drive (terrain
+## resident), THEN the grid's GENERATED lifecycle marker, THEN the nav graph
+## build, THEN the roster spawn -- the nav graph's predicate walk and the
+## roster's standable-cell search both read the grid and are silently empty
+## if run before real terrain is resident.
+func _run_world_genesis() -> void:
+	if _valley == null:
+		return
+	if not _valley.has_method(&"get_voxel_world"):
+		return
+	@warning_ignore("unsafe_method_access")
+	var voxel_world: Object = _valley.get_voxel_world()
+	if voxel_world == null:
+		return
+	@warning_ignore("unsafe_property_access")
+	var voxel_world_config: Object = voxel_world.config
+	if voxel_world_config == null:
+		return
+
+	var start_focus: Vector3i = VillagerRosterSpawner.world_center_cell(voxel_world_config)
+
+	if _valley.has_method(&"get_camera_input"):
+		@warning_ignore("unsafe_method_access")
+		var camera_input: Object = _valley.get_camera_input()
+		if camera_input != null and camera_input.has_method(&"set_target"):
+			@warning_ignore("unsafe_method_access")
+			camera_input.set_target(VoxelWorldGrid.cell_to_world(start_focus))
+
+	var ceiling_ms: float = DEFAULT_GENESIS_WALL_CLOCK_CEILING_MS
+	if config != null:
+		ceiling_ms = config.genesis_wall_clock_ceiling_ms
+	_drive_boot_residency(voxel_world, start_focus, ceiling_ms)
+
+	if voxel_world.has_method(&"mark_generated"):
+		@warning_ignore("unsafe_method_access")
+		voxel_world.mark_generated()
+
+	if _valley.has_method(&"build_villager_nav_graph"):
+		@warning_ignore("unsafe_method_access")
+		_valley.build_villager_nav_graph(start_focus)
+
+	if _valley.has_method(&"spawn_starting_roster"):
+		@warning_ignore("unsafe_method_access")
+		_valley.spawn_starting_roster()
+
+
+## Genesis's own bounded residency-drive loop (Implementation Notes:
+## "Alternate update_residency() with drain_pending_async_reads() until
+## is_chunk_resident() holds for the desired set or the config-driven
+## wall-clock ceiling elapses -- bounded, never a spin"). Driven exclusively
+## through [method VoxelWorldGrid.update_residency] and [method
+## VoxelWorldGrid.drain_pending_async_reads] -- never [method
+## VoxelWorldGrid.wait_for_async_residency_idle], whose own doc comment names
+## it the wrong primitive for a side-channel dispatch; this loop drives
+## residency itself; it is not a side channel. [param ceiling_ms] itself
+## bounds the REMAINING budget passed into each nested [method
+## VoxelWorldGrid.drain_pending_async_reads] call too, so one slow settle can
+## never silently consume more than what is left of the ceiling on its own.
+##
+## Termination is a TWO-PART fixed point, not a bare "zero in flight" check:
+## [member VoxelWorldConfig.max_concurrent_async_tasks] caps how many NEW
+## chunks a SINGLE [method VoxelWorldGrid.update_residency] call can dispatch
+## (Story vox-011/ADR-0015 §6) -- a boot window desiring more chunks than that
+## cap genuinely needs SEVERAL rounds, each dispatching another capped batch,
+## to become fully resident. Stopping the instant one round's dispatched
+## batch drains to zero in-flight (without re-checking for a NEXT round) would
+## silently leave every chunk beyond the first cap's worth of dispatches
+## never even requested -- so this loop additionally tracks [method
+## VoxelWorldGrid.get_resident_chunk_keys]'s size across rounds and only
+## terminates once BOTH nothing remains in flight AND a round produced no
+## resident-count growth over the previous one (the window's own focus never
+## moves during genesis, so resident count is monotonically non-decreasing
+## until it plateaus at the full desired-window size -- growth stopping is
+## therefore a correct convergence signal, not merely "this round's batch
+## settled"). [param ceiling_ms] still bounds the loop overall -- never an
+## unbounded spin.
+func _drive_boot_residency(voxel_world: Object, start_focus: Vector3i, ceiling_ms: float) -> void:
+	var start_usec: int = Time.get_ticks_usec()
+	var ceiling_usec: int = int(ceiling_ms * 1000.0)
+	var previous_resident_count: int = -1
+	while true:
+		@warning_ignore("unsafe_method_access")
+		voxel_world.update_residency(start_focus, start_focus)
+		var elapsed_usec: int = Time.get_ticks_usec() - start_usec
+		if elapsed_usec >= ceiling_usec:
+			_warn_genesis_ceiling_hit(ceiling_ms)
+			return
+		var remaining_msec: int = maxi(1, int(float(ceiling_usec - elapsed_usec) / 1000.0))
+		@warning_ignore("unsafe_method_access")
+		voxel_world.drain_pending_async_reads(remaining_msec)
+		@warning_ignore("unsafe_method_access")
+		var in_flight_count: int = voxel_world.get_in_flight_async_task_count()
+		@warning_ignore("unsafe_method_access")
+		var resident_count: int = voxel_world.get_resident_chunk_keys().size()
+		if in_flight_count == 0 and resident_count == previous_resident_count:
+			return
+		previous_resident_count = resident_count
+		if (Time.get_ticks_usec() - start_usec) >= ceiling_usec:
+			_warn_genesis_ceiling_hit(ceiling_ms)
+			return
+
+
+## Logs the deterministic, bounded termination of [method
+## _drive_boot_residency] when its wall-clock ceiling is hit before every
+## boot-window chunk settled -- a documented, non-crashing outcome (Control
+## Manifest: "the boot loop is bounded -- a wall-clock ceiling and a
+## deterministic outcome when it is hit -- never an unbounded spin"), not a
+## silently-swallowed failure.
+func _warn_genesis_ceiling_hit(ceiling_ms: float) -> void:
+	push_warning(
+		(
+			"GameWorld._run_world_genesis: boot residency drive hit its %sms wall-clock" +
+			" ceiling before every boot-window chunk settled -- terminating deterministically," +
+			" not spinning further"
+		) % [ceiling_ms]
+	)
 
 
 ## Calls [code]setup()[/code] on every wired injected-tier module, in array

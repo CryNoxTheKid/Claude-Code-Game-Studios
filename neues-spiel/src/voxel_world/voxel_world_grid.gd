@@ -558,6 +558,22 @@ func get_state() -> GridState:
 	return _state
 
 
+## Small additive surface (Story scene-005, AC-GENERATED-STATE; ADR-0015):
+## marks [member _state] GENERATED without going through [method
+## generate_terrain] -- the production boot path drives terrain into
+## existence via the residency page-in ([method update_residency], seeded
+## per-chunk regeneration, ADR-0015 Decision §5), never the full-extent
+## eager [method generate_terrain] (Control Manifest Forbidden,
+## AC-NO-FULL-EXTENT-GEN), so nothing else on that path ever flips [member
+## _state]. Idempotent -- calling this when already GENERATED is a harmless
+## no-op. Duplicates NO generation logic; it is purely the observable
+## lifecycle-milestone write [method generate_terrain] already performs on
+## its own last line, exposed as its own callable for the residency-driven
+## path.
+func mark_generated() -> void:
+	_state = GridState.GENERATED
+
+
 ## Procedural terrain generation (Story vox-006, ADR-0002 config + ADR-0014
 ## chunked storage; TR-voxel-world-026/029/038/039/044/046). For every
 ## in-bounds column `(x, z)` across the configured world extent, computes

@@ -1,7 +1,7 @@
 # Story 005: World genesis in the boot sequence — the Valley boots a REAL world (terrain, roster, nav graph) before ACTIVE
 
 > **Epic**: Scene / World Management
-> **Status**: Ready
+> **Status: Complete (2026-07-26 — 1100/1100 suite green 0 orphans, parent-verified; real boot 2.59s vs the 3.0s ceiling)
 > **Layer**: Foundation (boot sequencing) → drives Foundation (Voxel World residency) + Core (Villager AI roster/nav)
 > **Type**: Integration
 > **Estimate**: 2.0 days *(relative-complexity anchor, not a calendar prediction — sprint-09.md sizing convention)*

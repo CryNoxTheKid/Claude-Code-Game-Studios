@@ -167,8 +167,15 @@ func test_hosted_building_system_and_villager_ai_modules_are_children_of_valley(
 	# wiring/boot-timing proof. M01 condition C4 (`production/milestones/
 	# milestone-01-review-2026-07-26.md`) adds two more --
 	# [AmbientTorchLight]/[TorchFlicker], see [Valley]'s own class doc
-	# comment for the full wiring rationale -- this count is updated
-	# consciously, not incidentally (9 -> 11).
+	# comment for the full wiring rationale -- this count was 9 -> 11.
+	# Story scene-005 (World genesis in the boot sequence) adds a TWELFTH --
+	# not a new structural hosted module, but [method
+	# GameWorld._run_world_genesis] now calls [method
+	# Valley.spawn_starting_roster] exactly once during real boot
+	# (AC-ROSTER-AFTER-WORLD), and that method add_child()s each spawned
+	# [VillagerAi] directly onto this Valley instance (shipped MVP default
+	# `starting_villager_count = 1`). Updated consciously, not incidentally
+	# (11 -> 12).
 	var world: GameWorld = auto_free(GameWorld.new())
 	var database: MockResourceItemDatabase = auto_free(MockResourceItemDatabase.new())
 	database.configure_ready_immediately()
@@ -180,7 +187,7 @@ func test_hosted_building_system_and_villager_ai_modules_are_children_of_valley(
 
 	# Assert
 	var valley: Valley = world.get_valley() as Valley
-	assert_int(valley.get_child_count()).is_equal(11)
+	assert_int(valley.get_child_count()).is_equal(12)
 	assert_object(valley.get_voxel_world_mesher()).is_not_null()
 	assert_object(valley.get_voxel_world_mesh_streamer()).is_not_null()
 	assert_object(valley.get_tool_state_machine()).is_not_null()

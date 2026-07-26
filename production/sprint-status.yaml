@@ -128,7 +128,7 @@ stories:
     name: "World genesis in the boot sequence — terrain, roster and nav graph before ACTIVE (THE VALLEY BOOTS AN EMPTY GRID TODAY)"
     file: "production/epics/scene-world-management/story-005-world-genesis-boot-sequence.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete
     owner: "godot-specialist"
     estimate_days: 2.0
     blocker: "AMENDMENT 2026-07-26 — SEQUENCE FIRST on the godot-specialist lane, AHEAD of building-023. NOW BLOCKED ON vox-020 + vox-021 (TD Addendum D): vox-020 corrects the false premise this story's Guardrail was written on and closes its Open Decision #4; vox-021 pre-applies its named lever (1) and sets the 3.0s boot ceiling AC-BOOT-BUDGET now measures against. Closes the gap three landed stories independently hit: valley.gd defers terrain + VillagerNavGraph.build + spawn_starting_roster to 'a future world-generation story' and this is it; villager-ai-021's roster surface is dead code until this lands; building-023's pick DDA has nothing to hit in an empty grid, so its evidence screenshot is impossible before this. Large-world shape RESOLVED: production genesis is ADR-0015 residency page-in of the boot window, NEVER a full-extent generate_terrain() (measured 52.2s at 900x900, no completion >200s at 1000x1000 — Dictionary rehash cliff, vox-018 evidence). AC-BOOT-BUDGET RE-POINTED 2026-07-26: TD ceiling 3.0s total / <=2.5s mesh phase (was 5s producer-provisional); the radius lever is SPENT (owned by vox-021); remaining levers are nav_region_size then the boot-drain ceiling, then escalate to technical-director"

@@ -154,18 +154,27 @@ func test_build_initial_window_runs_synchronously_during_boot_before_any_process
 	# steady-state radius, AC-STEADY-STATE-UNCHANGED -- deliberately not
 	# reused here) -- so this test computes the expected boot window directly
 	# from the boot radius instead of the previous vox-018-era shortcut of
-	# comparing against get_desired_window_keys(). CameraInput's default
-	# Vector3.ZERO orbit target is a world CORNER (chunk (0,0)), so only the
-	# +x/+z quadrant survives the world's own lower-bound clip -- (radius+1)^2
-	# chunks, mirroring VoxelWorldMeshStreamer's own `_is_chunk_in_world`
-	# lower-bound check (a deliberate local copy, same rationale that
-	# method's own doc comment gives for why VoxelWorldGrid/
-	# VoxelWorldMeshStreamer each keep one).
+	# comparing against get_desired_window_keys().
+	#
+	# Story scene-005 (World genesis in the boot sequence, AC-ONE-START-FOCUS)
+	# changed the PRECONDITION this test was written against: world genesis
+	# now calls CameraInput.set_target() with the config-derived world-CENTER
+	# cell (VillagerRosterSpawner.world_center_cell) BEFORE this initial mesh
+	# window ever builds -- CameraInput's former default Vector3.ZERO "world
+	# corner" starting orbit target (this test's own former precondition, the
+	# exact bug AC-ONE-START-FOCUS names and fixes) no longer holds by the
+	# time build_initial_window runs. The window is therefore centered on that
+	# interior cell, clear of every world edge at this radius, and survives
+	# with NO lower-bound clipping -- a full (2*radius+1)^2 square. Updated
+	# consciously, not incidentally, per scene-005's own dev-story instructions
+	# to flag this file.
 	var boot_radius: int = valley.get_voxel_world().config.boot_mesh_radius_chunks
+	var focus_cell: Vector3i = VillagerRosterSpawner.world_center_cell(valley.get_voxel_world().config)
+	var focus_chunk: Vector2i = valley.get_voxel_world().chunk_key_for_cell(focus_cell)
 	var expected_keys: Array[Vector2i] = []
-	for dz in range(0, boot_radius + 1):
-		for dx in range(0, boot_radius + 1):
-			expected_keys.append(Vector2i(dx, dz))
+	for dz in range(-boot_radius, boot_radius + 1):
+		for dx in range(-boot_radius, boot_radius + 1):
+			expected_keys.append(Vector2i(focus_chunk.x + dx, focus_chunk.y + dz))
 
 	assert_int(expected_keys.size()).is_greater(0)
 	assert_int(mesher.get_tracked_chunk_keys().size()).is_equal(expected_keys.size())
@@ -178,35 +187,39 @@ func test_build_initial_window_runs_synchronously_during_boot_before_any_process
 # ---------------------------------------------------------------------------
 
 func test_valley_process_tracks_moving_camera_focus_and_stays_window_bounded() -> void:
-	# Arrange -- boot, then confirm the initial (near-origin) window is live.
-	# The production default boot focus is CameraInput's Vector3.ZERO orbit
-	# target -- the world's (0,0,0) corner -- so the initial window is
-	# WORLD-EDGE-CLIPPED. Story vox-021 (TD ruling Addendum D / D2): the boot
-	# window is now sized by `config.boot_mesh_radius_chunks` (8), NOT
+	# Arrange -- boot, then confirm the initial window is live.
+	#
+	# Story scene-005 (World genesis in the boot sequence, AC-ONE-START-FOCUS)
+	# changed the PRECONDITION this test was written against: world genesis
+	# now calls CameraInput.set_target() with the config-derived world-CENTER
+	# cell BEFORE the initial mesh window ever builds -- CameraInput's former
+	# default Vector3.ZERO "world corner" starting orbit target (this test's
+	# own former precondition, the exact bug AC-ONE-START-FOCUS names and
+	# fixes) no longer holds. The initial window is therefore centered on that
+	# interior cell, clear of every world edge at this radius -- NOT
+	# world-edge-clipped. Story vox-021 (TD ruling Addendum D / D2): the boot
+	# window is still sized by `config.boot_mesh_radius_chunks` (8), NOT
 	# `config.view_radius_chunks` (12, get_desired_window_keys' own
-	# steady-state radius) -- so the original/boot window below is computed
-	# directly from the boot radius, mirroring
-	# `test_build_initial_window_runs_synchronously_during_boot_before_any_process_frame`'s
-	# own fix immediately above. This is a real, empirically-landed
-	# characteristic of the CURRENT mesher (an empty/un-generated chunk's
-	# build cost, whatever it is on this machine, is bounded by
-	# [VoxelWorldConfig.mesh_build_budget_ms]'s 4.0 ms default per call, so
-	# the budgeted per-frame path integrates at least the progress-guaranteed
-	# FIRST item per call; this is a landed vox-007/vox-015/vox-020
-	# characteristic, not something this wiring-only story changes or needs
-	# to fix). This test's own pan distance is chosen small enough (2 chunks)
-	# that the real per-frame live loop settles well within this suite's own
-	# frame budget.
+	# steady-state radius). This is a real, empirically-landed characteristic
+	# of the CURRENT mesher (an empty/un-generated chunk's build cost is
+	# bounded by [VoxelWorldConfig.mesh_build_budget_ms]'s 4.0 ms default per
+	# call, so the budgeted per-frame path integrates at least the
+	# progress-guaranteed FIRST item per call; a landed vox-007/vox-015/
+	# vox-020 characteristic). This test's own pan distance is chosen small
+	# enough (2 chunks) that the real per-frame live loop settles well within
+	# this suite's own frame budget. Updated consciously, not incidentally,
+	# per scene-005's own dev-story instructions to flag this file.
 	var valley: Valley = _boot_valley()
 	var mesher: VoxelWorldMesher = valley.get_voxel_world_mesher()
 	var streamer: VoxelWorldMeshStreamer = valley.get_voxel_world_mesh_streamer()
 	var camera_input: CameraInput = valley.get_camera_input()
-	var original_focus := Vector3i.ZERO
+	var original_focus: Vector3i = VoxelWorldGrid.world_to_cell(camera_input.get_target())
 	var boot_radius: int = valley.get_voxel_world().config.boot_mesh_radius_chunks
+	var original_focus_chunk: Vector2i = valley.get_voxel_world().chunk_key_for_cell(original_focus)
 	var original_window: Array[Vector2i] = []
-	for dz in range(0, boot_radius + 1):
-		for dx in range(0, boot_radius + 1):
-			original_window.append(Vector2i(dx, dz))
+	for dz in range(-boot_radius, boot_radius + 1):
+		for dx in range(-boot_radius, boot_radius + 1):
+			original_window.append(Vector2i(original_focus_chunk.x + dx, original_focus_chunk.y + dz))
 	assert_int(mesher.get_tracked_chunk_keys().size()).is_equal(original_window.size())
 
 	# Act -- move the camera's orbit target a SMALL distance (2 chunks
@@ -223,15 +236,14 @@ func test_valley_process_tracks_moving_camera_focus_and_stays_window_bounded() -
 	assert_bool(new_focus != original_focus).is_true()
 	var new_window: Array[Vector2i] = streamer.get_desired_window_keys(new_focus)
 
-	# Genuinely new ("entering") chunk keys this pan introduces -- since the
-	# original window is corner-clipped, shifting AWAY from the corner only
-	# ever GROWS the window here (the original window is a strict subset of
-	# the new one); there is nothing to "leave" from this exact corner
-	# starting point. That is a fact of this specific starting position, not
-	# a gap in the streamer's own unload mechanism -- unload-on-leaving is
-	# already proven, from a genuinely non-overlapping pair of windows, by
-	# `mesh_view_window_streaming_test.gd`'s own
-	# `test_moving_camera_focus_builds_entering_chunks_and_unloads_leaving_chunks`
+	# Genuinely new ("entering") chunk keys this pan introduces. Story
+	# scene-005: since the original window is now centered on the world-center
+	# cell (no longer corner-clipped, see this test's own updated Arrange
+	# comment above), a small pan genuinely shifts the window -- some chunks
+	# leave, some enter -- rather than the former corner-start's pure-growth
+	# special case. Unload-on-leaving is already proven, from a genuinely
+	# non-overlapping pair of windows, by `mesh_view_window_streaming_test.gd`'s
+	# own `test_moving_camera_focus_builds_entering_chunks_and_unloads_leaving_chunks`
 	# (re-run as part of this story's own full suite pass); this test's own
 	# job is proving the LIVE per-frame WIRING drives the SAME mechanism, not
 	# re-proving the mechanism itself.
@@ -246,8 +258,18 @@ func test_valley_process_tracks_moving_camera_focus_and_stays_window_bounded() -
 
 	# Act -- let Valley's own live _process loop (never called directly --
 	# this drives it exactly the way the real engine does) stream the window
-	# to the new focus across enough real frames to fully settle.
-	await _await_window_settled(mesher, new_window, 250)
+	# to the new focus across enough real frames to fully settle. Story
+	# scene-005: the boot window (radius 8, unclipped from the world-center
+	# start, 17x17=289 chunks) must ALSO grow to the FULL unclipped
+	# steady-state view_radius_chunks=12 window (25x25=625 chunks) even before
+	# accounting for the pan -- a genuinely larger convergence than the former
+	# corner-clipped start (whose OWN steady window was equally clipped and
+	# therefore small). At ~1 chunk/frame (the shared mesh_build_budget_ms
+	# progress guarantee), settling needs on the order of (625-289)=336+
+	# frames; 250 (this test's former, corner-start-tuned bound) is no longer
+	# enough. Updated consciously, not incidentally, per scene-005's own
+	# dev-story instructions to flag this file.
+	await _await_window_settled(mesher, new_window, 700)
 
 	# Assert -- AC-1: the new window -- including every entering chunk -- is
 	# fully built, tracking the CURRENT camera focus, not the stale initial

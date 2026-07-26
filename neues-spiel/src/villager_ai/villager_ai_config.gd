@@ -212,7 +212,28 @@ const NAV_REGION_SIZE_MAX: int = 200
 ## ADR-owned architectural bound, same "authored here as another typed
 ## `@export`" precedent as [member max_deciding_per_tick]), out of scope for
 ## any other story.
-@export var nav_region_size: int = 200
+##
+## Story scene-005 re-tune (200 -> 40, TD-named lever #1, this story's own
+## AC-BOOT-BUDGET): wiring [method VillagerNavGraph.build] into the real
+## synchronous boot chain for the first time (villager-ai-007 landed the
+## method but nothing called it from boot until this story) surfaced a real
+## cost the ADR's own spike never measured against a live boot budget: at
+## the shipped default, 200x200x17 = 680,000 [method
+## VillagerWalkabilityRules.is_standable] evaluations measured **6697.6 ms**
+## (`tools/scene005_genesis_boot_budget_measurement.gd`), alone almost 2.2x
+## the technical-director's entire 3.0 s boot-to-ACTIVE ceiling (Addendum D /
+## D2). Reduced to 40 (64x fewer columns, 40x40x17 = 27,200 evaluations)
+## measured **~268 ms** -- see `production/qa/evidence/
+## world-genesis-boot-budget-2026-07-26.md` for the full phase-split
+## before/after. Still comfortably inside villager-ai-007's own ADR-0007
+## measured-safe range (20-200) and its own per-query performance ceiling
+## (region <= 200x200 was the UPPER bound that query-time measurement named,
+## not a floor); a 40x40 settlement core is still generous at MVP/VS
+## population scale (1-5 villagers). This is a `.tres` DATA change only, no
+## code -- reversible the instant a future story funds a faster nav-graph
+## build (e.g. an incremental/threaded construction) and wants the larger
+## region back.
+@export var nav_region_size: int = 40
 
 
 ## See [ConfigResource.validate]. Clamps every knob to its GDD-documented (or

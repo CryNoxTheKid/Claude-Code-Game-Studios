@@ -164,6 +164,27 @@
 ## recruitment is Township Progression's job") does not cover WHEN world
 ## generation itself first runs, only that growth BEYOND the starting roster
 ## is out of scope.
+## Story scene-005 (World genesis in the boot sequence, ADR-0005 primary /
+## ADR-0015 primary / ADR-0014 secondary) closes every deferral the paragraphs
+## above name. [method GameWorld._run_world_genesis] -- a NEW orchestration
+## method on [GameWorld], not this class (this class still owns no `setup()`
+## and calls no hosted child's `setup()` itself, per the class doc comment's
+## opening hosting-vs-DI distinction) -- now drives, in this load-bearing
+## order, during WIRING, strictly before [constant
+## GameWorld.BootState.ACTIVE]: the camera's start-focus target ([method
+## CameraInput.set_target], the SAME cell everything else below anchors on),
+## the boot-window residency drive ([method VoxelWorldGrid.update_residency]
+## alternated with [method VoxelWorldGrid.drain_pending_async_reads], bounded
+## by a config-driven wall-clock ceiling -- never [method
+## VoxelWorldGrid.generate_terrain], the full-extent call this class's own
+## class doc comment used to name as never-called and still is), [method
+## VoxelWorldGrid.mark_generated], [method build_villager_nav_graph] (closing
+## [method VillagerNavGraph.build]'s "a fresh grid has no terrain yet"
+## deferral), and finally [method spawn_starting_roster] itself -- which is
+## THEREFORE no longer dead code: it is called exactly once per boot, from
+## [GameWorld], after real terrain is confirmed resident. [method _process]
+## additionally gains the per-frame residency-drive line documented on that
+## method itself -- vox-018's own named seam, now cashed.
 class_name Valley
 extends Node3D
 
@@ -308,8 +329,23 @@ func _wire_hosted_modules() -> void:
 ## wired, every hosted module's `setup()` has already run, and the UNBOUNDED
 ## initial window build has already happened exactly once, before this
 ## method is ever invoked for the first time.
+## Story scene-005 (World genesis in the boot sequence, AC-NO-SYNC-IO-IN-
+## FRAME-PATH): drives [member _voxel_world]'s BUDGETED residency window
+## (never [method VoxelWorldGrid.drain_pending_async_reads]/[method
+## VoxelWorldGrid.wait_for_async_residency_idle] -- both grep-guarded absent
+## from any `_process`/`_physics_process` call graph, tests/boot-genesis-only
+## synchronization points) every frame, BEFORE the pre-existing mesh
+## view-window streaming call -- vox-018's own explicitly-named seam ("a
+## shared per-frame focus-drive call site is the natural home for both").
+## The settlement anchor is recomputed each frame from [method
+## VillagerRosterSpawner.world_center_cell] -- a pure, cheap function of
+## [member _voxel_world]'s own config, so this is always the SAME start-focus
+## cell world genesis anchored on ([method GameWorld._run_world_genesis]),
+## with no separate stored-anchor seam to keep in sync.
 func _process(_delta: float) -> void:
 	var focus_cell: Vector3i = VoxelWorldGrid.world_to_cell(_camera_input.get_target())
+	var settlement_anchor_cell: Vector3i = VillagerRosterSpawner.world_center_cell(_voxel_world.config)
+	_voxel_world.update_residency(focus_cell, settlement_anchor_cell)
 	_voxel_world_mesh_streamer.update_view_window(focus_cell)
 
 
@@ -375,6 +411,44 @@ func get_construction_tick_loop() -> ConstructionTickLoop:
 ## Returns the hosted Villager AI instance.
 func get_villager_ai() -> VillagerAi:
 	return _villager_ai
+
+
+## Returns the shared, population-wide [VillagerNavGraph] instance [method
+## _wire_villager_population] constructs (fulfilling the "exposed read-only
+## for... a future world-generation story" promise [member
+## _villager_nav_graph]'s own doc comment already made -- this IS that story).
+func get_villager_nav_graph() -> VillagerNavGraph:
+	return _villager_nav_graph
+
+
+## Default region size used ONLY when [member villager_ai_config] is unwired
+## (mirrors [method spawn_starting_roster]'s own established "`if config !=
+## null` else a documented literal default" precedent for this exact optional
+## dependency) -- [constant VillagerAIConfig.NAV_REGION_SIZE_MIN], the GDD's
+## own conservative floor, never an invented literal.
+const DEFAULT_NAV_REGION_SIZE: int = VillagerAIConfig.NAV_REGION_SIZE_MIN
+
+
+## Config-driven nav-graph build (Story scene-005, AC-NAV-GRAPH-BUILT) --
+## builds the shared [VillagerNavGraph] over a [param region_size] x
+## [param region_size] window centered on [param region_center], reading
+## [member villager_ai_config]'s `nav_region_size` (never a literal, ADR-0002)
+## with the same optional-config fallback [method spawn_starting_roster]
+## already establishes. [member _villager_ai] (villager_id 0, always present)
+## is the `predicate_source` -- [VillagerNavGraph.build]'s own predicate reads
+## are instance-independent (BV-4 ruling: every [VillagerAi] instance answers
+## identically), so which hosted villager supplies them is immaterial; this is
+## the SAME predicate_source shape [VillagerNavGraph.subscribe_to_voxel_world]
+## already uses in [method _wire_villager_population]. Called from [method
+## GameWorld._run_world_genesis], AFTER the boot-window residency drive has
+## made real terrain resident (this class never calls this on its own --
+## exactly [VillagerNavGraph.build]'s own pre-existing "a fresh grid has no
+## terrain yet" deferral this story closes).
+func build_villager_nav_graph(region_center: Vector3i) -> void:
+	var region_size: int = DEFAULT_NAV_REGION_SIZE
+	if villager_ai_config != null:
+		region_size = villager_ai_config.nav_region_size
+	_villager_nav_graph.build(_voxel_world, _villager_ai, region_center, region_size)
 
 
 ## Returns every hosted [VillagerAi] instance (Story villager-ai-021) --

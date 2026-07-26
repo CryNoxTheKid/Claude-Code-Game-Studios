@@ -222,17 +222,29 @@ func test_valley_spawn_starting_roster_places_exactly_n_villagers_each_deciding_
 func test_valley_spawn_starting_roster_mvp_default_count_places_exactly_one() -> void:
 	# Arrange -- the shipped .tres default (starting_villager_count = 1, MVP)
 	# -- never mutated, this test reads it as-is.
+	#
+	# Story scene-005 (World genesis in the boot sequence): _boot_valley()'s
+	# real GameWorld boot now runs world genesis (AC-ROSTER-AFTER-WORLD), which
+	# calls spawn_starting_roster() itself ONCE automatically before this
+	# test's own Act step -- so by the time _boot_valley() returns, one roster
+	# villager already exists. baseline_next_id captures wherever that
+	# boot-time call left villager_id numbering (Valley.get_villagers().size()
+	# is always exactly the next id spawn_starting_roster() will assign, since
+	# ids start at 1 and continue from the current roster size) rather than
+	# hardcoding the pre-scene-005 assumption that this test's OWN call is the
+	# very first one ever made.
 	var valley: Valley = _boot_valley()
 	var voxel_world: VoxelWorldGrid = valley.get_voxel_world()
 	var center: Vector3i = VillagerRosterSpawner.world_center_cell(voxel_world.config)
 	_fill_flat_plane(voxel_world, center, 10)
+	var baseline_next_id: int = valley.get_villagers().size()
 
 	# Act
 	var spawned: Array[VillagerAi] = valley.spawn_starting_roster()
 
 	# Assert
 	assert_int(spawned.size()).is_equal(1)
-	assert_int(spawned[0].get_villager_id()).is_equal(1)
+	assert_int(spawned[0].get_villager_id()).is_equal(baseline_next_id)
 
 
 func test_valley_spawn_starting_roster_does_not_disturb_the_pre_existing_default_villager() -> void:
@@ -261,17 +273,24 @@ func test_valley_spawn_starting_roster_has_no_growth_bookkeeping_of_its_own() ->
 	# "already spawned the starting roster" guard exists anywhere in this
 	# class, by design (that bookkeeping belongs to whichever future story
 	# decides WHEN to call this exactly once).
+	#
+	# Story scene-005: see the sibling MVP-default test's own updated comment
+	# above -- _boot_valley() now runs world genesis, which calls
+	# spawn_starting_roster() once automatically before this test's own Act
+	# step. baseline_next_id captures wherever that left villager_id
+	# numbering, exactly as that test does.
 	var valley: Valley = _boot_valley()
 	var voxel_world: VoxelWorldGrid = valley.get_voxel_world()
 	var center: Vector3i = VillagerRosterSpawner.world_center_cell(voxel_world.config)
 	_fill_flat_plane(voxel_world, center, 10)
 	valley.villager_ai_config = VillagerAIConfig.new()
 	valley.villager_ai_config.starting_villager_count = 1
+	var baseline_next_id: int = valley.get_villagers().size()
 
 	# Act
 	var first_call: Array[VillagerAi] = valley.spawn_starting_roster()
 	var second_call: Array[VillagerAi] = valley.spawn_starting_roster()
 
-	# Assert -- ids keep incrementing (1, then 2).
-	assert_int(first_call[0].get_villager_id()).is_equal(1)
-	assert_int(second_call[0].get_villager_id()).is_equal(2)
+	# Assert -- ids keep incrementing from wherever boot-time genesis left off.
+	assert_int(first_call[0].get_villager_id()).is_equal(baseline_next_id)
+	assert_int(second_call[0].get_villager_id()).is_equal(baseline_next_id + 1)

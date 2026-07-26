@@ -453,6 +453,23 @@ func get_distance() -> float:
 
 
 ## Returns the current orbit target point.
+## Small additive public surface (Story scene-005, AC-ONE-START-FOCUS; camera-
+## input epic file). [method setup] resets [member _target] to
+## [constant Vector3.ZERO] unconditionally (this class's own pre-existing
+## behavior, unchanged) -- there was previously no public way for a caller to
+## establish a DIFFERENT start-focus point afterward, which is exactly the
+## "camera starts at cell (0,0,0) while the roster centers on the world
+## center" bug this story's own Context names. World genesis calls this
+## exactly once, AFTER [method setup] has already run (so this write is never
+## clobbered by it), with the SAME start-focus cell the residency anchor,
+## mesh-window centre and roster placement centre all use -- see
+## [method GameWorld._run_world_genesis]. Never writes [member _target]
+## itself from any logic path other than this explicit call and [method
+## _apply_pan]'s own pre-existing per-frame pan mutation.
+func set_target(value: Vector3) -> void:
+	_target = value
+
+
 func get_target() -> Vector3:
 	return _target
 
