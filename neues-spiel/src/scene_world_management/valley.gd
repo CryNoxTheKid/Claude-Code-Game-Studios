@@ -49,6 +49,47 @@
 ## reached via [method get_injected_tier_modules] below, not a second one on
 ## this class).
 ##
+## M01 Go/No-Go condition C4 (`production/milestones/milestone-01-review-
+## 2026-07-26.md`, criterion #9's "visible in the build" gap) additionally
+## hosts [TorchFlicker] (`presentation-experience` epic, story presentation-001
+## Sub-scope A) driving a real [OmniLight3D] ("AmbientTorchLight", a structural
+## child of this class, not itself an injected-tier module -- a plain light
+## has no `setup()`) -- wired exactly like every other hosted sibling above:
+## [member TorchFlicker.config] is Resource-typed and Inspector-assigned
+## directly on `Valley.tscn` (Story scene-004's own established "a Resource
+## export resolves fine from a hand-authored `.tscn`, only Node-typed
+## cross-references need code assignment" distinction), while
+## [member TorchFlicker.light] (Node-typed) is code-assigned in [method
+## _wire_hosted_modules] below, mirroring [member
+## VoxelWorldMeshStreamer.grid]/[member VoxelWorldMeshStreamer.mesher]'s own
+## precedent exactly. [TorchFlicker] IS appended to [method
+## get_injected_tier_modules] (it has a real `setup()`/`is_set_up()` contract,
+## [GameWorld] calls it same as every other hosted module) -- this is a
+## genuine wiring of already-landed presentation code into the real Valley,
+## not a rebuild of it.
+##
+## **Honest scope note, not silently narrowed**: presentation-001 Sub-scope A
+## shipped FOUR ambient elements ([ChimneySmokeEmitter], [TorchFlicker],
+## [InteriorClutterPlacer], `foliage_sway.gdshader`) -- only [TorchFlicker] is
+## wired here. The other three each require a REAL host system this codebase
+## does not yet have in the boot chain: [ChimneySmokeEmitter]'s one gating
+## input, [method ChimneySmokeEmitter.set_occupied_lit], has no real
+## occupied/lit data source anywhere yet (that class's own doc comment --
+## "does not exist yet anywhere in this codebase"), so wiring it here would
+## mean driving it from an invented/fake signal, which this story explicitly
+## does not do; [InteriorClutterPlacer] needs a real room/building fixture to
+## place its scene-authored `clutter_transforms` inside, and no fixture/
+## building-interior entity exists yet (Valley boots with an EMPTY
+## [VoxelWorldGrid] -- no `generate_terrain()` call anywhere in the boot chain,
+## by this class's own long-standing design, a future world-generation
+## story's job per this class's already-existing doc comment above); the
+## foliage shader needs a real vegetation-placement host over real terrain,
+## which the same empty-world fact rules out today. [TorchFlicker] alone needs
+## neither a fixture, a room, nor terrain -- only a positioned [Light3D] --
+## which is exactly why it is the one component this condition can honestly
+## close today; the other three remain the CD's own already-tracked Sub-B/
+## wave-2 backlog (`ambient-life-wave-1-evidence.md`), not silently dropped.
+##
 ## Story vox-018 (ADR-0014 primary -- the deferred live-wiring integration
 ## `VoxelWorldMeshStreamer`'s own class doc comment explicitly named as a
 ## LATER story's job; ADR-0015 secondary) additionally hosts
@@ -151,6 +192,19 @@ extends Node3D
 ## performs on top of the plain structural hosting every other child gets.
 @onready var _villager_ai: VillagerAi = $VillagerAi
 
+## Hosted ambient torch/lantern light fixture (M01 condition C4, see class
+## doc comment). Structural child only, mirrors [member _voxel_world]'s own
+## hosting-vs-DI distinction -- a plain [OmniLight3D] has no `setup()` of its
+## own; [member _torch_flicker] is the actual injected-tier module that
+## drives its `light_energy`.
+@onready var _ambient_torch_light: Light3D = $AmbientTorchLight
+
+## Hosted [TorchFlicker] instance (M01 condition C4; `presentation-experience`
+## epic, story presentation-001 Sub-scope A). Structural child only -- see
+## class doc comment for the full wiring rationale and the honest scope note
+## on why the other three Sub-scope A elements are NOT hosted here.
+@onready var _torch_flicker: TorchFlicker = $TorchFlicker
+
 ## The shared, population-wide [VillagerNavGraph] instance [method
 ## _wire_villager_population] constructs -- exposed read-only for tests/
 ## future world-generation stories that need to (re)build it once real
@@ -185,6 +239,7 @@ func _wire_hosted_modules() -> void:
 	_commit_pipeline.voxel_world = _voxel_world
 	_construction_tick_loop.voxel_world = _voxel_world
 	_villager_ai.voxel_world = _voxel_world
+	_torch_flicker.light = _ambient_torch_light
 
 
 ## Story vox-018's ONE new per-frame hook (class doc comment) -- reads the
@@ -267,6 +322,16 @@ func get_villager_ai() -> VillagerAi:
 	return _villager_ai
 
 
+## Returns the hosted ambient torch/lantern light fixture (M01 condition C4).
+func get_ambient_torch_light() -> Light3D:
+	return _ambient_torch_light
+
+
+## Returns the hosted [TorchFlicker] instance (M01 condition C4).
+func get_torch_flicker() -> TorchFlicker:
+	return _torch_flicker
+
+
 ## The GameWorld assembly seam (Story scene-004): every hosted tier module
 ## this Valley owns, in the load-bearing DI order [method
 ## GameWorld._setup_injected_tier] will call `setup()` in (Voxel World grid,
@@ -295,4 +360,5 @@ func get_injected_tier_modules() -> Array[Node]:
 		_commit_pipeline,
 		_construction_tick_loop,
 		_villager_ai,
+		_torch_flicker,
 	]

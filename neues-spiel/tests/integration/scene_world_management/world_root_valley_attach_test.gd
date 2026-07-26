@@ -164,8 +164,11 @@ func test_hosted_building_system_and_villager_ai_modules_are_children_of_valley(
 	# to this suite's own established child-topology coverage). Story
 	# vox-018 adds a ninth hosted child, [VoxelWorldMeshStreamer] -- see
 	# `live_view_window_wiring_test.gd` for that story's own dedicated
-	# wiring/boot-timing proof; this count is updated consciously, not
-	# incidentally.
+	# wiring/boot-timing proof. M01 condition C4 (`production/milestones/
+	# milestone-01-review-2026-07-26.md`) adds two more --
+	# [AmbientTorchLight]/[TorchFlicker], see [Valley]'s own class doc
+	# comment for the full wiring rationale -- this count is updated
+	# consciously, not incidentally (9 -> 11).
 	var world: GameWorld = auto_free(GameWorld.new())
 	var database: MockResourceItemDatabase = auto_free(MockResourceItemDatabase.new())
 	database.configure_ready_immediately()
@@ -177,7 +180,7 @@ func test_hosted_building_system_and_villager_ai_modules_are_children_of_valley(
 
 	# Assert
 	var valley: Valley = world.get_valley() as Valley
-	assert_int(valley.get_child_count()).is_equal(9)
+	assert_int(valley.get_child_count()).is_equal(11)
 	assert_object(valley.get_voxel_world_mesher()).is_not_null()
 	assert_object(valley.get_voxel_world_mesh_streamer()).is_not_null()
 	assert_object(valley.get_tool_state_machine()).is_not_null()
@@ -185,6 +188,8 @@ func test_hosted_building_system_and_villager_ai_modules_are_children_of_valley(
 	assert_object(valley.get_commit_pipeline()).is_not_null()
 	assert_object(valley.get_construction_tick_loop()).is_not_null()
 	assert_object(valley.get_villager_ai()).is_not_null()
+	assert_object(valley.get_ambient_torch_light()).is_not_null()
+	assert_object(valley.get_torch_flicker()).is_not_null()
 
 
 # ---------------------------------------------------------------------------

@@ -112,12 +112,16 @@ func test_ac_assembly_gameworld_wires_all_tier_modules_into_valley_and_boots_act
 	assert_object(valley.get_construction_tick_loop()).is_not_null()
 	# Villager AI
 	assert_object(valley.get_villager_ai()).is_not_null()
+	# Ambient torch flicker (M01 condition C4, production/milestones/
+	# milestone-01-review-2026-07-26.md)
+	assert_object(valley.get_torch_flicker()).is_not_null()
 
 	# The assembly seam (GameWorld._gather_valley_tier_modules) fed exactly
-	# these nine (story vox-018 added the mesh streamer as a ninth), in the
-	# load-bearing DI order Valley itself reports.
+	# these ten (story vox-018 added the mesh streamer as a ninth; M01
+	# condition C4 added the torch flicker as a tenth), in the load-bearing DI
+	# order Valley itself reports.
 	assert_array(world.injected_tier_modules).contains_exactly(valley.get_injected_tier_modules())
-	assert_int(world.injected_tier_modules.size()).is_equal(9)
+	assert_int(world.injected_tier_modules.size()).is_equal(10)
 
 
 func test_ac_assembly_hosted_modules_ran_through_boot_gated_setup_never_their_own_ready() -> void:
