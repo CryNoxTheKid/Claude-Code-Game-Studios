@@ -1,7 +1,7 @@
 # Story 004: Recovery interruption, mid-recovery re-rating & bed revocation
 
 > **Epic**: Needs & Mood System
-> **Status**: Ready
+> **Status: Complete (2026-07-27 — 1250/1250 suite green 0 orphans, agent-verified; no production change needed, behavior proven to follow from story-003's design)
 > **Layer**: Feature
 > **Type**: Logic
 > **Estimate**: ~1 agent-day
