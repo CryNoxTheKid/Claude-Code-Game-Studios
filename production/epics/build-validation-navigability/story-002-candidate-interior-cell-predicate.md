@@ -1,12 +1,12 @@
 # Story 002: Candidate interior cell predicate (standable + roofed, furniture-transparent)
 
 > **Epic**: Build Validation & Navigability
-> **Status**: Ready
+> **Status: Complete (2026-07-26 — 1004/1004 suite green 0 orphans, parent-verified)
 > **Layer**: Feature
 > **Type**: Logic
 > **Estimate**: ~1 agent-day
 > **Manifest Version**: 2026-07-23
-> **Last Updated**: —
+> **Last Updated**: 2026-07-26
 
 ## Context
 
@@ -104,7 +104,8 @@ walkability provider and no `VillagerAi` reference in this module.
 **Story Type**: Logic
 **Required evidence**: `neues-spiel/tests/unit/build_validation/candidate_cell_test.gd` — must exist and pass.
 
-**Status**: [ ] Not yet created
+**Status**: [x] Created — `neues-spiel/src/build_validation/candidate_cell_rules.gd` +
+`neues-spiel/tests/unit/build_validation/candidate_cell_test.gd` (14 tests)
 
 ---
 

@@ -19,6 +19,12 @@
 #   production/architecture-decisions-m02-preflight-2026-07-26.md (TD: BV-1/BV-2/BV-4/NM-3/NM-5/NM-6/NM-7)
 #   production/creative-decisions-m02-preflight-2026-07-26.md   (CD: Ruling 1 pacing, Ruling 2 payoff signal)
 #   The plan proceeds AS IF ratified. BV-4 CREATES villager-ai-026. See sprint-09.md for the blast radius.
+#
+# ⚑ AMENDMENT 2026-07-26 (TD Addendum D, also PROVISIONAL): vox-020 (mesh invalidation) and vox-021
+#   (boot-scoped mesh radius + view_radius_chunks 24->12) ADDED as Must. Sprint 15 -> 17 stories.
+#   Order on the gdscript lane is load-bearing: vox-020 -> vox-021 (same file), both BEFORE scene-005.
+#   The gdscript lane is now the sprint's longest AND still carries the binding build-validation chain —
+#   see sprint-09.md's amendment block for the honest over-commitment read and the recommended trim.
 
 sprint: 9
 goal: "Open Milestone 02's protected payoff spine and make the game presentable to a human. Land the TD-mandated VillagerWalkabilityRules extraction (villager-ai-026 — sequenced FIRST, it gates a serial depth-5 chain), then drive Build Validation from scaffold to Room/Sealed verdict (build-validation-001→002→003→004) and Needs & Mood from scaffold to the three-rung recovery ladder (needs-mood-001→002→003) — the two halves that converge on criterion #5. In parallel clear Cluster 0's three loop-facing residue stories: building-023 (ghost preview — the player draws blind today), villager-ai-021 (starting roster — the Valley boots empty), building-001 (build editor mode — R10's named unblocker for Building UI, independent of Cluster A). Capacity-permitting extend the analysis chain through build-validation-005 and stand up the milestone's riskiest test artifact, build-validation-010 (AC36 reachability corpus, R3). Cluster B, C and D do not start. At sprint close: /team-qa sprint — criterion #14, the habit starts here."
@@ -50,7 +56,7 @@ stories:
     name: "Candidate interior cell predicate (standable + roofed, furniture-transparent) — building-028 dependency DROPPED per BV-1"
     file: "production/epics/build-validation-navigability/story-002-candidate-interior-cell-predicate.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete
     owner: "godot-gdscript-specialist"
     estimate_days: 1.0
     blocker: "depends on build-validation-001 (in-sprint); transitively villager-ai-026. Furniture transparency proven BY CONSTRUCTION, no branch (BV-1)"
@@ -100,6 +106,24 @@ stories:
     estimate_days: 1.5
     blocker: "depends on needs-mood-001 + 002 (in-sprint). Three-arg start_recovery(villager_id, need, source_enum) per NM-5; THREE rungs via table lookup per NM-3 — the two-multiplier form is NEVER to be implemented"
     completed: ""
+  - id: "vox-020"
+    name: "Mesh invalidation — dirty-marking + budgeted rebuild drain (drained FIRST, inside the EXISTING mesh_build_budget_ms) + chunk_became_resident (TD Addendum D / D7)"
+    file: "production/epics/voxel-world/story-020-mesh-invalidation-dirty-set-and-budgeted-rebuild.md"
+    priority: must-have
+    status: ready-for-dev
+    owner: "godot-gdscript-specialist"
+    estimate_days: 1.5
+    blocker: "ADDED 2026-07-26 by TD Addendum D (PROVISIONAL pending user ratification). Blocked on nothing — vox-007/015/019 and the residency tier are all landed. SEQUENCES BEFORE scene-005 (it corrects scene-005's Guardrail and closes its Open Decision #4); PARALLEL-SAFE with building-023 (disjoint files). MUST BE SERIALIZED WITH vox-021 — both edit voxel_world_mesh_streamer.gd; vox-020 runs FIRST. Corrects a FALSE premise: the mesher DOES subscribe (voxel_world_mesher.gd:163) — the real defects are the unbudgeted synchronous in-handler rebuild (~69ms for a 9-chunk edit at 7.7ms/chunk) and residency page-in emitting no signal. NO NEW BUDGET KNOB: a separate rebuild budget would allow 7.7+7.7ms in one 16.6ms frame and regress vox-019's measured p95 of 16.947ms. 9 ACs. Evidence: tests/integration/voxel_world/mesh_invalidation_budget_test.gd"
+    completed: ""
+  - id: "vox-021"
+    name: "Boot-scoped mesh radius + view_radius_chunks 24 -> 12 retune (TD Addendum D / D2)"
+    file: "production/epics/voxel-world/story-021-boot-scoped-mesh-radius-and-view-radius-retune.md"
+    priority: must-have
+    status: ready-for-dev
+    owner: "godot-gdscript-specialist"
+    estimate_days: 1.0
+    blocker: "ADDED 2026-07-26 by TD Addendum D (PROVISIONAL pending user ratification). SEQUENCES AFTER vox-020 (same-file serialization: voxel_world_mesh_streamer.gd) and BEFORE scene-005 (it pre-applies scene-005's named lever 1 and sets the boot ceiling scene-005's AC-BOOT-BUDGET is measured against). view_radius_chunks 24->12 in .tres + new boot_mesh_radius_chunks: int = 8 consumed ONLY by build_initial_window as a radius threaded into the existing _collect_window; growth to full via the existing budgeted update_view_window — no timer, no camera trigger, no new state. Boot ceiling 3.0s total / <=2.5s mesh phase (TD, replacing the producer's provisional 5s), measured windowed with VSync OFF, phase-split, to production/qa/evidence/. USER DECISION FLAGGED: visible extent halves 384 -> 192 world units — look-and-feel call, two named alternatives (accept longer fill-in, or fund greedy meshing / ADR-0014 §2 reserve sooner)"
+    completed: ""
   - id: "scene-005"
     name: "World genesis in the boot sequence — terrain, roster and nav graph before ACTIVE (THE VALLEY BOOTS AN EMPTY GRID TODAY)"
     file: "production/epics/scene-world-management/story-005-world-genesis-boot-sequence.md"
@@ -107,7 +131,7 @@ stories:
     status: ready-for-dev
     owner: "godot-specialist"
     estimate_days: 2.0
-    blocker: "AMENDMENT 2026-07-26 — SEQUENCE FIRST on the godot-specialist lane, AHEAD of building-023. Blocked on nothing (every surface it calls is landed). Closes the gap three landed stories independently hit: valley.gd defers terrain + VillagerNavGraph.build + spawn_starting_roster to 'a future world-generation story' and this is it; villager-ai-021's roster surface is dead code until this lands; building-023's pick DDA has nothing to hit in an empty grid, so its evidence screenshot is impossible before this. Large-world shape RESOLVED: production genesis is ADR-0015 residency page-in of the boot window, NEVER a full-extent generate_terrain() (measured 52.2s at 900x900, no completion >200s at 1000x1000 — Dictionary rehash cliff, vox-018 evidence). AC-BOOT-BUDGET is measure-and-lever: 5s producer-provisional ceiling, named lever = boot-scoped mesh radius, then escalate to technical-director"
+    blocker: "AMENDMENT 2026-07-26 — SEQUENCE FIRST on the godot-specialist lane, AHEAD of building-023. NOW BLOCKED ON vox-020 + vox-021 (TD Addendum D): vox-020 corrects the false premise this story's Guardrail was written on and closes its Open Decision #4; vox-021 pre-applies its named lever (1) and sets the 3.0s boot ceiling AC-BOOT-BUDGET now measures against. Closes the gap three landed stories independently hit: valley.gd defers terrain + VillagerNavGraph.build + spawn_starting_roster to 'a future world-generation story' and this is it; villager-ai-021's roster surface is dead code until this lands; building-023's pick DDA has nothing to hit in an empty grid, so its evidence screenshot is impossible before this. Large-world shape RESOLVED: production genesis is ADR-0015 residency page-in of the boot window, NEVER a full-extent generate_terrain() (measured 52.2s at 900x900, no completion >200s at 1000x1000 — Dictionary rehash cliff, vox-018 evidence). AC-BOOT-BUDGET RE-POINTED 2026-07-26: TD ceiling 3.0s total / <=2.5s mesh phase (was 5s producer-provisional); the radius lever is SPENT (owned by vox-021); remaining levers are nav_region_size then the boot-drain ceiling, then escalate to technical-director"
     completed: ""
   - id: "building-023"
     name: "Ghost preview rendering + drag re-rasterization + degradation + state tint (Cluster 0) — THE PLAYER CURRENTLY DRAWS BLIND"
