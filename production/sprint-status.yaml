@@ -41,7 +41,7 @@ stories:
     name: "Config resource, DI scaffold & blocking lockstep invariant — DI surface smaller than planned per BV-4 (call the static twin, inject nothing)"
     file: "production/epics/build-validation-navigability/story-001-config-and-scaffold.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete
     owner: "godot-gdscript-specialist"
     estimate_days: 0.5
     blocker: "HARD: villager-ai-026 (in-sprint) — the static call form does not exist until it lands. M01 Foundation boot/DI/config spine Complete"

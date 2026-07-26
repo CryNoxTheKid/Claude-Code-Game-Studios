@@ -1,7 +1,7 @@
 # Story 001: Config resource, DI scaffold & blocking lockstep invariant
 
 > **Epic**: Build Validation & Navigability
-> **Status**: Ready
+> **Status: Complete (2026-07-26 — 993/993 suite green 0 orphans, parent-verified)
 > **Layer**: Feature
 > **Type**: Integration
 > **Estimate**: ~0.5 agent-day
