@@ -26,6 +26,19 @@
 ## smoothing ([method _pass_f3_mood]) remain untouched no-op stubs --
 ## stories 003/005's scope.
 ##
+## Story needs-mood-003 (this revision) fills in the recovery-report API and
+## F2 recovery for real: [method start_recovery]/[method stop_recovery] (TD
+## ruling NM-5 -- `production/architecture-decisions-m02-preflight-
+## 2026-07-26.md` -- the three-arg villager-id form is canonical, matching
+## `docs/architecture/architecture.md`'s API Boundaries block verbatim), the
+## [enum RecoverySource] source schema + [constant RECOVERY_SOURCE_NAMES]
+## conversion table, the per-tick [member _source_rate_table] lookup (GDD
+## Core Rule 4; per TD ruling NM-3 the THREE-rung ladder is authoritative --
+## the GDD's own stale two-multiplier F2 variable-table row is never
+## implemented), [method _pass_f2_recovery] (GDD Formulas F2), and the
+## edge-triggered [signal need_satisfied] notification. F3 mood smoothing
+## ([method _pass_f3_mood]) remains story 005's untouched no-op stub.
+##
 ## Tick dispatch is driven EXCLUSIVELY by [member time_tick_system]'s `tick`
 ## signal (GDD: "all decay/recovery/mood math runs on Time & Tick events",
 ## TR-needs-mood-system-051), connected with Godot's plain synchronous
@@ -58,6 +71,45 @@ const ACTIVE_NEEDS: Array[Need] = [Need.SLEEP]
 ## matching this file's own F1/F2/F3 stub-now-fill-later precedent.
 enum NeedState { SATISFIED, URGENT, RECOVERING }
 
+## The recovery-source enum Villager AI reports via [method start_recovery]
+## (GDD Core Rule 4, TR-needs-mood-system-035/036) -- fixed schema, same
+## precedent as [enum Need]: the three `ground_*` values are separate schema
+## members (the why-string, story 007's scope, needs to tell them apart) even
+## though they share one rate row in [member _source_rate_table] below.
+## Matches `docs/architecture/architecture.md`'s
+## `start_recovery(villager_id, need, source_enum: RecoverySource)` /
+## `stop_recovery` signatures (TD ruling NM-5) and Build Validation's
+## `shelter_status_changed(item_cell, source_enum: RecoverySource)` verbatim.
+enum RecoverySource {
+	BED_SHELTERED,
+	BED_UNSHELTERED,
+	GROUND_NO_BED_OWNED,
+	GROUND_BED_UNREACHABLE,
+	GROUND_TRAPPED,
+}
+
+## [enum RecoverySource] <-> the external `StringName` id every reporter and
+## this module's own [member _source_rate_table] actually key by -- mirrors
+## [constant NEED_NAMES]'s pattern exactly. This is the ONLY place the fixed
+## five-member enum touches the table: F2's rate lookup ([method
+## _rate_for_source]) is keyed by [member NeedRecord.recovery_source_name]
+## (a `StringName`), never by this enum directly, which is what keeps
+## [member _source_rate_table] a genuinely open `Dictionary[StringName,
+## float]` rather than a lookup hardwired to five compile-time values --
+## AC10's "a brand-new source id works via table lookup with no code change"
+## is a claim about THAT table (proven directly against it in this story's
+## own test, `recovery_source_rate_table_test.gd`), not a claim that this
+## production enum itself is ever extended without a code change (adding a
+## sixth reported source IS a schema/code change here, exactly like [enum
+## Need]'s own "adding a need type is a design change, not a data edit").
+const RECOVERY_SOURCE_NAMES: Dictionary[RecoverySource, StringName] = {
+	RecoverySource.BED_SHELTERED: &"bed_sheltered",
+	RecoverySource.BED_UNSHELTERED: &"bed_unsheltered",
+	RecoverySource.GROUND_NO_BED_OWNED: &"ground_no_bed_owned",
+	RecoverySource.GROUND_BED_UNREACHABLE: &"ground_bed_unreachable",
+	RecoverySource.GROUND_TRAPPED: &"ground_trapped",
+}
+
 ## One flat record per (villager_id, need) pair actually tracked -- created
 ## ONLY by [method set_need_value] (never as a side effect of a query, see
 ## [method has_urgent_need]'s own doc comment, NM-6). Keyed by a composite
@@ -84,6 +136,14 @@ class NeedRecord:
 	## ever SATISFIED or URGENT in this story's own scope (see [enum
 	## NeedState]'s own doc comment).
 	var state: NeedState = NeedState.SATISFIED
+	## The reported [enum RecoverySource]'s `StringName` id (see [constant
+	## RECOVERY_SOURCE_NAMES]), re-read every F2 tick (GDD Core Rule 10 --
+	## "re-reads the CURRENT source enum each tick", story 004's mid-recovery
+	## re-rating). Empty (`&""`) whenever [member state] is not
+	## [constant NeedState.RECOVERING] -- written only by [method
+	## start_recovery] (sets it) and [method stop_recovery]/[method
+	## _pass_f2_recovery]'s satisfied-cross branch (both clear it).
+	var recovery_source_name: StringName = &""
 
 
 ## Need-enum <-> the external `StringName` need id every public query/report
@@ -118,6 +178,17 @@ const NEED_NAME_TO_ENUM: Dictionary[StringName, Need] = {
 ## harmless (ADR-0008: Villager AI polls state, never trusts this alone).
 signal need_urgent(villager_id: int, need: StringName)
 
+## Edge-triggered "need satisfied" notification (GDD Core Rule 3/10,
+## TR-needs-mood-system-033/053) -- a LATENCY HINT, same status as [signal
+## need_urgent]. Fires exactly once per upward `satisfied_threshold` cross
+## while [constant NeedState.RECOVERING], emitted by [method
+## _pass_f2_recovery] in the same tick the cross occurs; never re-fires
+## afterward because that record is no longer RECOVERING (F2 skips
+## non-Recovering records by construction, not by a separate dedup check --
+## same "no repeat is possible by construction" argument [method
+## _pass_f1_decay]'s own doc comment makes for [signal need_urgent]).
+signal need_satisfied(villager_id: int, need: StringName)
+
 ## Tuning config (ADR-0002). Wired via a scene file's Inspector in
 ## production, or assigned directly in a headless test. Asserted wired by
 ## [method setup] -- never read inside `_ready()`.
@@ -141,6 +212,20 @@ var time_tick_system: Object = null
 ## queries for the same consistency reason even though NM-6 only strictly
 ## requires it of has_urgent_need).
 var _need_records: Dictionary[String, NeedRecord] = {}
+
+## F2's source->rate table (GDD Core Rule 4; Implementation Notes: "built
+## once from config at setup() -- five enum keys today, three distinct
+## values"). Built exactly once, in [method setup], from [member config]'s
+## POST-validate/clamp values -- never rebuilt per tick (Control Manifest
+## Guardrail: "F2 is an O(1) table lookup per recovering need per tick; the
+## table is read, never rebuilt per tick"). Deliberately `Dictionary[
+## StringName, float]` rather than `Dictionary[RecoverySource, float]`: this
+## is what lets [method _rate_for_source] be a genuine generic lookup that a
+## test can extend with a key [enum RecoverySource] does not (yet) name
+## (AC10) without touching this module's code -- see [constant
+## RECOVERY_SOURCE_NAMES]'s own doc comment for why the production enum
+## stays closed while this table stays open.
+var _source_rate_table: Dictionary[StringName, float] = {}
 
 ## True once [method setup] has completed at least once.
 var _is_set_up: bool = false
@@ -184,6 +269,18 @@ func setup() -> void:
 	for issue: String in issues:
 		if not issue.begins_with(ConfigResource.BLOCKING_PREFIX):
 			push_warning(issue)
+	# F2's source->rate table (GDD Core Rule 4) -- built once, here, from
+	# config's POST-validate/clamp values (deliberately after validate() so a
+	# clamped ground_penalty/unsheltered_bed_multiplier is what F2 ever reads).
+	# The three ground_* enum ids share one rate row by construction (a single
+	# dictionary value written three times), never a hardcoded branch.
+	_source_rate_table = {
+		&"bed_sheltered": 1.0,
+		&"bed_unsheltered": config.unsheltered_bed_multiplier,
+		&"ground_no_bed_owned": config.ground_penalty,
+		&"ground_bed_unreachable": config.ground_penalty,
+		&"ground_trapped": config.ground_penalty,
+	}
 	@warning_ignore("unsafe_property_access")
 	time_tick_system.tick.connect(_on_tick)
 	_is_set_up = true
@@ -302,6 +399,73 @@ func set_need_value(villager_id: int, need: StringName, value: float) -> void:
 	record.state = NeedState.SATISFIED if record.value > config.urgency_threshold else NeedState.URGENT
 
 
+## `docs/architecture/architecture.md` API Boundaries (TD ruling NM-5, the
+## villager-id three-arg form): the SOLE entry into [constant
+## NeedState.RECOVERING] (GDD Core Rule 10, TR-needs-mood-system-042/034).
+## Villager AI (the only production caller) reports via a discrete call per
+## activity start -- never a per-tick push. Stores the reported
+## [param source_enum] as its `StringName` id on the record (re-read fresh by
+## [method _pass_f2_recovery] every tick, never captured once -- Core Rule 10
+## / story 004's mid-recovery re-rating); calling this again with the SAME
+## source while already Recovering is idempotent BY CONSTRUCTION (re-writing
+## an identical value), no special-case branch needed.
+##
+## A villager_id/need with no tracked record is a documented no-op (mirrors
+## [member _need_records]'s own "created ONLY by [method set_need_value]"
+## invariant -- there is no sensible value to recover FROM for a need this
+## module has never been told about); an unrecognized [param need] name is
+## the same safe no-op [method get_need_value]/[method set_need_value] apply.
+## An unrecognized [param source_enum] fails loudly (`assert`) rather than
+## silently defaulting -- there is no legal [enum RecoverySource] value this
+## can occur for today (every member is in [constant RECOVERY_SOURCE_NAMES]
+## by construction); the guard exists for the same defensive reason
+## [method setup]'s asserts do.
+func start_recovery(villager_id: int, need: StringName, source_enum: RecoverySource) -> void:
+	if not NEED_NAME_TO_ENUM.has(need):
+		return
+	assert(
+		RECOVERY_SOURCE_NAMES.has(source_enum),
+		"NeedsMood.start_recovery: unrecognized RecoverySource enum value %s" % source_enum
+	)
+	var key: String = _record_key(villager_id, need)
+	if not _need_records.has(key):
+		return
+	var record: NeedRecord = _need_records[key]
+	record.state = NeedState.RECOVERING
+	record.recovery_source_name = RECOVERY_SOURCE_NAMES[source_enum]
+
+
+## `docs/architecture/architecture.md` API Boundaries:
+## `stop_recovery(villager_id: int, need: StringName, reason: StringName) ->
+## void` (TD ruling NM-5). Revokes/interrupts a Recovering need (GDD Edge
+## Case 1/3) -- a documented no-op for an untracked villager_id, an
+## unrecognized need name, or a need that is not currently
+## [constant NeedState.RECOVERING] (the story's own named edge case: "a
+## documented no-op"). [param reason] is accepted but not yet consumed here
+## (a future why-string/logging consumer, story 007) -- the signature is
+## fixed now per NM-5 so no later signature migration is needed.
+##
+## Transition is purely by CURRENT value (Edge Case 1, no new signal either
+## way): strictly above [member NeedsMoodConfig.urgency_threshold] ->
+## Satisfied (decay resumes silently); at or below -> Urgent (the original
+## downward-cross edge already fired earlier and is not re-emitted here).
+## Per Core Rule 10's intra-tick ordering this write lands synchronously,
+## before the next dispatched tick's F-pass -- so an interruption this tick
+## credits ZERO recovery for that same tick (F2 simply never sees this
+## record as RECOVERING again).
+func stop_recovery(villager_id: int, need: StringName, reason: StringName) -> void:
+	if not NEED_NAME_TO_ENUM.has(need):
+		return
+	var key: String = _record_key(villager_id, need)
+	if not _need_records.has(key):
+		return
+	var record: NeedRecord = _need_records[key]
+	if record.state != NeedState.RECOVERING:
+		return
+	record.recovery_source_name = &""
+	record.state = NeedState.SATISFIED if record.value > config.urgency_threshold else NeedState.URGENT
+
+
 ## Composite storage key for [member _need_records] (see [NeedRecord]'s own
 ## doc comment for why this is flat rather than nested).
 static func _record_key(villager_id: int, need: StringName) -> String:
@@ -321,6 +485,40 @@ func _decay_rate_for_need(need: Need) -> float:
 			return config.decay_per_tick_sleep
 		_:
 			return 0.0
+
+
+## F2's per-need base-recovery-rate lookup (GDD F2:
+## `base_recovery_per_tick[need]`) -- same "only SLEEP is configured in MVP"
+## shape as [method _decay_rate_for_need], for the identical reason (Core
+## Rule 2).
+func _base_recovery_rate_for_need(need: Need) -> float:
+	match need:
+		Need.SLEEP:
+			return config.base_recovery_per_tick_sleep
+		_:
+			return 0.0
+
+
+## F2's source->rate multiplier lookup (GDD Core Rule 4) -- a pure
+## `Dictionary[StringName, float]` read against [member _source_rate_table],
+## never a hardcoded bed/ground branch (Control Manifest Forbidden pattern;
+## AC10/AC65). Fails LOUDLY (`assert`) when [param source_name] is not a key
+## in the table, rather than silently defaulting to `1.0` (the story's own
+## named edge case: "an unknown source enum fails loudly rather than
+## silently recovering at 1.0") -- every [enum RecoverySource] member
+## [method start_recovery] can ever write resolves to one of the five keys
+## [method setup] populates, so this can only trip for a source name written
+## directly into a record outside the production API (a test-only scenario
+## proving the guard, see `recovery_source_rate_table_test.gd`).
+func _rate_for_source(source_name: StringName) -> float:
+	assert(
+		_source_rate_table.has(source_name),
+		(
+			"NeedsMood._pass_f2_recovery: unrecognized recovery source '%s' -- not"
+			+ " present in the source->rate table (TR-needs-mood-system-035/065)"
+		) % source_name
+	)
+	return _source_rate_table.get(source_name, 0.0)
 
 
 ## F1 -- need decay (GDD Formulas: `value <- max(0, value -
@@ -356,11 +554,41 @@ func _pass_f1_decay() -> void:
 			need_urgent.emit(record.villager_id, NEED_NAMES.get(record.need, &""))
 
 
-## F2 -- need recovery via the source-rate table (GDD Formulas). Story 003's
-## scope; a documented no-op here that only records its own name in
-## [member _last_tick_pass_order].
+## F2 -- need recovery via the source-rate table (GDD Formulas: `value <-
+## min(100, value + base_recovery_per_tick[need] * source_multiplier)`,
+## TR-needs-mood-system-053), plus the edge-triggered `satisfied_threshold`
+## upward-cross detection (GDD Core Rule 3). Only ever touches records
+## currently [constant NeedState.RECOVERING] -- F1 already skips those, so
+## a need is decayed XOR recovered on any given tick, never both (the story's
+## own "no-decay-while-Recovering" requirement falls out of the two passes'
+## mutually exclusive record filters, not a separate guard here).
+##
+## Crossing compares the PRE-tick value vs the POST-tick (clamped) value
+## against [member NeedsMoodConfig.satisfied_threshold] (`<` then `>=`) --
+## the mirror of [method _pass_f1_decay]'s own crossing comparison, upward
+## instead of downward. The domain clamp (`minf(100.0, ...)`, AC33) is
+## applied BEFORE the crossing check, so an overshoot that would exceed 100
+## is capped first and the satisfied cross still fires off the capped value
+## (100.0 can only ever satisfy-cross a threshold <= 100.0, never miss it).
+## On the cross: state -> Satisfied, [signal need_satisfied] emits exactly
+## once, and [member NeedRecord.recovery_source_name] clears -- symmetric to
+## [method stop_recovery]'s own clear. The value itself is left exactly
+## where F2 landed it (AC11's "overshoot retained, never clamped back to the
+## threshold").
 func _pass_f2_recovery() -> void:
 	_last_tick_pass_order.append(&"f2_recovery")
+	for key: String in _need_records.keys():
+		var record: NeedRecord = _need_records[key]
+		if record.state != NeedState.RECOVERING:
+			continue
+		var rate: float = _rate_for_source(record.recovery_source_name)
+		var previous_value: float = record.value
+		var base_rate: float = _base_recovery_rate_for_need(record.need)
+		record.value = minf(100.0, previous_value + base_rate * rate)
+		if previous_value < config.satisfied_threshold and record.value >= config.satisfied_threshold:
+			record.state = NeedState.SATISFIED
+			record.recovery_source_name = &""
+			need_satisfied.emit(record.villager_id, NEED_NAMES.get(record.need, &""))
 
 
 ## F3 -- mood smoothing (GDD Formulas). Story 005's scope; a documented

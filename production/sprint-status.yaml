@@ -101,7 +101,7 @@ stories:
     name: "Recovery-report API, source→rate table & F2 recovery — THE THREE-RUNG LADDER"
     file: "production/epics/needs-mood-system/story-003-recovery-report-api-and-source-rate-table.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete
     owner: "systems-designer"
     estimate_days: 1.5
     blocker: "depends on needs-mood-001 + 002 (in-sprint). Three-arg start_recovery(villager_id, need, source_enum) per NM-5; THREE rungs via table lookup per NM-3 — the two-multiplier form is NEVER to be implemented"

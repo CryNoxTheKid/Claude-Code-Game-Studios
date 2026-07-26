@@ -1,7 +1,7 @@
 # Story 003: Recovery-report API, source→rate table & F2 recovery
 
 > **Epic**: Needs & Mood System
-> **Status**: Ready
+> **Status: Complete (2026-07-26 — 1175/1175 suite green 0 orphans, agent-verified; parent re-verifies with the concurrent building-023)
 > **Layer**: Feature
 > **Type**: Logic
 > **Estimate**: ~1.5 agent-days
