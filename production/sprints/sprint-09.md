@@ -609,3 +609,17 @@ S09 blocker; it bears directly on whether the shipped build looks correct to a h
 - **Next step:** run `/qa-plan sprint` to define test cases per story before `/dev-story`, then
   sequence **`villager-ai-026` FIRST** (it gates the binding lane) with `needs-mood-001`,
   `building-023` and `villager-ai-021` opening the other three lanes in parallel.
+
+
+### Lane-Korrektur (2026-07-26)
+
+Die Needs-&-Mood-Lane war im Plan als `systems-designer` gefuehrt. Der
+systems-designer-Agent hat die Story korrekt abgelehnt: `.gd`-Dateien
+routen laut `.claude/docs/technical-preferences.md` und den
+Koordinationsregeln zum `godot-gdscript-specialist`; der Designer haelt
+die Domaene (Formeln, Tuning-Tabellen), nicht die Implementierung. Er hat
+vor dem Ablehnen geprueft, dass keine Design-Entscheidung mehr offen ist
+(F1-F4 und die Tuning-Ranges stehen vollstaendig im GDD, CD Ruling 1 hat
+die letzte Zahl geklaert). Lane korrigiert auf
+`godot-gdscript-specialist`; die Domaenen-Zuordnung im Plan bleibt
+`systems-designer` als fachlicher Owner fuer Review.
