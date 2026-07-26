@@ -101,6 +101,14 @@ Godot_v4.7-stable_win64.exe --headless --path neues-spiel -s -d --remote-debug t
 ```
 Result: **2/2 test cases PASSED, 0 errors, 0 failures, 0 orphans.**
 
+> **UPDATE 2026-07-26 (later same day) — Scenario 1's `permanent_stuck_count = 15`
+> finding below has been FIXED**, not merely left as a follow-up recommendation.
+> See "Fix applied" at the end of this Scenario 1 section for the root cause,
+> the change, the regression test, and the corrected after-numbers (Scenario 2
+> is unaffected — unchanged before/after). The narrative below is left
+> historically intact (it is what the observation run first measured); do not
+> read it as still-current without the update note.
+
 ### Scenario 1 — natural long run (real population, real construction, no adversarial setup)
 
 **Run parameters**: 15 real `VillagerAi` instances (full `setup()`, real `VillagerDecidingScheduler`/
@@ -131,10 +139,89 @@ the now-solid cell). Every earlier seal-prevention/watchdog test in this codebas
 a bare, never-`setup()`-wired villager as its claim-holder, or stops asserting the instant the
 write commits — none of them drive a real villager's own tick handler far enough afterward to see
 this. **This is real production code behavior, reproduced deterministically, not a harness
-artifact** — recommended as a follow-up `villager-ai` story (`_tick_wandering` real behavior, or a
-narrower re-path-from-self-fix), out of this task's own scope to fix. It is **not** the same gap
+artifact.** It is **not** the same gap
 condition C3/the CD ruling's #7 design test is about (see Scenario 2) — the watchdog's coverage of
 "walled in by someone ELSE's write while genuinely traveling" is intact and proven below.
+
+#### Fix applied (2026-07-26, same day — closes the finding above)
+
+**Root cause**: [method VillagerAi._update_unstuck_watchdog] only counted
+`stuck_tick_count` (and only ever called [method VillagerAi._attempt_watchdog_rescue])
+while `_state` was `TRAVELING` or `WORKING` (Rule 15's own literal scope). A
+self-sealed builder's OWN [method VillagerAi._tick_working] detects the
+completion and transitions `WORKING -> DECIDING` the SAME tick the self-seal
+first becomes true (GDD's own state table: "Cell Built" is an unconditional
+Working-exit trigger) — so the villager could accumulate at most ONE stuck
+tick before permanently leaving the counted states, structurally short of
+`unstuck_watchdog_threshold_ticks` (12), and stayed `is_distressed() == true`
+forever once Rule 2's periodic re-check carried it on into
+`DECIDING`/`WANDERING` (never rescuable, by design, per Edge Case 2/AC32).
+This directly contradicted `VillagerSealPreventionGate`'s own already-written
+class doc comment, which promises a self-sealed builder is "cleaned up later
+by the Unstuck Watchdog's own rescue... on its normal schedule."
+
+**Fix chosen**: `VillagerAi._update_unstuck_watchdog` now treats the
+"self-sealed" sub-condition (own `current_cell` has become non-standable —
+`VillagerAi._is_self_sealed_at_current_cell`, split out of the existing
+`VillagerAi._is_stuck_at_current_cell` as a pure, behavior-preserving
+refactor) as rescue-eligible in EVERY state, not only `TRAVELING`/`WORKING`.
+The OTHER sub-condition ("own cell fine, but zero legal step to any
+neighbor" — the ordinary "walled in by someone else's write while idling"
+case Edge Case 2/AC32 is about) stays strictly `TRAVELING`/`WORKING`-scoped,
+completely unchanged.
+
+**Why this over the other two candidate directions**:
+- *Widen rescue to ANY stuck villager in any "mobile" state* (treating
+  Wandering like Traveling/Working generally) was rejected — it would
+  contradict Rule 15's explicit scope and break Edge Case 2/AC32's own
+  negative test (an Idle/Wandering villager walled in by someone else's
+  write must never be rescued; "the player resolves it by removing
+  blocks" is deliberate design, not an oversight).
+- *Require self-seal to pass an escape check (defer like any other trapping
+  write if it would leave zero legal steps)* was rejected — `VillagerAi.
+  would_trap_builder` short-circuits on the builder's OWN cell failing
+  standability before ever consulting the neighbor-escape loop, so by
+  construction EVERY self-seal completion already "fails" such a check;
+  requiring an escape route would silently revoke the self-seal exception
+  itself (009/012 park builders on their own job cell) — not narrower, but
+  a bigger, load-bearing behavior change, without touching the actual bug
+  (an already-committed self-seal would still hit the identical
+  same-tick-state-exit ordering problem after any later livelock-escape
+  write).
+- *Implement `_tick_wandering` for real* was rejected as insufficient — per
+  Edge Case 2, a genuinely walled-in Wandering villager should stay put
+  regardless (a real flood-fill wander finding zero reachable cells changes
+  nothing observable); this candidate does not address the ordering defect
+  at all.
+
+**Regression test** (BLOCKING, `tests/unit/villager_ai/unstuck_watchdog_test.gd`):
+two new unit tests — `test_self_sealed_builder_recovers_after_completion_transitions_it_out_of_working`
+(reproduces the exact real-production sequence: WORKING villager standing on
+its own job cell, the completion write lands, `_tick_working` leaves WORKING
+the same tick — asserts the watchdog still rescues it) and
+`test_self_sealed_villager_already_in_wandering_is_rescued` (a companion case
+starting the villager directly in `WANDERING` while self-sealed, proving the
+fix is genuinely state-independent). The pre-existing AC32 negative test
+(`test_non_rescuable_states_with_no_legal_step_stay_put_with_distress_never_teleport`)
+is unchanged and still passes, confirming the "standable but walled in while
+idling" case is untouched.
+
+**After-numbers** (same harness, same production defaults, re-run 2026-07-26):
+
+- **Scenario 1**: `built=79` (79 of 80 targets completed within the 600-tick
+  window) · **watchdog_fire_count = 79** · **recovery_count = 79** ·
+  `unstuck_search_failed_count = 0` · **`permanent_stuck_count = 0`**
+  (previously 15) — the watchdog/recovery counters now agree one-to-one
+  with `built_count`, and permanent-stuck is zero.
+- **Scenario 2 (unchanged, as required)**: `watchdog_fire_count = 2` ·
+  `recovery_count = 2` · `unstuck_search_failed_count = 0` ·
+  `permanent_stuck_count = 0` — identical to the original run above.
+
+Full blocking suite (`tests/run-tests.cmd`) after the fix: **953 test cases,
+0 errors, 0 failures, 0 flaky, 0 skipped, 0 orphans, exit code 0.**
+
+Milestone criterion #13 ("build stable... no permanent stuck") is no longer
+blocked by this finding.
 
 ### Scenario 2 — adversarial: workers seal two rooms around bystanders (story-016 fixture)
 
@@ -164,7 +251,10 @@ classes**. Zero permanent stuck. Zero search failures.
 named but never ran) **and executes the CD ruling's own #7 design test** (the watchdog fires and
 recovers a genuinely-traveling villager walled in by someone else's write, at production tuning,
 against real code) — Scenario 2 is the clean, unambiguous positive proof; Scenario 1 is the honest
-natural-traffic baseline plus one real, separately-flagged, out-of-scope-to-fix finding.
+natural-traffic baseline, whose real, reproducible self-seal permanent-stuck finding has since been
+FIXED the same day (see Scenario 1's own "Fix applied" subsection above) — both scenarios now show
+zero permanent stuck at production-default tuning, fully closing milestone criterion #13's "no
+permanent stuck" clause.
 
 **Not covered here**: C3's other half — "the ruling's own #6 design test... captured as a short
 walkthrough + screenshots" (a human draws a room, workers build it, a villager moves in) — that is

@@ -1756,6 +1756,23 @@ func _has_any_legal_step_from_current_cell() -> bool:
 	return false
 
 
+## Rule 15/F5's OWN cell-standability half of the "stuck" predicate, split
+## out as its own named query (fix for the M01 closure observation run's
+## Scenario 1 finding, `production/qa/evidence/m01-closure-evidence-
+## 20260726.md`): `true` iff [member current_cell] itself has become
+## non-standable -- the exact signature of a self-seal completion (Rule
+## 16/F6, [VillagerSealPreventionGate]'s own class doc comment point 1:
+## "the villager ending up standing inside now-solid content"). Distinct
+## from "walled in but my own cell is fine" (the OTHER half of [method
+## _is_stuck_at_current_cell], see below) -- [method
+## _update_unstuck_watchdog] treats the two halves differently: this one is
+## rescue-eligible in EVERY state (see that method's own doc comment for
+## why); the other stays strictly `TRAVELING`/`WORKING`-scoped, unchanged,
+## per Rule 15/Edge Case 2/AC32.
+func _is_self_sealed_at_current_cell() -> bool:
+	return not is_standable(current_cell)
+
+
 ## Rule 15/F5's full "stuck" predicate: [member current_cell] fails
 ## standability, OR has zero legal step to any neighbor (GDD F5 Formulas:
 ## "`stuck_tick_count` increments... a Traveling/Working villager has zero
@@ -1763,9 +1780,13 @@ func _has_any_legal_step_from_current_cell() -> bool:
 ## check"). Used both by [method _update_unstuck_watchdog]'s
 ## `TRAVELING`/`WORKING` counter and by [member _distressed]'s own
 ## all-states read (AC32) -- ONE predicate, not two independently-maintained
-## copies.
+## copies. Delegates its own-cell half to [method
+## _is_self_sealed_at_current_cell] rather than re-checking [method
+## is_standable] inline a second time (this is a pure refactor of this
+## method's OWN body -- its return value is byte-for-byte unchanged from
+## before the M01 closure fix).
 func _is_stuck_at_current_cell() -> bool:
-	if not is_standable(current_cell):
+	if _is_self_sealed_at_current_cell():
 		return true
 	return not _has_any_legal_step_from_current_cell()
 
@@ -1778,16 +1799,44 @@ func _is_stuck_at_current_cell() -> bool:
 ##
 ## Every state updates [member _distressed] (AC32, Edge Case 2's complement:
 ## an Idle/Wandering/Sleeping/Breather villager with no legal step shows the
-## distress cue and stays put, never rescued) -- but only `State.TRAVELING`/
-## `State.WORKING` ever touch [member stuck_tick_count] or can trigger
-## [method _attempt_watchdog_rescue] (Rule 15's own explicit scope
-## boundary). Leaving either rescuable state -- including via this SAME
-## tick's own rescue, since dispatch order guarantees [method _tick_state]
-## has not yet run for THIS tick when this runs -- resets [member
-## stuck_tick_count] to `0` and [member _search_failure_gate] for a fresh
-## future episode (this story's own interpretation of GDD F5's "resets to 0
-## the instant relief is available": exiting the two rescuable states is
-## itself relief, the counter having no meaning outside them).
+## distress cue and stays put, never rescued) -- and, as before, only
+## `State.TRAVELING`/`State.WORKING` ever count a "walled in but my own cell
+## is still standable" episode toward [member stuck_tick_count] (Rule 15's
+## own explicit scope boundary, Edge Case 2/AC32's negative test, both
+## UNCHANGED by this fix).
+##
+## **M01 closure fix** (`production/qa/evidence/m01-closure-evidence-
+## 20260726.md` Scenario 1): a villager whose OWN [member current_cell] has
+## become non-standable -- [method _is_self_sealed_at_current_cell] --
+## remains rescue-eligible REGARDLESS of [member _state]. This is a
+## narrowly-scoped exception to "only `TRAVELING`/`WORKING` count", not a
+## general widening of Rule 15's rescue scope to Idle/Wandering/Sleeping/
+## Breather (Edge Case 2's own "never teleported, stays put" guarantee for
+## a merely WALLED-IN-but-standable villager in those states is completely
+## untouched -- see [method _is_self_sealed_at_current_cell]'s own doc
+## comment for the exact line this fix draws). It exists because Rule
+## 16b/[VillagerSealPreventionGate]'s own class doc comment ALREADY promises
+## this exact outcome ("the builder becomes sealed in by its own completed
+## work, and the Unstuck Watchdog... rescues it on its normal schedule") --
+## but [method _tick_working]'s own completion handling
+## ([method _complete_claimed_job]) transitions `WORKING -> DECIDING` the
+## SAME tick the self-seal first becomes true (GDD's own state table: "Cell
+## Built" is an unconditional Working-exit trigger), and Rule 2's periodic
+## `decision_interval` re-check (unrelated to this fix) can carry the
+## villager on into `WANDERING` shortly after when no other job is
+## reachable -- so a strictly `TRAVELING`/`WORKING`-scoped counter, as
+## written before this fix, could accumulate at most ONE stuck tick before
+## the villager left the counted states for good, structurally short of
+## `unstuck_watchdog_threshold_ticks` (12 at production defaults) forever.
+## Scoping the exception to "self-sealed" specifically (not "any villager
+## with zero legal steps") is deliberate: a self-sealed cell is a
+## comparatively rare, severe physical condition (the villager's own body
+## literally overlaps solid content) that ONLY Rule 16's self-seal write
+## can produce against a previously-standable cell; it is a strict subset
+## of "stuck", never triggered by the ordinary "walled into a room by
+## someone else's write while idling" case Edge Case 2 is about (that case
+## always leaves [member current_cell] itself standable -- only the
+## LEGAL-STEP half of [method _is_stuck_at_current_cell] fails there).
 func _update_unstuck_watchdog() -> void:
 	# Nil-safe against a villager fixture that has no [member voxel_world]
 	# wired at all, or one wired but not yet given its own
@@ -1804,7 +1853,12 @@ func _update_unstuck_watchdog() -> void:
 		return
 	var stuck: bool = _is_stuck_at_current_cell()
 	_distressed = stuck
-	if _state != State.TRAVELING and _state != State.WORKING:
+	var rescue_eligible_now: bool = (
+		_state == State.TRAVELING
+		or _state == State.WORKING
+		or _is_self_sealed_at_current_cell()
+	)
+	if not rescue_eligible_now:
 		_reset_stuck_episode()
 		return
 	if not stuck:

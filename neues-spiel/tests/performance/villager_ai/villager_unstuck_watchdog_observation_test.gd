@@ -23,40 +23,29 @@
 ##    claim -> travel -> build work against a real, ordinary (non-adversarial)
 ##    platform for 600 real ticks, with the full anti-stuck stack wired
 ##    (on-site gate AND seal-prevention gate, exactly like production `Valley`
-##    wiring) — reports whatever the watchdog counters read. Ordinary
-##    real-world construction traffic never walls anyone in from an OUTSIDE
-##    write, so [VillagerUnstuckTelemetry]'s own fire/recovery counters read
-##    zero here, exactly as the milestone review's own framing expects ("if
-##    the natural run produces zero stuck events, ALSO run a deliberately
-##    adversarial scenario").
+##    wiring) — reports whatever the watchdog counters read.
 ##
-##    **Honest additional finding, not silently dropped**: this run's own
-##    `permanent_stuck_count` sweep is NOT zero — every villager that
-##    completes a single-cell BUILD job ends up in the documented "self-seal"
+##    **M01 closure fix applied** (`production/qa/evidence/m01-closure-
+##    evidence-20260726.md` Scenario 1, fixed 2026-07-26): this run's own
+##    `permanent_stuck_count` sweep used to be NON-zero — every villager that
+##    completed a single-cell BUILD job ended up in the documented "self-seal"
 ##    case (`VillagerSealPreventionGate`'s own class doc comment: "the
 ##    villager ending up standing inside now-solid content, cleaned up later
-##    by the Unstuck Watchdog's own rescue... on its normal schedule").
-##    Observed here for the first time at REAL population/tick scale (every
-##    earlier seal-prevention/watchdog test either hand-pokes a bare,
-##    never-`setup()`-wired villager as its claim-holder, or stops asserting
-##    the instant the write commits — neither drives the villager's OWN tick
-##    handler far enough to see what happens next): [method
-##    VillagerAi._tick_working] transitions WORKING -> DECIDING the SAME tick
-##    it detects the completion, so the self-sealed villager accumulates
-##    exactly ONE stuck tick while still in a rescuable state — structurally
-##    short of `unstuck_watchdog_threshold_ticks` (12) — before leaving
-##    WORKING. Once in DECIDING/WANDERING (never rescuable, per Rule 15's own
-##    TRAVELING/WORKING-only scope, AC32), it stays `is_distressed() == true`
-##    indefinitely: `_tick_wandering` is still an empty stub (no re-path
-##    attempt ever originates from the now-solid cell). This is a REAL,
-##    reproducible gap in the anti-stuck chain's coverage for the single-cell
-##    self-seal case specifically — distinct from (and not gated by) this
-##    file's own C3 "permanent-stuck must be zero" demonstration, which is
-##    Scenario 2's job below (a bystander WALLED IN BY ANOTHER villager's
-##    write while genuinely TRAVELING, never self-sealing, so it keeps
-##    accumulating stuck ticks in a rescuable state for the FULL threshold
-##    window) -- flagged here for a follow-up `villager-ai` story
-##    (`_tick_wandering`/re-decide-from-a-solid-cell), not fixed by this task.
+##    by the Unstuck Watchdog's own rescue... on its normal schedule"), but
+##    [method VillagerAi._tick_working] transitioned WORKING -> DECIDING the
+##    SAME tick it detected the completion, so the self-sealed villager could
+##    accumulate only ONE stuck tick before leaving the (then-strictly)
+##    TRAVELING/WORKING-scoped watchdog counter for good — structurally short
+##    of `unstuck_watchdog_threshold_ticks`, staying `is_distressed() == true`
+##    forever in DECIDING/WANDERING. [method VillagerAi._update_unstuck_watchdog]
+##    now keeps counting/rescuing a villager whose OWN `current_cell` has
+##    become non-standable (the self-seal signature) REGARDLESS of `_state` —
+##    see that method's own doc comment for the exact, narrowly-scoped carve-
+##    out (Edge Case 2/AC32's "standable but walled in while Idle/Wandering/
+##    Sleeping/Breather" negative case is completely untouched). Every
+##    self-sealed builder below is now rescued: the watchdog fire/recovery
+##    counters equal `built_count` (one rescue per completed job that
+##    self-sealed its own builder), and `permanent_stuck_count` is zero.
 ## 2. **Adversarial sealed-room scenario** (per the review's own suggestion —
 ##    "workers sealing a room per the story-016 fixture") — reuses
 ##    `seal_prevention_real_build_write_test.gd`'s own proven `_wall_off_room`
@@ -331,18 +320,18 @@ func test_natural_long_run_real_population_construction_produces_zero_stuck_even
 	)
 
 	# Structural correctness: real construction work actually happened (the
-	# population is doing something real, not idling); as expected of an
-	# ordinary, non-adversarial platform, the WATCHDOG never fires here (no
-	# outside write ever walls anyone in) -- but see this function's own doc
-	# comment for the honest, separately-flagged self-seal finding this run
-	# surfaced: every completed single-cell BUILD job leaves its own builder
-	# permanently distressed (self-seal, never rescued, never gated by THIS
-	# scenario's own assertions) -- asserted below as the documented,
-	# reproducible count it actually is, not silently rounded to zero.
+	# population is doing something real, not idling). No OUTSIDE write ever
+	# walls anyone in on this ordinary, non-adversarial platform, but every
+	# completed single-cell BUILD job DOES self-seal its own builder (Rule
+	# 16's own documented exception) -- the M01 closure fix (see this
+	# function's own doc comment) means the watchdog now rescues every one of
+	# them, so the fire/recovery counters track `built_count` one-to-one and
+	# permanent-stuck is zero, closing the milestone's own #13 clause 3 "no
+	# permanent stuck" criterion for this natural-traffic run too.
 	assert_int(built_count).is_greater(0)
-	assert_int(telemetry.get_world_total()).is_equal(0)
+	assert_int(telemetry.get_world_total()).is_equal(built_count)
 	assert_int(search_failed_counter[0]).is_equal(0)
-	assert_int(permanent_stuck_count).is_equal(built_count)
+	assert_int(permanent_stuck_count).is_equal(0)
 
 
 # ---------------------------------------------------------------------------

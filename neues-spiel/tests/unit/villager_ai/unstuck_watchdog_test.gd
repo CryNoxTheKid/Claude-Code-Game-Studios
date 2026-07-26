@@ -37,6 +37,13 @@
 ##    re-enters Deciding through the SAME FIFO-queue + budget path -- no
 ##    bonus unbudgeted immediate decide, no duplicate queue entry if already
 ##    queued at rescue time.
+## 10. **M01 closure fix (`m01-closure-evidence-20260726.md` Scenario 1)**: a
+##    self-sealed builder (own `current_cell` non-standable -- Rule 16's
+##    self-seal exception) is rescued even though it left `WORKING` the same
+##    tick the self-seal first became true and later sits in `DECIDING`/
+##    `WANDERING` -- the fix's own state-independent carve-out for the
+##    self-seal sub-condition, proven distinct from AC32's own untouched
+##    "standable but walled-in" negative case (#5 above).
 class_name UnstuckWatchdogTest
 extends GdUnitTestSuite
 
@@ -254,6 +261,99 @@ func test_non_rescuable_states_with_no_legal_step_stay_put_with_distress_never_t
 		assert_bool(villager.is_distressed()).is_true()
 		assert_int(villager.get_stuck_tick_count()).is_equal(0)
 		assert_int(villager.get_unstuck_count()).is_equal(0)
+
+
+# ---------------------------------------------------------------------------
+# M01 closure fix -- self-seal recovery (BLOCKING regression;
+# `production/qa/evidence/m01-closure-evidence-20260726.md` Scenario 1). A
+# builder that seals itself into its own just-completed BUILD write (Rule
+# 16's self-seal exception, [VillagerSealPreventionGate]'s own class doc
+# comment point 1) must still get rescued, even though [method
+# VillagerAi._tick_working]'s own completion handling leaves `WORKING` the
+# SAME tick the self-seal first becomes true. Before the fix under test,
+# [method VillagerAi._update_unstuck_watchdog] reset [member
+# VillagerAi.stuck_tick_count] to `0` on every tick once the villager left
+# `WORKING`/`TRAVELING` -- so a self-sealed builder could accumulate at most
+# ONE stuck tick before leaving those states for good, structurally short of
+# `unstuck_watchdog_threshold_ticks`, and stayed permanently distressed in
+# `DECIDING`/`WANDERING` forever (the observation run's own reproduced
+# `permanent_stuck_count = 15` finding at real population/tick scale).
+# ---------------------------------------------------------------------------
+
+func test_self_sealed_builder_recovers_after_completion_transitions_it_out_of_working() -> void:
+	var grid: VoxelWorldGrid = _make_grid()
+	var job_cell := Vector3i(10, 1, 10)  # the villager's OWN job cell -- it stands here.
+	var rescue_cell := Vector3i(12, 1, 10)
+	_make_standable(grid, job_cell)
+	_make_standable(grid, rescue_cell)
+	# An open neighbor next to the rescue cell -- without it, the rescue
+	# cell itself would be a bare standable island (no legal step anywhere),
+	# which would re-trip the OTHER ("walled in but standable") half of the
+	# stuck predicate on the very next tick and confuse this test's own
+	# distress assertion below with an unrelated, second stuck condition.
+	_make_standable(grid, rescue_cell + Vector3i(1, 0, 0))
+	# Blocks the cell directly above the job cell from accidentally becoming
+	# a closer, unintended standable rescue candidate once `job_cell` itself
+	# turns solid below (the self-seal write, further down) -- mirrors a
+	# real sealed room's own wall extending more than 1 cell tall.
+	grid.set_cell(job_cell + Vector3i(0, 1, 0), _solid())
+	var villager: VillagerAi = _make_watchdog_villager(grid)
+	_place_villager(villager, job_cell)
+	villager._state = VillagerAi.State.WORKING
+	villager._pursued_activity = VillagerAi.PursuedActivity.WORK
+	var jobs := MockJobQueue.new()
+	villager.job_queue = jobs
+	var claimed_cell := BlueprintCell.new(job_cell, BlueprintCell.MicroState.UNDER_CONSTRUCTION)
+	villager._claimed_blueprint_cell = claimed_cell
+
+	# The completion write itself, reproduced exactly as production commits
+	# it within a single tick (ConstructionTickLoop connects to the shared
+	# tick source BEFORE VillagerAi, so by the time the villager's own
+	# _on_tick() runs, this write has already landed): the cell the
+	# villager occupies turns solid, and its own claim record flips to
+	# BUILT.
+	grid.set_cell(job_cell, _solid())
+	claimed_cell.state = BlueprintCell.MicroState.BUILT
+
+	# Drive well past the threshold. Before this fix, _tick_working()'s own
+	# completion handling left WORKING on tick 1 (the sole tick the
+	# watchdog was permitted to count this villager's stuck-ness), after
+	# which DECIDING never accumulated another tick and the villager stayed
+	# permanently distressed.
+	for _i in range(villager.config.unstuck_watchdog_threshold_ticks * 3):
+		villager._on_tick()
+
+	assert_int(villager.get_state()).is_equal(VillagerAi.State.DECIDING)
+	assert_vector(villager.get_current_cell()).is_equal(rescue_cell)
+	assert_bool(villager.is_distressed()).is_false()
+	assert_int(villager.get_unstuck_count()).is_equal(1)
+	assert_int(villager.get_stuck_tick_count()).is_equal(0)
+	assert_int(jobs.release_claim_call_count).is_equal(1)
+
+
+## Companion case: a villager that has ALREADY fallen through to `WANDERING`
+## (Rule 2's normal Deciding fallback, e.g. no other reachable job) while
+## self-sealed is rescued too -- proving the fix's scope is genuinely
+## state-independent for the self-seal sub-condition, not merely a one-tick
+## grace period tied to `WORKING`'s own exit. AC32's own negative case
+## (Wandering/Sleeping/Breather with a STANDABLE current cell that is merely
+## walled in) stays intact and unchanged, see the test directly above this
+## section.
+func test_self_sealed_villager_already_in_wandering_is_rescued() -> void:
+	var grid: VoxelWorldGrid = _make_grid()
+	var stuck_cell := Vector3i(10, 1, 10)  # deliberately NEVER made standable -- self-sealed.
+	var rescue_cell := Vector3i(12, 1, 10)
+	_make_standable(grid, rescue_cell)
+	var villager: VillagerAi = _make_watchdog_villager(grid)
+	_place_villager(villager, stuck_cell)
+	villager._state = VillagerAi.State.WANDERING
+
+	_tick_until_threshold(villager)
+
+	assert_int(villager.get_state()).is_equal(VillagerAi.State.DECIDING)
+	assert_vector(villager.get_current_cell()).is_equal(rescue_cell)
+	assert_bool(villager.is_distressed()).is_false()
+	assert_int(villager.get_unstuck_count()).is_equal(1)
 
 
 # ---------------------------------------------------------------------------
