@@ -164,7 +164,7 @@ stories:
     name: "Analysis pass lifecycle, batched trigger, snapshot & never-blocks guards — trigger RESOLVED by BV-2, simpler than planned"
     file: "production/epics/build-validation-navigability/story-005-analysis-pass-lifecycle-and-snapshot.md"
     priority: should-have
-    status: backlog
+    status: complete
     owner: "godot-gdscript-specialist"
     estimate_days: 1.5
     blocker: "depends on build-validation-001 + 004 (in-sprint). ONE subscription: cells_changed_batch, NEVER construction_completed (deferred-write hazard, ADR-0015). New AC covers a deferred/paged write. Last gate before 006, the payoff-chain unblocker and head of S10"

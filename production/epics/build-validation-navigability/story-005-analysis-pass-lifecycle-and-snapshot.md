@@ -1,7 +1,7 @@
 # Story 005: Analysis pass lifecycle, batched trigger, snapshot & never-blocks guards
 
 > **Epic**: Build Validation & Navigability
-> **Status**: Ready
+> **Status: Complete (2026-07-26 — 1100/1100 suite green 0 orphans, agent-verified; parent re-verifies with the concurrent scene-005)
 > **Layer**: Feature
 > **Type**: Integration
 > **Estimate**: ~1.5 agent-days
