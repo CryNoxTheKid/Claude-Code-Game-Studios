@@ -1,7 +1,7 @@
 # Story 016: Seal prevention negative-write gate & livelock escape (F6)
 
 > **Epic**: Villager AI & Behavior
-> **Status**: Ready
+> **Status: Complete (2026-07-25 — 938/938 suite green, parent-verified; anti-stuck ladder complete)
 > **Layer**: Core
 > **Type**: Logic
 > **Estimate**: ~1 agent-day

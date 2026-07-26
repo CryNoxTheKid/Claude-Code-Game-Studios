@@ -488,6 +488,19 @@ var needs_provider: Object = null
 ## introduces the real claim record this stands in for.
 var job_queue: Object = null
 
+## Story villager-ai-016 (this revision) adds the Seal Prevention trap
+## predicate (GDD Rule 16/F6, ADR-0009 slice propagation Sec.2b): [method
+## would_trap_builder] answers "would completing a write at this cell leave
+## THIS villager with zero legal steps," evaluated as if the write had
+## already committed, WITHOUT ever mutating [member voxel_world] (a real
+## trial write would fire real signals for a change that might never
+## commit). This class has no awareness of the Building System's write
+## path, abandon-count bookkeeping, or the dig/demolition exemption at all --
+## those live entirely in the new [VillagerSealPreventionGate] collaborator
+## (mirrors [VillagerOnSiteGate]'s own "separate shared collaborator wired
+## behind [ConstructionTickLoop]'s own predicate seam" architecture exactly),
+## which calls this method once per registered villager per completing cell.
+
 ## Population dependency (Story villager-ai-015, mocked boundary -- see this
 ## class's own doc comment's villager-ai-015 paragraph). Duck-typed, nil-safe
 ## default (see [method _get_other_villager_cells]) -- exposes exactly one
@@ -1908,6 +1921,112 @@ func _get_other_villager_cells() -> Array[Vector3i]:
 		return []
 	@warning_ignore("unsafe_method_access")
 	return population.get_other_villager_cells(villager_id)
+
+
+# =============================================================================
+# Story villager-ai-016 -- Seal Prevention (GDD Rule 16/F6, ADR-0009 slice
+# propagation Sec.2b, [TR-villager-ai-behavior-101]/102/106/107)
+# =============================================================================
+
+## Seal-prevention trap predicate (GDD F6: `would_trap_builder`) -- true iff
+## a write that makes [param written_cell] solid would leave THIS villager
+## (at its own [member current_cell]) with zero legal steps to any standable
+## neighbor, evaluated AS IF the write had already committed
+## (Implementation Notes) without ever mutating the real [member voxel_world]
+## (a genuine trial write would fire real signals -- nav-graph patching,
+## repath filters -- for a change that might never actually commit, exactly
+## the side-effect risk this predicate is designed to avoid). Reuses the
+## SAME neighbor-candidate set [method _has_any_legal_step_from_current_cell]
+## already establishes ([VillagerNavGraph.HORIZONTAL_FULL_OFFSETS]/[VillagerNavGraph.
+## VERTICAL_STEP_OFFSETS]) and the SAME Rule 8/9 arithmetic [method
+## is_standable]/[method is_step_legal] already define -- never a second,
+## locally-derived neighbor set or a duplicated walkability formula (Control
+## Manifest Feature Layer Forbidden). The private `_after_write` twins below
+## are the ONLY new arithmetic this story adds: each mirrors its non-`_after_
+## write` counterpart line-for-line, substituting exactly one thing --
+## treating [param written_cell] as solid/occupied regardless of what
+## [member voxel_world] currently reports there -- mirroring this codebase's
+## own established "extract a parameterized twin rather than duplicate"
+## precedent ([method classify_step_length_cells]'s own extraction, story
+## villager-ai-007).
+##
+## Checked against [member current_cell] itself first (mirrors [method
+## _is_stuck_at_current_cell]'s own "not standable OR no legal step"
+## structure exactly) -- a write that removes the builder's OWN standing
+## clearance (e.g. directly overhead) counts as trapping just as surely as
+## sealing every exit does.
+##
+## [VillagerSealPreventionGate] is this predicate's real caller (wired into
+## [ConstructionTickLoop]'s completion write path via [ConstructionJobQueue]
+## behind [method ConstructionTickLoop.set_seal_prevention_predicate]) --
+## this method itself has no Building System awareness whatsoever, exactly
+## like [method is_standable]/[method is_step_legal].
+func would_trap_builder(written_cell: Vector3i) -> bool:
+	if not _is_standable_after_write(current_cell, written_cell):
+		return true
+	for offset: Vector2i in VillagerNavGraph.HORIZONTAL_FULL_OFFSETS:
+		for dy: int in VillagerNavGraph.VERTICAL_STEP_OFFSETS:
+			var neighbor: Vector3i = current_cell + Vector3i(offset.x, dy, offset.y)
+			if (
+				_is_standable_after_write(neighbor, written_cell)
+				and _is_step_legal_after_write(current_cell, neighbor, written_cell)
+			):
+				return false
+	return true
+
+
+## [method is_standable]'s "as if written" twin -- see [method
+## would_trap_builder]'s own doc comment. Identical control flow to [method
+## is_standable]; only the solid-below/clearance-column reads are routed
+## through the override-aware [method _is_solid_after_write]/[method
+## _is_passable_after_write] below instead of [method _is_solid]/[method
+## _is_passable] directly.
+func _is_standable_after_write(cell: Vector3i, written_cell: Vector3i) -> bool:
+	if not _is_solid_after_write(cell + Vector3i(0, -1, 0), written_cell):
+		return false
+	for offset in range(VILLAGER_CLEARANCE):
+		if not _is_passable_after_write(cell + Vector3i(0, offset, 0), written_cell):
+			return false
+	return true
+
+
+## [method is_step_legal]'s "as if written" twin -- see [method
+## would_trap_builder]'s own doc comment. Identical control flow to [method
+## is_step_legal]; only the diagonal flanker standability reads are routed
+## through [method _is_standable_after_write] instead of [method
+## is_standable] directly.
+func _is_step_legal_after_write(from_cell: Vector3i, to_cell: Vector3i, written_cell: Vector3i) -> bool:
+	if absi(to_cell.y - from_cell.y) > MAX_STEP_HEIGHT:
+		return false
+	var dx: int = to_cell.x - from_cell.x
+	var dz: int = to_cell.z - from_cell.z
+	if dx != 0 and dz != 0:
+		var flanker_a := Vector3i(to_cell.x, from_cell.y, from_cell.z)
+		var flanker_b := Vector3i(from_cell.x, from_cell.y, to_cell.z)
+		if (
+			not _is_standable_after_write(flanker_a, written_cell)
+			or not _is_standable_after_write(flanker_b, written_cell)
+		):
+			return false
+	return true
+
+
+## [method _is_solid]'s override-aware twin -- [param written_cell] always
+## reads solid (the hypothetical write has committed), regardless of
+## [member voxel_world]'s REAL current contents there.
+func _is_solid_after_write(cell: Vector3i, written_cell: Vector3i) -> bool:
+	if cell == written_cell:
+		return true
+	return _is_solid(cell)
+
+
+## [method _is_passable]'s override-aware twin -- [param written_cell] never
+## reads passable (the hypothetical write has committed), regardless of
+## [member voxel_world]'s REAL current contents there.
+func _is_passable_after_write(cell: Vector3i, written_cell: Vector3i) -> bool:
+	if cell == written_cell:
+		return false
+	return _is_passable(cell)
 
 
 # =============================================================================

@@ -215,14 +215,24 @@ func has_available_job() -> bool:
 ## tick_loop], and -- if [param cell] was previously flagged unreachable
 ## ([method report_unreachable]) -- clears the flag and emits [signal
 ## job_became_reachable] (Edge Case 5's "on re-claim the ghost returns to
-## normal Planned").
-func claim_job(cell: Vector3i, villager_id: int) -> bool:
+## normal Planned"). [param job_type] (Story villager-ai-016, default
+## [constant ConstructionTickLoop.JobType.BUILD]) forwards unchanged to
+## [member tick_loop]'s own identically-shaped parameter -- this class adds
+## no job-type bookkeeping/meaning of its own, it is purely a pass-through
+## so a future dig/demolition-project caller (Story building-013/014, not
+## yet landed) has a real seam to pass a non-BUILD value through, exactly
+## like [method set_seal_prevention_predicate] is a pure forward too.
+func claim_job(
+	cell: Vector3i,
+	villager_id: int,
+	job_type: ConstructionTickLoop.JobType = ConstructionTickLoop.JobType.BUILD
+) -> bool:
 	if _claims_by_villager.has(villager_id):
 		return false
 	var blueprint_cell: BlueprintCell = _find_eligible_cell(cell)
 	if blueprint_cell == null:
 		return false
-	if not tick_loop.claim_job(blueprint_cell, villager_id):
+	if not tick_loop.claim_job(blueprint_cell, villager_id, job_type):
 		return false
 	_claims_by_villager[villager_id] = cell
 	if blueprint_cell.is_unreachable:
@@ -287,6 +297,22 @@ func report_unreachable(cell: Vector3i) -> bool:
 ## actually take effect against.
 func set_occupancy_predicate(predicate: Callable) -> void:
 	tick_loop.set_occupancy_predicate(predicate)
+
+
+## Forwards to [member ConstructionTickLoop.set_seal_prevention_predicate]
+## (Story villager-ai-016, GDD Rule 16/F6) -- this class performs no
+## trap-checking/abandon-count bookkeeping of its own; [member tick_loop] is
+## the sole per-tick completion-write dispatcher the predicate can actually
+## take effect against. [VillagerSealPreventionGate] is the real wirer (its
+## own `_init` calls this exactly once, mirroring [VillagerOnSiteGate]'s own
+## `_init` -> [method set_occupancy_predicate] precedent) -- and, on refusal,
+## calls THIS class's own [method release_claim] directly (never [member
+## tick_loop]'s [method ConstructionTickLoop.release_job] directly), so both
+## this queue's `_claims_by_villager` bookkeeping AND the tick loop's active-
+## job state stay in sync in the SAME call, exactly as every other
+## claim-relinquishing path in this codebase already does.
+func set_seal_prevention_predicate(predicate: Callable) -> void:
+	tick_loop.set_seal_prevention_predicate(predicate)
 
 
 ## On-site predicate (Rule 12, [TR-building-system-056]; see class doc

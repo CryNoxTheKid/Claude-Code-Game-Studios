@@ -53,6 +53,25 @@
 ##    concern entirely -- this class only consults whatever boolean the
 ##    predicate returns, exactly as [CommitPipeline]'s furniture-support seam
 ##    never reasons about footprint geometry itself.
+## 2c. **Seal-prevention negative-write gate** (Story villager-ai-016, GDD
+##    Rule 16/F6, [TR-villager-ai-behavior-101]/102/106/107): [method
+##    set_seal_prevention_predicate] wires a SECOND optional
+##    `Callable(cell: Vector3i, villager_id: int, job_type: JobType) -> bool`
+##    seam -- unlike [member _occupancy_predicate] (which only skips a
+##    tick's progress accrual), this one is consulted exactly once, at the
+##    moment a job would otherwise COMPLETE, and a `false` return means the
+##    completion write never commits THIS dispatch at all (see [method
+##    _on_tick]'s own doc comment). Default `Callable()` (invalid) means
+##    "always allow" -- every pre-016 caller/test is unaffected.
+##    [VillagerSealPreventionGate] is the real wirer, and is itself
+##    responsible for releasing the claim back to [ConstructionJobQueue] on
+##    refusal (this class still has zero [ConstructionJobQueue] awareness,
+##    mirroring point 2b's own "this class has no concept of
+##    ConstructionJobQueue" invariant exactly). [method claim_job]'s new
+##    optional `job_type` parameter (default [constant JobType.BUILD]) is
+##    the value the predicate receives back -- see [enum JobType]'s own doc
+##    comment for why every job this codebase can currently originate is a
+##    build job.
 ## 3. **Per-job independence, no rollover** (F3 burst rule, AC25/AC45,
 ##    [TR-building-system-080]): active jobs are tracked one per CELL, keyed
 ##    by that cell's address -- "N villagers complete at most N cells per
@@ -151,6 +170,27 @@
 class_name ConstructionTickLoop
 extends Node
 
+## Story villager-ai-016 (GDD F6: `job_type` variable, `{build, dig,
+## demolish}`) -- which seal-prevention exemption bucket a claimed job falls
+## into. Defaults to [constant JobType.BUILD] everywhere [method claim_job]
+## is called without an explicit value -- every job this codebase can
+## currently ORIGINATE (Building System's dig/demolition project kinds,
+## Story building-013/014, are not yet landed) is a build job, so this
+## default changes NO existing caller's behavior. [constant JobType.DIG]/
+## [constant JobType.DEMOLISH] exist now so [method
+## VillagerSealPreventionGate]'s own exemption check (`job_type != build`,
+## Rule 16) has a real value to compare against the moment a future dig/
+## demolition job queue starts passing one explicitly -- this class itself
+## assigns no special MEANING to either value beyond that comparison; it
+## still writes every completing job through the exact same batched
+## [method _complete_jobs] path regardless of kind (class doc comment
+## point 5).
+enum JobType {
+	BUILD,
+	DIG,
+	DEMOLISH,
+}
+
 ## Injected-tier dependency (ADR-0001) -- the sole mutation path this class
 ## ever calls: [method VoxelWorldGrid.bulk_write], on job completion only
 ## (Story building-033 -- see class doc comment point 5).
@@ -209,9 +249,18 @@ class _ActiveJob:
 	## `required_ticks_for(...)` total so far.
 	var progress_ticks: int = 0
 
-	func _init(p_blueprint_cell: BlueprintCell, p_villager_id: int) -> void:
+	## See [enum JobType] (Story villager-ai-016). Defaults to
+	## [constant JobType.BUILD] -- see that enum's own doc comment.
+	var job_type: ConstructionTickLoop.JobType = ConstructionTickLoop.JobType.BUILD
+
+	func _init(
+		p_blueprint_cell: BlueprintCell,
+		p_villager_id: int,
+		p_job_type: ConstructionTickLoop.JobType = ConstructionTickLoop.JobType.BUILD
+	) -> void:
 		blueprint_cell = p_blueprint_cell
 		villager_id = p_villager_id
+		job_type = p_job_type
 
 ## True once [method setup] has completed at least once.
 var _is_set_up: bool = false
@@ -226,6 +275,29 @@ var _active_jobs: Dictionary[Vector3i, _ActiveJob] = {}
 ## complete no-op for every pre-030 caller. Set via [method
 ## set_occupancy_predicate].
 var _occupancy_predicate: Callable = Callable()
+
+## Seal-prevention negative-write gate seam (Story villager-ai-016, GDD Rule
+## 16/F6, ADR-0009 slice propagation Sec.2b) -- `Callable(cell: Vector3i,
+## villager_id: int, job_type: JobType) -> bool`, `true` meaning "allow this
+## completion write to commit" (the OPPOSITE polarity from [member
+## _occupancy_predicate]: this seam mirrors the GDD's own `allow_write`
+## naming directly, since -- unlike the occupancy seam, which only ever
+## skips a tick's progress accrual -- refusing here means the completion
+## itself never commits and the claim is released back to the queue, a
+## materially different consequence worth a materially different polarity
+## rather than reusing "true = block"). Default `Callable()` (invalid) means
+## "always allow" -- every pre-016 caller/test is completely unaffected.
+## [VillagerSealPreventionGate] is the real wirer (via [method
+## ConstructionJobQueue.set_seal_prevention_predicate], mirroring [member
+## _occupancy_predicate]'s own forwarding precedent exactly) -- when it
+## refuses, IT is responsible for releasing the claim back to
+## [ConstructionJobQueue] (via that class's own [method
+## ConstructionJobQueue.release_claim], which this class has no visibility
+## into at all, same as [member _occupancy_predicate]'s own "this class has
+## no concept of ConstructionJobQueue" invariant) -- this class only skips
+## finalizing the write for that job THIS dispatch; see [method _on_tick]'s
+## own doc comment for why that reentrant release, mid-iteration, is safe.
+var _seal_prevention_predicate: Callable = Callable()
 
 
 ## Explicitly callable wiring/validation entry point (ADR-0001). Asserts
@@ -270,14 +342,18 @@ func is_set_up() -> bool:
 ## [param blueprint_cell] is not currently Planned, or if its cell address
 ## already has an active job (double-claim guard) -- either way nothing is
 ## mutated.
-func claim_job(blueprint_cell: BlueprintCell, villager_id: int) -> bool:
+func claim_job(
+	blueprint_cell: BlueprintCell,
+	villager_id: int,
+	job_type: JobType = JobType.BUILD
+) -> bool:
 	assert(is_set_up(), "ConstructionTickLoop.claim_job called before setup()")
 	if blueprint_cell.state != BlueprintCell.MicroState.PLANNED:
 		return false
 	if _active_jobs.has(blueprint_cell.cell):
 		return false
 	blueprint_cell.state = BlueprintCell.MicroState.UNDER_CONSTRUCTION
-	_active_jobs[blueprint_cell.cell] = _ActiveJob.new(blueprint_cell, villager_id)
+	_active_jobs[blueprint_cell.cell] = _ActiveJob.new(blueprint_cell, villager_id, job_type)
 	return true
 
 
@@ -320,6 +396,17 @@ func set_occupancy_predicate(predicate: Callable) -> void:
 	_occupancy_predicate = predicate
 
 
+## Wires the seal-prevention negative-write gate seam (Story villager-ai-016,
+## class doc comment/[member _seal_prevention_predicate]'s own doc comment)
+## -- [VillagerSealPreventionGate]'s real caller, or a test's mocked
+## allow/refuse stand-in, supplies `Callable(cell: Vector3i, villager_id:
+## int, job_type: JobType) -> bool`. Passing an invalid [Callable] (the
+## default, or an explicit `Callable()`) restores the pre-016 "always allow"
+## behavior.
+func set_seal_prevention_predicate(predicate: Callable) -> void:
+	_seal_prevention_predicate = predicate
+
+
 ## Ticks credited so far toward [param cell]'s active job, or `0` if it has
 ## none (never claimed, or already retired) -- read-only observability
 ## (e.g. a future UI progress-fill consumer, TR-building-system-069).
@@ -352,9 +439,22 @@ static func required_ticks_for(category: BlueprintCell.Category, ticks_config: C
 ## currently occupied per [member _occupancy_predicate] is skipped entirely
 ## THIS dispatch -- no progress increment, no completion check -- while every
 ## other active job in the SAME snapshot still credits normally. Every job
-## that reaches its `required_ticks_for(...)` total THIS dispatch is
-## collected (never written individually) and handed to [method
-## _complete_jobs] once the credit pass is done.
+## that reaches its `required_ticks_for(...)` total THIS dispatch consults
+## [member _seal_prevention_predicate] (Story villager-ai-016) EXACTLY once,
+## at the moment it would otherwise complete: a `false` return (refused)
+## skips this job for THIS dispatch entirely -- no entry in [param changes]/
+## [param completed_jobs], so [method _complete_jobs] never writes it and
+## [signal construction_completed] never names it. The predicate itself is
+## responsible for releasing the claim back to [ConstructionJobQueue] when it
+## refuses (see [member _seal_prevention_predicate]'s own doc comment) -- that
+## release synchronously erases this SAME cell's entry from [member
+## _active_jobs] via [method release_job], which is safe here because this
+## loop iterates a SNAPSHOT of [member _active_jobs]'s keys (see this
+## method's own doc comment above), never the live [Dictionary] itself; the
+## local `job` reference already held below stays valid regardless. Every
+## job that reaches threshold and is NOT refused is collected (never written
+## individually) and handed to [method _complete_jobs] once the credit pass
+## is done.
 func _on_tick() -> void:
 	var changes: Dictionary[Vector3i, CellContents] = {}
 	var completed_jobs: Array[_ActiveJob] = []
@@ -364,6 +464,12 @@ func _on_tick() -> void:
 		var job: _ActiveJob = _active_jobs[cell]
 		job.progress_ticks += 1
 		if job.progress_ticks >= ConstructionTickLoop.required_ticks_for(job.blueprint_cell.category, config):
+			if _seal_prevention_predicate.is_valid():
+				var allow_write: bool = bool(
+					_seal_prevention_predicate.call(cell, job.villager_id, job.job_type)
+				)
+				if not allow_write:
+					continue
 			changes[cell] = job.blueprint_cell.contents
 			completed_jobs.append(job)
 	_complete_jobs(changes, completed_jobs)

@@ -115,7 +115,7 @@ stories:
     name: "Seal-prevention negative-write gate & livelock escape (F6) — anti-stuck base (criterion #7)"
     file: "production/epics/villager-ai-behavior/story-016-seal-prevention-and-livelock.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete
     owner: "ai-programmer"
     estimate_days: 1.0
     blocker: "depends on villager-ai-015 (in-sprint), 003/011/012 DONE; guarantees no permanent-stuck under player builds"
