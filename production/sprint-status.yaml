@@ -124,7 +124,7 @@ stories:
     name: "ADR-0015 C1 — async concurrency cap + bounded per-chunk gen cost (measured) — opportunistic #5 measured-value close"
     file: "production/epics/voxel-world/story-016-c1-async-cap-gen-cost-tuning.md"
     priority: nice-to-have
-    status: backlog
+    status: complete
     owner: "godot-gdscript-specialist"
     estimate_days: 0.75
     blocker: "#5 baseline closes on certification; pull only if the residency lane clears vox-018 + tick-007 with headroom, OR as vox-018 residency-stall remediation"

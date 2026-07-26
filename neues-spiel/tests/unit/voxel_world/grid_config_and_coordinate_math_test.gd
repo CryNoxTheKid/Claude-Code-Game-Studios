@@ -239,6 +239,89 @@ func test_voxel_world_config_validate_mesh_unload_budget_ms_above_max_clamps_and
 
 
 # ---------------------------------------------------------------------------
+# VoxelWorldConfig — max_concurrent_async_tasks (Story vox-011, re-measured
+# Story vox-016, ADR-0015 Decision §6 / carried tuning item C1) and
+# max_chunk_generation_cost_ms (Story vox-016, new field) defaults +
+# validate() clamp+warn tier
+# ---------------------------------------------------------------------------
+
+func test_voxel_world_config_max_concurrent_async_tasks_default_matches_vox016_measured_value() -> void:
+	# Arrange + Act
+	var config := VoxelWorldConfig.new()
+
+	# Assert — Story vox-016 re-measured both spike caps (32, 64) against
+	# production code and kept 32 (see the field's own doc comment for the
+	# measured worst-frame numbers backing this decision).
+	assert_int(config.max_concurrent_async_tasks).is_equal(32)
+
+
+func test_voxel_world_config_validate_max_concurrent_async_tasks_below_min_clamps_and_warns() -> void:
+	# Arrange
+	var config := VoxelWorldConfig.new()
+	config.max_concurrent_async_tasks = 0
+
+	# Act
+	var issues: Array[String] = config.validate()
+
+	# Assert
+	assert_int(issues.size()).is_equal(1)
+	assert_bool(ConfigResource.has_blocking_issue(issues)).is_false()
+	assert_int(config.max_concurrent_async_tasks).is_equal(VoxelWorldConfig.MAX_CONCURRENT_ASYNC_TASKS_MIN)
+
+
+func test_voxel_world_config_validate_max_concurrent_async_tasks_above_max_clamps_and_warns() -> void:
+	# Arrange
+	var config := VoxelWorldConfig.new()
+	config.max_concurrent_async_tasks = 999999
+
+	# Act
+	var issues: Array[String] = config.validate()
+
+	# Assert
+	assert_int(issues.size()).is_equal(1)
+	assert_bool(ConfigResource.has_blocking_issue(issues)).is_false()
+	assert_int(config.max_concurrent_async_tasks).is_equal(VoxelWorldConfig.MAX_CONCURRENT_ASYNC_TASKS_MAX)
+
+
+func test_voxel_world_config_max_chunk_generation_cost_ms_default_matches_vox016_measured_bound() -> void:
+	# Arrange + Act
+	var config := VoxelWorldConfig.new()
+
+	# Assert — Story vox-016 recorded regression-guard bound (~4.7x headroom
+	# over the measured p95 compute-only per-chunk cost of 0.212 ms; see the
+	# field's own doc comment).
+	assert_float(config.max_chunk_generation_cost_ms).is_equal_approx(1.0, 0.0001)
+
+
+func test_voxel_world_config_validate_max_chunk_generation_cost_ms_below_min_clamps_and_warns() -> void:
+	# Arrange
+	var config := VoxelWorldConfig.new()
+	config.max_chunk_generation_cost_ms = -1.0
+
+	# Act
+	var issues: Array[String] = config.validate()
+
+	# Assert
+	assert_int(issues.size()).is_equal(1)
+	assert_bool(ConfigResource.has_blocking_issue(issues)).is_false()
+	assert_float(config.max_chunk_generation_cost_ms).is_equal_approx(VoxelWorldConfig.CHUNK_GENERATION_COST_MS_MIN, 0.0001)
+
+
+func test_voxel_world_config_validate_max_chunk_generation_cost_ms_above_max_clamps_and_warns() -> void:
+	# Arrange
+	var config := VoxelWorldConfig.new()
+	config.max_chunk_generation_cost_ms = 999999.0
+
+	# Act
+	var issues: Array[String] = config.validate()
+
+	# Assert
+	assert_int(issues.size()).is_equal(1)
+	assert_bool(ConfigResource.has_blocking_issue(issues)).is_false()
+	assert_float(config.max_chunk_generation_cost_ms).is_equal_approx(VoxelWorldConfig.CHUNK_GENERATION_COST_MS_MAX, 0.0001)
+
+
+# ---------------------------------------------------------------------------
 # VoxelWorldConfig.validate() — BLOCKING cross-value invariant (min_y <= max_y)
 # ---------------------------------------------------------------------------
 

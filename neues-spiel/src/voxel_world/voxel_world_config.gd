@@ -82,11 +82,22 @@ const SETTLEMENT_RADIUS_CHUNKS_MAX: int = 32
 ## Safe range for [member max_concurrent_async_tasks] (Story vox-011,
 ## ADR-0015 Decision §6's `MAX_CONCURRENT_ASYNC_TASKS` -- "a config knob" the
 ## spike measured at 32 and 64 with the worst frame nearly identical between
-## them, i.e. "the exact cap is not load-bearing" -- Story 016 measures/
-## records the tuned production value; this range only guards against a
-## degenerate 0-or-negative or absurdly large value).
+## them, i.e. "the exact cap is not load-bearing" -- Story 016 measured/
+## recorded the tuned production value (see [member
+## max_concurrent_async_tasks]'s own doc comment); this range only guards
+## against a degenerate 0-or-negative or absurdly large value).
 const MAX_CONCURRENT_ASYNC_TASKS_MIN: int = 1
 const MAX_CONCURRENT_ASYNC_TASKS_MAX: int = 128
+
+## Safe range for [member max_chunk_generation_cost_ms] (Story vox-016,
+## ADR-0015 carried tuning item C1 -- "the per-chunk generation cost must be
+## bounded"). This range is this story's own choice, same "spike-tuned knob,
+## not a GDD Tuning Knob" rationale as [constant REGION_SIZE_CHUNKS_MIN]/
+## [constant MAX] -- wide enough to record a sub-millisecond measured value
+## while still catching a degenerate zero-or-negative bound that would make
+## the recorded regression guard meaningless.
+const CHUNK_GENERATION_COST_MS_MIN: float = 0.001
+const CHUNK_GENERATION_COST_MS_MAX: float = 1000.0
 
 ## Safe range for [member page_budget_ms]/[member evict_budget_ms] (Story
 ## vox-012, ADR-0015 Decision §1 -- "a time budget... validated at 4.0 ms
@@ -195,8 +206,68 @@ const REGION_DIRECTORY_DEFAULT: String = "user://regions"
 ## needs paging in/out when this cap is already saturated simply stays
 ## queued for a later call -- it is NEVER read/regenerated/flushed
 ## synchronously as a fallback (ADR-0015 Decision §6: "a synchronous fallback
-## IS the failure mode"). [TR-voxel-world-053]
+## IS the failure mode").
+##
+## Story vox-016 re-measurement (this revision, ADR-0015 carried tuning item
+## C1): re-measured against the REAL production [VoxelWorldGrid]/[method
+## update_residency] (never the throwaway `prototypes/storage-residency-
+## spike/` code) via `tools/vox016_residency_tuning_measurement.gd` -- a
+## full-span corridor traverse at the shipped [CameraInputConfig]'s own real
+## max camera speed (`distance_max * pan_speed_factor` = 60.0 * 0.7 = 42.0
+## cells/sec -- NOT the spike's stale 144 cells/sec, which was derived from
+## an earlier prototype `camera_input.gd`'s now-superseded constants, never
+## the shipped production config), at both candidate caps (32, 64), on a
+## 2000x2000-cell world (the shipped `world_width_cells`/`world_depth_cells`
+## default), 3 full one-way legs, 8,397 `update_residency()` calls sampled
+## per cap. MEASURED (2026-07-26): cap 32 -- worst 5.512 ms, p95 3.927 ms,
+## avg 2.369 ms; cap 64 -- worst 10.727 ms, p95 2.836 ms, avg 2.359 ms. Both
+## caps kept the worst `update_residency()` call comfortably inside the
+## 16.6 ms frame budget (cap 32 at 3.0x headroom, cap 64 at 1.5x headroom) --
+## confirming the spike's own "the exact cap is not load-bearing" finding
+## holds on production code, not just the spike's synthetic terrain-gen
+## formula (cap 32's worst frame is, if anything, LOWER than cap 64's here).
+## **Kept at 32** (the already-shipped value) rather than moved to 64 --
+## there was no measured benefit to the larger cap (worse worst-frame, only
+## a marginally better p95), and a smaller cap leaves more
+## `WorkerThreadPool` headroom for other systems (mesh building, Villager
+## AI) sharing the same pool. See `production/qa/smoke-2026-07-26.md` for
+## the full measured numbers.
+## Because cap-miss = "stay queued," not "run synchronously" (Story 011),
+## this value is NON-CRITICAL to correctness -- never mistake it for a hard
+## correctness threshold. [TR-voxel-world-053]
 @export var max_concurrent_async_tasks: int = 32
+
+## Recorded, MEASURED per-chunk terrain-generation cost bound, milliseconds
+## (Story vox-016, ADR-0015 carried tuning item C1: "the per-chunk
+## generation cost must be bounded"). This is NOT a runtime throttle --
+## ADR-0015 Decision §6 forbids any synchronous fallback/preemption of an
+## in-flight [WorkerThreadPool] task ("a synchronous fallback IS the failure
+## mode"), so this value cannot and does not cap [method
+## VoxelWorldGrid._bg_regenerate_from_seed]'s actual wall time. It is a
+## recorded REGRESSION GUARD: `tools/vox016_residency_tuning_measurement.gd`
+## Phase 0 measures the CURRENT production per-chunk regen cost DIRECTLY --
+## the exact `static` pure functions [method
+## VoxelWorldGrid._bg_regenerate_from_seed] calls
+## ([method VoxelWorldGrid._pure_terrain_noise], [method
+## VoxelWorldGrid._pure_terrain_height]), timed in isolation from
+## [WorkerThreadPool] dispatch/polling overhead -- over 40 distinct
+## never-before-touched chunks. MEASURED (2026-07-26): avg 0.166 ms, p95
+## 0.212 ms, worst 0.226 ms per chunk (single-octave [FastNoiseLite] height
+## per column, `FRACTAL_NONE`, no tree stamping, production
+## [constant VoxelWorldGrid.CHUNK_SIZE] = 16 footprint). This value is set
+## to 1.0 ms -- roughly 4.7x headroom over the measured p95 (4.4x over the
+## measured worst sample) -- a future change that makes terrain generation
+## dramatically more expensive (added noise octaves, tree stamping, etc.)
+## should be checked against this recorded bound rather than silently
+## eroding ADR-0015's "regen_worst = 0.00 ms by construction" async
+## guarantee. (The tool's Phase 1 also reports a dispatch+poll wall-time
+## number for the same chunks, ~2.0 ms -- that number is dominated by
+## [method VoxelWorldGrid.wait_for_async_residency_idle]'s own ~1 ms polling
+## granularity, NOT real compute cost, and is deliberately NOT what this
+## bound is measured against; see the tool's own class doc comment.) See
+## `production/qa/smoke-2026-07-26.md` for the full measured numbers.
+## [TR-voxel-world-053]
+@export var max_chunk_generation_cost_ms: float = 1.0
 
 ## Per-frame TIME budget (milliseconds) for PAGE-IN work -- integrating an
 ## already-finished background read result into [member _chunks] AND
@@ -339,6 +410,12 @@ func validate() -> Array[String]:
 			[MAX_CONCURRENT_ASYNC_TASKS_MIN, MAX_CONCURRENT_ASYNC_TASKS_MAX, max_concurrent_async_tasks]
 		)
 		max_concurrent_async_tasks = clampi(max_concurrent_async_tasks, MAX_CONCURRENT_ASYNC_TASKS_MIN, MAX_CONCURRENT_ASYNC_TASKS_MAX)
+	if max_chunk_generation_cost_ms < CHUNK_GENERATION_COST_MS_MIN or max_chunk_generation_cost_ms > CHUNK_GENERATION_COST_MS_MAX:
+		issues.append(
+			"max_chunk_generation_cost_ms out of range [%s, %s], got %s -- clamped" %
+			[CHUNK_GENERATION_COST_MS_MIN, CHUNK_GENERATION_COST_MS_MAX, max_chunk_generation_cost_ms]
+		)
+		max_chunk_generation_cost_ms = clampf(max_chunk_generation_cost_ms, CHUNK_GENERATION_COST_MS_MIN, CHUNK_GENERATION_COST_MS_MAX)
 	if page_budget_ms < STREAM_BUDGET_MS_MIN or page_budget_ms > STREAM_BUDGET_MS_MAX:
 		issues.append(
 			"page_budget_ms out of range [%s, %s], got %s -- clamped" %

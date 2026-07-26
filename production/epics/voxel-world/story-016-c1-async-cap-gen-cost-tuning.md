@@ -1,12 +1,12 @@
 # Story 016: ADR-0015 C1 — async concurrency cap + bounded per-chunk gen cost (measured)
 
 > **Epic**: Voxel World / Grid Data
-> **Status**: Ready
+> **Status: Complete (2026-07-26 — 944/944 suite green, parent-verified; #5 upgraded to measured values)
 > **Layer**: Presentation (world-storage residency tier)
 > **Type**: Config/Data
 > **Estimate**: 0.5–1 day
 > **Manifest Version**: 2026-07-23
-> **Last Updated**: (set by /dev-story)
+> **Last Updated**: 2026-07-26
 
 ## Context
 
