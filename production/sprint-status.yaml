@@ -74,7 +74,7 @@ stories:
     name: "Outside-connection trace & Room/Sealed verdict — the epic's mechanical heart"
     file: "production/epics/build-validation-navigability/story-004-outside-connection-trace-and-verdict.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete
     owner: "godot-gdscript-specialist"
     estimate_days: 1.5
     blocker: "depends on build-validation-003 + 002 (in-sprint). Largest single story; do NOT let it sit on the last day — 005 and 010 both wait on it. AC10: the cozy carport IS a valid room"

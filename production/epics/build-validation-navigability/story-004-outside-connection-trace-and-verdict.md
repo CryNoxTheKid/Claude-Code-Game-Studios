@@ -1,7 +1,7 @@
 # Story 004: Outside-connection trace & Room/Sealed verdict
 
 > **Epic**: Build Validation & Navigability
-> **Status**: Ready
+> **Status: Complete (2026-07-26 — 1083/1083 suite green 0 orphans, parent-verified)
 > **Layer**: Feature
 > **Type**: Logic
 > **Estimate**: ~1.5 agent-days
