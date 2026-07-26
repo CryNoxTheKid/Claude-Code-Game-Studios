@@ -185,6 +185,25 @@
 ## [GameWorld], after real terrain is confirmed resident. [method _process]
 ## additionally gains the per-frame residency-drive line documented on that
 ## method itself -- vox-018's own named seam, now cashed.
+##
+## Story presentation-003 (Villager body view, hit proxy & slice hook; VB-1)
+## additionally hosts [VillagerBodyPresenter] -- structural child, exactly
+## like every other hosted module above -- wired via [method
+## _wire_hosted_modules] with a small anonymous roster-provider [RefCounted]
+## ([member _villager_roster_provider]) whose sole member,
+## `get_villagers() -> Array[VillagerAi]`, delegates to [method get_villagers]
+## (the SAME "one hard-wired villager + spawned roster" list every other
+## consumer already reads). [method spawn_starting_roster] additionally
+## calls [method VillagerBodyPresenter.refresh] immediately after adding each
+## newly-spawned villager, so a real boot (which calls
+## [method spawn_starting_roster] exactly once from [method
+## GameWorld._run_world_genesis]) produces exactly one [VillagerBodyView] per
+## hosted villager, INCLUDING [member _villager_ai] itself (villager_id 0,
+## always present, view created by [method VillagerBodyPresenter.setup]'s own
+## boot-gated initial pass -- see [GameWorld]'s own `setup()` sweep, appended
+## via [method get_injected_tier_modules] below; this class never calls a
+## hosted child's `setup()` itself, per the class doc comment's opening
+## hosting-vs-DI distinction).
 class_name Valley
 extends Node3D
 
@@ -241,6 +260,17 @@ extends Node3D
 ## (villager_id 0); [method get_villagers] reports it first.
 @onready var _villager_ai: VillagerAi = $VillagerAi
 
+## Hosted Needs & Mood System instance (ADR-0001 injected-tier module;
+## `needs-mood-system` epic, stories 001-008; Story needs-mood-010 -- THE
+## CROWN's own production-wiring AC). Structural child only -- see [member
+## _voxel_world]'s own hosting-vs-DI distinction. [method
+## _wire_villager_population] assigns this SAME instance to every hosted
+## [VillagerAi]'s `needs_provider` seam (both [member _villager_ai] and every
+## member [method spawn_starting_roster] creates) -- the moment the landed
+## nil-safe seam becomes live in the shipped game. This is the ONLY call site
+## in `src/` that ever assigns [member VillagerAi.needs_provider].
+@onready var _needs_mood: NeedsMood = $NeedsMood
+
 ## Tuning config for the whole starting roster (Story villager-ai-021,
 ## ADR-0002) -- Resource-typed, Inspector-assigned directly on `Valley.tscn`
 ## (Story scene-004's own established "a Resource export resolves fine from
@@ -279,6 +309,32 @@ var _villager_unstuck_telemetry: VillagerUnstuckTelemetry = null
 ## on why the other three Sub-scope A elements are NOT hosted here.
 @onready var _torch_flicker: TorchFlicker = $TorchFlicker
 
+## Hosted [VillagerBodyPresenter] instance (Presentation Experience story
+## presentation-003). Structural child only -- mirrors [member
+## _torch_flicker]'s own "a real injected-tier module, `setup()` reached
+## only via [GameWorld]'s boot-gated sweep" precedent. [member
+## VillagerBodyPresenter.roster_provider] is code-assigned in [method
+## _wire_hosted_modules] to [member _villager_roster_provider] below.
+@onready var _villager_body_presenter: VillagerBodyPresenter = $VillagerBodyPresenter
+
+## Small anonymous roster-provider [RefCounted] (Story presentation-003) --
+## its sole member, `get_villagers() -> Array[VillagerAi]`, delegates to
+## [method get_villagers] (the SAME "one hard-wired villager + spawned
+## roster" list every other consumer already reads). Exists purely so
+## [VillagerBodyPresenter]'s duck-typed `roster_provider` seam has a live
+## object to call without holding a direct `Valley` reference of its own
+## (mirrors this codebase's established small-mock/small-adapter precedent).
+class _ValleyRosterProvider:
+	var _valley: Valley = null
+
+	func _init(valley: Valley) -> void:
+		_valley = valley
+
+	func get_villagers() -> Array[VillagerAi]:
+		return _valley.get_villagers()
+
+var _villager_roster_provider: _ValleyRosterProvider = null
+
 ## The shared, population-wide [VillagerNavGraph] instance [method
 ## _wire_villager_population] constructs -- exposed read-only for tests/
 ## future world-generation stories that need to (re)build it once real
@@ -314,6 +370,8 @@ func _wire_hosted_modules() -> void:
 	_construction_tick_loop.voxel_world = _voxel_world
 	_villager_ai.voxel_world = _voxel_world
 	_torch_flicker.light = _ambient_torch_light
+	_villager_roster_provider = _ValleyRosterProvider.new(self)
+	_villager_body_presenter.roster_provider = _villager_roster_provider
 
 
 ## Story vox-018's ONE new per-frame hook (class doc comment) -- reads the
@@ -364,6 +422,7 @@ func _wire_villager_population() -> void:
 	_villager_ai.scheduler = _villager_deciding_scheduler
 	_villager_ai.nav_graph = _villager_nav_graph
 	_villager_ai.unstuck_telemetry = _villager_unstuck_telemetry
+	_villager_ai.needs_provider = _needs_mood
 	_villager_nav_graph.subscribe_to_voxel_world(_voxel_world, _villager_ai)
 
 
@@ -411,6 +470,11 @@ func get_construction_tick_loop() -> ConstructionTickLoop:
 ## Returns the hosted Villager AI instance.
 func get_villager_ai() -> VillagerAi:
 	return _villager_ai
+
+
+## Returns the hosted Needs & Mood System instance (Story needs-mood-010).
+func get_needs_mood() -> NeedsMood:
+	return _needs_mood
 
 
 ## Returns the shared, population-wide [VillagerNavGraph] instance [method
@@ -505,9 +569,17 @@ func spawn_starting_roster() -> Array[VillagerAi]:
 		next_id,
 	)
 	for villager: VillagerAi in new_villagers:
+		villager.needs_provider = _needs_mood
 		add_child(villager)
 		villager.setup()
 		_spawned_villagers.append(villager)
+	# Story presentation-003: re-sync the hosted body-view set so every newly
+	# spawned villager gets a real VillagerBodyView -- [member
+	# _villager_body_presenter]'s own `setup()` (boot-gated, [GameWorld]'s own
+	# sweep) already created a view for [member _villager_ai] (villager_id 0)
+	# before any roster spawn can run; this call only ADDS views for the
+	# entries this method just created, never touching that one.
+	_villager_body_presenter.refresh()
 	return new_villagers
 
 
@@ -521,6 +593,12 @@ func get_torch_flicker() -> TorchFlicker:
 	return _torch_flicker
 
 
+## Returns the hosted [VillagerBodyPresenter] instance (Story
+## presentation-003).
+func get_villager_body_presenter() -> VillagerBodyPresenter:
+	return _villager_body_presenter
+
+
 ## The GameWorld assembly seam (Story scene-004): every hosted tier module
 ## this Valley owns, in the load-bearing DI order [method
 ## GameWorld._setup_injected_tier] will call `setup()` in (Voxel World grid,
@@ -528,6 +606,11 @@ func get_torch_flicker() -> TorchFlicker:
 ## placed here so both its `grid`/`mesher` dependencies have already
 ## completed their own `setup()` by the time this streamer's runs), then
 ## Camera & Input, then the four Building System modules, then Villager AI).
+## Story needs-mood-010 appends [NeedsMood]; story presentation-003 appends
+## [VillagerBodyPresenter] LAST -- its own `setup()` reads [method
+## get_villagers] (already valid: [member _villager_ai] exists from this
+## same `_ready()` pass), creating that villager's initial
+## [VillagerBodyView] before any roster spawn can ever run.
 ## [GameWorld] calls this exactly once, from
 ## [method GameWorld._on_database_settled], AFTER [method
 ## GameWorld._attach_valley] has already attached this instance -- appending
@@ -548,6 +631,8 @@ func get_injected_tier_modules() -> Array[Node]:
 		_placement_pick,
 		_commit_pipeline,
 		_construction_tick_loop,
+		_needs_mood,
 		_villager_ai,
 		_torch_flicker,
+		_villager_body_presenter,
 	]

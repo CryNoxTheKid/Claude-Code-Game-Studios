@@ -983,6 +983,23 @@ func get_current_cell() -> Vector3i:
 	return current_cell
 
 
+## PRESENTATION ONLY. Read-only accessor over [member _visual_position]
+## (Presentation Experience story presentation-003, VB-1 §2) -- returns
+## whatever [method _process] most recently computed, unmodified. Never read
+## this from any logic path -- occupancy, targeting, walled-in and
+## seal-prevention checks all read [method get_current_cell] instead
+## (ADR-0009 §2). The interpolation itself stays exactly where ADR-0009 put
+## it ([method _process]); this accessor adds no computation, caches
+## nothing, and is the ONE sanctioned call-site the presentation tier's
+## [VillagerBodyView] pulls from every frame (pull-only, re-read every
+## frame, never cached -- "one writer, N readers, zero copies"). This is
+## purely additive: [member _visual_position] itself, [method _process],
+## and every existing consumer of [member current_cell]/[method
+## get_current_cell] are completely unchanged by this method's existence.
+func get_visual_position() -> Vector3:
+	return _visual_position
+
+
 ## Cosmetic-only visual-position recompute (ADR-0009 Decision §1 Key
 ## Interfaces, Control Manifest Core Layer Required Pattern: "Visual lerp...
 ## each frame"). This is [VillagerAi]'s ONE deliberate, narrowly-scoped

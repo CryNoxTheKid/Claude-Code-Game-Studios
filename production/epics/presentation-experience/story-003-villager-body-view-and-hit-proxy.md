@@ -1,7 +1,7 @@
 # Story 003: Villager body view, hit proxy & slice hook — the substrate three epics are blocked on
 
 > **Epic**: Presentation Experience (Ambient Life & Loop-Payoff Communication)
-> **Status**: Ready
+> **Status: Complete (2026-07-27 — 1298/1298 suite green 0 orphans, parent-verified)
 > **Layer**: Presentation
 > **Type**: Integration
 > **Tier**: **CORE** (a hard blocker for four stories across two other epics)

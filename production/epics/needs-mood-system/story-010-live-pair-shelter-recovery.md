@@ -1,7 +1,7 @@
 # Story 010: Live-pair shelter recovery round trip (AC34, milestone criterion #5)
 
 > **Epic**: Needs & Mood System
-> **Status**: Ready
+> **Status: Complete (2026-07-27 — 1298/1298 suite green 0 orphans, parent-verified)
 > **Layer**: Feature
 > **Type**: Integration
 > **Estimate**: ~1.5 agent-days

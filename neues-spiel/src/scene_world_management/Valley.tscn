@@ -1,4 +1,4 @@
-[gd_scene load_steps=19 format=3]
+[gd_scene load_steps=21 format=3]
 
 [ext_resource type="Script" path="res://src/scene_world_management/valley.gd" id="1_valley"]
 [ext_resource type="Script" path="res://src/voxel_world/voxel_world_grid.gd" id="2_voxelgrid"]
@@ -18,6 +18,9 @@
 [ext_resource type="Resource" path="res://data/config/villager_ai_config.tres" id="14_villagercfg"]
 [ext_resource type="Script" path="res://src/presentation/torch_flicker.gd" id="15_torchflicker"]
 [ext_resource type="Resource" path="res://data/config/ambient_life_config.tres" id="16_ambientcfg"]
+[ext_resource type="Script" path="res://src/needs_mood/needs_mood.gd" id="17_needsmood"]
+[ext_resource type="Resource" path="res://data/config/needs_mood_config.tres" id="18_needsmoodcfg"]
+[ext_resource type="Script" path="res://src/presentation/villager_body_presenter.gd" id="19_villagerbodypresenter"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_torchindicator"]
 shading_mode = 0
@@ -67,6 +70,10 @@ script = ExtResource("13_villagerai")
 config = ExtResource("14_villagercfg")
 villager_id = 0
 
+[node name="NeedsMood" type="Node" parent="."]
+script = ExtResource("17_needsmood")
+config = ExtResource("18_needsmoodcfg")
+
 [node name="AmbientTorchLight" type="OmniLight3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.5, 1.5, 0.5)
 light_color = Color(1, 0.93, 0.8, 1)
@@ -78,3 +85,6 @@ mesh = SubResource("SphereMesh_torchindicator")
 [node name="TorchFlicker" type="Node" parent="."]
 script = ExtResource("15_torchflicker")
 config = ExtResource("16_ambientcfg")
+
+[node name="VillagerBodyPresenter" type="Node3D" parent="."]
+script = ExtResource("19_villagerbodypresenter")

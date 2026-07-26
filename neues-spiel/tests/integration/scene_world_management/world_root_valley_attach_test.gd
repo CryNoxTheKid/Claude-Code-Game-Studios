@@ -175,7 +175,13 @@ func test_hosted_building_system_and_villager_ai_modules_are_children_of_valley(
 	# (AC-ROSTER-AFTER-WORLD), and that method add_child()s each spawned
 	# [VillagerAi] directly onto this Valley instance (shipped MVP default
 	# `starting_villager_count = 1`). Updated consciously, not incidentally
-	# (11 -> 12).
+	# (11 -> 12). Story needs-mood-010 (THE CROWN's own production-wiring AC)
+	# adds a THIRTEENTH -- the hosted [NeedsMood] instance [method
+	# _wire_villager_population] assigns to every [VillagerAi]'s
+	# `needs_provider` seam (12 -> 13). Story presentation-003 (Villager body
+	# view, hit proxy & slice hook) adds a FOURTEENTH -- the hosted
+	# [VillagerBodyPresenter], concurrent with needs-mood-010 in this same
+	# sprint; updated consciously here, not incidentally (13 -> 14).
 	var world: GameWorld = auto_free(GameWorld.new())
 	var database: MockResourceItemDatabase = auto_free(MockResourceItemDatabase.new())
 	database.configure_ready_immediately()
@@ -187,7 +193,7 @@ func test_hosted_building_system_and_villager_ai_modules_are_children_of_valley(
 
 	# Assert
 	var valley: Valley = world.get_valley() as Valley
-	assert_int(valley.get_child_count()).is_equal(12)
+	assert_int(valley.get_child_count()).is_equal(14)
 	assert_object(valley.get_voxel_world_mesher()).is_not_null()
 	assert_object(valley.get_voxel_world_mesh_streamer()).is_not_null()
 	assert_object(valley.get_tool_state_machine()).is_not_null()
@@ -197,6 +203,9 @@ func test_hosted_building_system_and_villager_ai_modules_are_children_of_valley(
 	assert_object(valley.get_villager_ai()).is_not_null()
 	assert_object(valley.get_ambient_torch_light()).is_not_null()
 	assert_object(valley.get_torch_flicker()).is_not_null()
+	assert_object(valley.get_needs_mood()).is_not_null()
+	assert_object(valley.get_villager_ai().needs_provider).is_same(valley.get_needs_mood())
+	assert_object(valley.get_villager_body_presenter()).is_not_null()
 
 
 # ---------------------------------------------------------------------------

@@ -115,13 +115,20 @@ func test_ac_assembly_gameworld_wires_all_tier_modules_into_valley_and_boots_act
 	# Ambient torch flicker (M01 condition C4, production/milestones/
 	# milestone-01-review-2026-07-26.md)
 	assert_object(valley.get_torch_flicker()).is_not_null()
+	# Needs & Mood System (Story needs-mood-010 -- THE CROWN's production wiring)
+	assert_object(valley.get_needs_mood()).is_not_null()
+	# Villager body presenter (Story presentation-003 -- concurrent with
+	# needs-mood-010 in this same sprint)
+	assert_object(valley.get_villager_body_presenter()).is_not_null()
 
 	# The assembly seam (GameWorld._gather_valley_tier_modules) fed exactly
-	# these ten (story vox-018 added the mesh streamer as a ninth; M01
-	# condition C4 added the torch flicker as a tenth), in the load-bearing DI
-	# order Valley itself reports.
+	# these twelve (story vox-018 added the mesh streamer as a ninth; M01
+	# condition C4 added the torch flicker as a tenth; story needs-mood-010
+	# added Needs & Mood as an eleventh; story presentation-003 added the
+	# villager body presenter as a twelfth -- updated consciously, not
+	# incidentally), in the load-bearing DI order Valley itself reports.
 	assert_array(world.injected_tier_modules).contains_exactly(valley.get_injected_tier_modules())
-	assert_int(world.injected_tier_modules.size()).is_equal(10)
+	assert_int(world.injected_tier_modules.size()).is_equal(12)
 
 
 func test_ac_assembly_hosted_modules_ran_through_boot_gated_setup_never_their_own_ready() -> void:
