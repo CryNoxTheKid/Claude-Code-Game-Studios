@@ -1,17 +1,19 @@
 # Epics Index
 
-Last Updated: 2026-07-24
+Last Updated: 2026-07-26
 Engine: Godot 4.7-stable
 Manifest Version referenced: 2026-07-23
-Milestone: 01 — Foundation + Core (Playable Integrated Build)
+Milestone: 01 — Foundation + Core (Playable Integrated Build) · 02 — MVP Completion (Feature layer opening)
 
 Scope of this pass: Foundation + Core layers (per architecture.md layer map), plus
 the **presentation-experience** micro-epic which houses the two M01 CD-protected
 experience items (exception to the layer order — Art-Bible-driven, not a full
-Presentation-layer pass). Feature-layer systems (Build Validation & Navigability,
-Needs & Mood) and the full Presentation-layer UI systems (Building UI, Villager
-Info UI) remain **Milestone 02** — their epics are created when those layers are
-approached (`/create-epics layer: feature`).
+Presentation-layer pass).
+
+**Feature layer opened 2026-07-26** (`/create-epics layer: feature`, first half):
+**build-validation-navigability** is created and storied as a gate on Sprint 09
+planning (M02 risk R2). Still outstanding for M02: the **needs-mood-system**
+Feature epic and the Presentation-layer UI epics (Building UI, Villager Info UI).
 
 | Epic | Layer | System / Scope | GDD | Stories | Status |
 |------|-------|----------------|-----|---------|--------|
@@ -23,6 +25,7 @@ approached (`/create-epics layer: feature`).
 | resource-item-database | Foundation | Item/material definitions + boot gate + immutable queries | design/gdd/resource-item-database.md | 9 stories | Ready |
 | building-system | Core | Project lifecycle, tools, change orders, undo, demolition | design/gdd/building-system.md | 33 stories (Block A foundation 019–033 + Block B slice 001–018) | Ready |
 | villager-ai-behavior | Core | FSM, AStar3D, occupancy, threading, anti-stuck | design/gdd/villager-ai-behavior.md | 25 stories | Ready |
+| build-validation-navigability | Feature | Room/enclosure detection, own BFS reachability trace, shelter classification, four-signal contract + AC36 property corpus (**M02 Cluster A head — PROTECTED**; created 2026-07-26) | design/gdd/build-validation-navigability.md | 10 stories | Ready |
 | presentation-experience | Presentation | Ambient-life wave 1 + loop-payoff communication scaffolding (the two M01 CD-protected items) | N/A — Art Bible §6.5/§5.6 (GDD-less, foundation-spine precedent) | 2 stories | Ready |
 
 ## Milestone 01 Tech-Debt & CD-Item Placement
@@ -46,8 +49,30 @@ GDD module, no decision-owning ADR). The stories are dependency-gated (mesher vo
 villager FSM/movement) and scheduled for the Presentation pass (Sprint 5+), not Sprint 4.
 Owner remains godot-specialist per the milestone; **cutting either still requires CD sign-off.**
 
+## Milestone 02 Epic Placement
+
+| M02 Criterion | Type | Lands In | Note |
+|---------------|------|----------|------|
+| #1 Build Validation implemented (AC1–35, 37, 38) | Cluster A (PROTECTED) | **build-validation-navigability** | AC26 deferred to VS with Save/Load |
+| #2 Reachability property corpus green ≤ 60 s in CI | Cluster A (PROTECTED) | **build-validation-navigability / story-010** | M02 risk R3 — technical-director-owned |
+| #5 Payoff loop closes (analysis half — shelter flag) | Cluster A (PROTECTED) | **build-validation-navigability / story-006** | `shelter_status_changed` is what the needs-mood epic consumes |
+| #7 Loop-payoff scaffolding fires real signals | Cluster A (PROTECTED) | **build-validation-navigability / story-009** | Wires into `presentation-experience / story-002`'s surface |
+| #3 / #4 Needs & Mood + real-time-rate pass | Cluster A (PROTECTED) | needs-mood-system | **Epic not yet created** |
+| #10 Building UI / Villager Info UI | Cluster D | building-ui, villager-info-ui | **Epics not yet created** |
+
+**Cross-epic dependencies introduced 2026-07-26**: build-validation stories 002
+and 006 hard-depend on `building-028` (furniture placement) — the voxel layer has
+no furniture representation today. Story 009 depends on
+`presentation-experience / story-002`'s landed surface. See that epic's
+**Known Conflicts With Landed Code** section for the five items that need a
+decision before the stories they block.
+
 ## Next Step
 
 Run `/create-stories [epic-slug]` per epic (Foundation first, then Core).
 Foundation + Core epics are the Pre-Production → Production gate input —
 run `/gate-check production` once stories exist.
+
+For Milestone 02: create the remaining three epics (`needs-mood-system`,
+`building-ui`, `villager-info-ui`) before S09 planning closes — R2 treats this as
+a gate on S09, not as S09 content.
