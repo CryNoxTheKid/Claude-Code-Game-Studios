@@ -13,9 +13,15 @@ Presentation-layer pass).
 **Feature layer opened 2026-07-26** (`/create-epics layer: feature`): both
 Feature epics — **build-validation-navigability** and **needs-mood-system** — are
 created and storied as a gate on Sprint 09 planning (M02 risk R2). Together they
-are Milestone 02's **Cluster A (PROTECTED)**, the payoff mechanic. Still
-outstanding for M02: the Presentation-layer UI epics (**building-ui**,
-**villager-info-ui**), which hard-depend on Cluster A.
+are Milestone 02's **Cluster A (PROTECTED)**, the payoff mechanic.
+
+**Presentation-layer UI epics created 2026-07-26**: **building-ui** (18 stories)
+and **villager-info-ui** (7 stories) — Milestone 02's **Cluster D**, the last
+open item on the S09 epic/story-creation gate (M02 risk R2). All four M02 epics
+now exist and are storied. Cluster D is trimmed **second** by the Cut-Lever
+Policy; each epic marks which stories are its minimum-viable core (lever steps
+4/5) and which are the polish tail. R10's split holds: only villager-info-ui is
+truly Cluster-A-gated — building-ui needs only Cluster 0's `building-001`/`023`.
 
 | Epic | Layer | System / Scope | GDD | Stories | Status |
 |------|-------|----------------|-----|---------|--------|
@@ -30,6 +36,8 @@ outstanding for M02: the Presentation-layer UI epics (**building-ui**,
 | needs-mood-system | Feature | Need decay/state machine, 3-rung recovery ladder (the Building→Needs seam), mood EMA, why-string; **M02 Cluster A — PROTECTED** | design/gdd/needs-mood-system.md | 12 stories (10 M02-blocking + 1 Advisory + 1 VS-tier) | Ready |
 | build-validation-navigability | Feature | Room/enclosure detection, own BFS reachability trace, shelter classification, four-signal contract + AC36 property corpus (**M02 Cluster A head — PROTECTED**; created 2026-07-26) | design/gdd/build-validation-navigability.md | 10 stories | Ready |
 | presentation-experience | Presentation | Ambient-life wave 1 + loop-payoff communication scaffolding (the two M01 CD-protected items) | N/A — Art Bible §6.5/§5.6 (GDD-less, foundation-spine precedent) | 2 stories | Ready |
+| building-ui | Presentation | Build HUD (toolbar/palette/stepper/undo/time), Build Mode + 4-step Esc chain, hover-suppression gate, Selection routing, ghost/marker/hover presentation, Projects Panel, toast+anchor surface, Slice View, higher-level tools; **M02 Cluster D — trimmed 2nd** (created 2026-07-26) | design/gdd/building-ui.md + design/ux/hud.md, projects-panel.md | 18 stories (12 minimum-viable core + 6 polish tail) | Ready |
+| villager-info-ui | Presentation | Villager panel (name/6-state activity/need bar/mood band/why-string verbatim), villager hit query + selection rules, overhead distress icons, hover + selection outline; **M02 Cluster D — trimmed 2nd, the A-gated half** (created 2026-07-26) | design/gdd/villager-info-ui.md + design/ux/villager-panel.md, hud.md | 7 stories (4 minimum-viable core + 3 polish tail) | Ready |
 
 ## Milestone 01 Tech-Debt & CD-Item Placement
 
@@ -61,7 +69,7 @@ Owner remains godot-specialist per the milestone; **cutting either still require
 | #5 Payoff loop closes (analysis half — shelter flag) | Cluster A (PROTECTED) | **build-validation-navigability / story-006** | `shelter_status_changed` is what the needs-mood epic consumes |
 | #7 Loop-payoff scaffolding fires real signals | Cluster A (PROTECTED) | **build-validation-navigability / story-009** | Wires into `presentation-experience / story-002`'s surface |
 | #3 / #4 Needs & Mood + real-time-rate pass | Cluster A (PROTECTED) | needs-mood-system | **Epic not yet created** |
-| #10 Building UI / Villager Info UI | Cluster D | building-ui, villager-info-ui | **Epics not yet created** |
+| #10 Building UI / Villager Info UI | Cluster D | **building-ui** (18), **villager-info-ui** (7) | Created 2026-07-26. Trimmed 2nd; cut-lever step 4 = villager-info-ui → 4-story core, step 5 = building-ui → 12-story core |
 
 **Cross-epic dependencies introduced 2026-07-26**: build-validation stories 002
 and 006 hard-depend on `building-028` (furniture placement) — the voxel layer has
@@ -76,6 +84,18 @@ Run `/create-stories [epic-slug]` per epic (Foundation first, then Core).
 Foundation + Core epics are the Pre-Production → Production gate input —
 run `/gate-check production` once stories exist.
 
-For Milestone 02: create the remaining three epics (`needs-mood-system`,
-`building-ui`, `villager-info-ui`) before S09 planning closes — R2 treats this as
-a gate on S09, not as S09 content.
+For Milestone 02: **the S09 epic/story-creation gate (R2) is now satisfied** — all
+four M02 epics exist and are storied. Before S09 planning closes, escalate the
+decisions the two UI epics surfaced (each epic's **Known Conflicts With Landed
+Code** section names an owner per item). Two need a producer/user call rather than
+a specialist one:
+
+1. **Cluster C ↔ Cluster D cut-lever hazard** (building-ui Known Conflict 4): the
+   Projects Panel's *Pause* / *Fortsetzen* / *Abriss* buttons call `building-006`
+   (C3) and `building-010` (C4) — both on the cut lever, both trimmed **before**
+   Cluster D. Pulling the lever as written ships a panel rendering a lifecycle the
+   player cannot drive.
+2. **Villagers have no body, collider, or public world position**
+   (villager-info-ui Known Conflict 1) — `VillagerAi extends Node`, no `Area3D`
+   anywhere in `src/`. It blocks 3 of that epic's 7 stories and no UI story can
+   resolve it.
