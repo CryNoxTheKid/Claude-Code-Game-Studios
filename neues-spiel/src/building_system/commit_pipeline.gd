@@ -396,6 +396,63 @@ func _all_cells_supported(cells: Array[Vector3i]) -> bool:
 	return true
 
 
+## Preview-only cell-set resolution (Story building-023) -- the EXACT SAME
+## per-tool resolver dispatch [method _on_build_committed] uses for a genuine
+## commit ([method _resolve_cell_set], registered via [method
+## set_cell_set_resolver] by whichever tool is currently wired -- wall/floor/
+## roof/block, Stories 024-027), exposed publicly so a live ghost preview can
+## call it every frame BEFORE any release ever happens. Never creates a
+## [BlueprintCell] and never touches [VoxelWorldGrid] -- [method
+## _resolve_cell_set] itself only ever calls a registered tool's pure static
+## formula function (or [method _default_cell_set]'s placeholder). This is
+## the "preview/commit parity by construction" every tool's own doc comment
+## already promises this future call site ("reusable as-is by a future
+## ghost-preview call site, Story 023").
+func preview_cell_set(is_drag: bool, press_cell: Vector3i, release_cell: Vector3i) -> Array[Vector3i]:
+	assert(is_set_up(), "CommitPipeline.preview_cell_set called before setup()")
+	return _resolve_cell_set(is_drag, press_cell, release_cell)
+
+
+## Bounds-clamp only (Story building-023) -- the EXACT SAME filter [method
+## commit] applies before running its validity gate (Edge Case 1), exposed so
+## a live ghost preview clamps identically without duplicating the filter
+## predicate. Pure w.r.t. this instance's own state -- reads only [member
+## voxel_world].
+func clamp_to_bounds(candidate_cells: Array[Vector3i]) -> Array[Vector3i]:
+	return candidate_cells.filter(
+		func(cell: Vector3i) -> bool: return voxel_world.is_in_bounds(cell)
+	)
+
+
+## Preview-only validity probe (Story building-023) -- reuses the EXACT SAME
+## four checks [method commit] itself runs, in the SAME order, entirely
+## side-effect-free: no [BlueprintCell] is ever created and [signal
+## commit_rejected] is never emitted (that signal is reserved for a genuine
+## commit ATTEMPT -- a live per-frame preview probe asking "would this be
+## valid right now" is not a rejection event, it would spam the signal every
+## frame of a hover). Returns the first failing [enum RejectReason] as its
+## plain [int] ordinal, or `-1` if every check passes (there is no "valid"
+## [enum RejectReason] value to return instead -- mirrors this class's own
+## sentinel conventions elsewhere, e.g. [ADR-0016]'s `-1 = none` for
+## `project_at_cell`). [GhostPreview] (this story) is this method's real
+## caller, on [param in_bounds_cells] (the output of [method clamp_to_bounds])
+## -- calling this on a NOT-yet-clamped set would double-count an
+## out-of-bounds cell against [member CommitPipelineConfig.max_cells_per_command]
+## incorrectly, exactly as [method commit] itself avoids by always clamping
+## first.
+func first_rejection_reason(in_bounds_cells: Array[Vector3i]) -> int:
+	assert(is_set_up(), "CommitPipeline.first_rejection_reason called before setup()")
+	if not _is_selected_item_available():
+		return RejectReason.NO_MATERIAL_SELECTED
+	if in_bounds_cells.size() > config.max_cells_per_command:
+		return RejectReason.CELL_COUNT_EXCEEDS_CAP
+	if not _all_cells_available(in_bounds_cells):
+		return RejectReason.CELL_OCCUPIED
+	if not _all_cells_supported(in_bounds_cells):
+		return RejectReason.FURNITURE_UNSUPPORTED
+	return -1
+
+
 ## Live wiring: reacts to [signal PlacementPick.build_committed] (a genuine
 ## release, never an aborted drag -- see that signal's own doc comment) by
 ## resolving a candidate cell set via [method _resolve_cell_set] and calling

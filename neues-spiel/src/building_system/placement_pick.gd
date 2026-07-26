@@ -266,6 +266,22 @@ func get_replace_cell() -> Vector3i:
 	return _current_pick.cell
 
 
+## The ATTACH cell resolved at the moment of the most recently STARTED drag
+## (Story building-023) -- read-only exposure of [member _press_cell], which
+## this class already tracks internally for [signal build_committed]'s own
+## `press_cell` payload (Story building-021). [GhostPreview] (this story) is
+## this getter's real caller: while Dragging, the live preview needs the
+## drag's FROZEN start cell (never re-derived from the current, continuously
+## moving pick) to feed the SAME `press_cell` a genuine release would
+## eventually carry -- mirrors [method get_attach_cell]'s existing "surface-
+## aware target" shape, just reading the frozen press value instead of the
+## live current one. Meaningless before the first valid press this session
+## (defaults to [constant Vector3i.ZERO], matching [member _press_cell]'s own
+## default).
+func get_press_cell() -> Vector3i:
+	return _press_cell
+
+
 ## Whether the highlight overlay is CURRENTLY visible -- a headlessly
 ## assertable property proxy for TR-building-system-092's visual contract
 ## (see class doc comment on the highlight's necessarily-partial automated
@@ -509,6 +525,31 @@ func _unhandled_input(event: InputEvent) -> void:
 ## [method Viewport.set_input_as_handled], clears the locked-plane state, and
 ## reverts to [method _unhandled_input]-only listening via
 ## [method Node.set_process_input].
+##
+## **Bug fix (Story building-023 discovery)**: [param release_cell] reads
+## [member _current_pick]'s cell DIRECTLY, never through [method
+## get_attach_cell]. While Dragging, [member _current_pick] comes from
+## [method derive_drag_plane_hit] (Core Rule 3/AC8's locked-plane dispatch),
+## whose returned `cell` IS ALREADY the attach-equivalent working-surface
+## cell -- its `normal` field is a fixed `(0, 1, 0)` convention marker, not a
+## real solid-block face normal (see that method's own doc comment: "always
+## represents the UPWARD-facing working surface... never a picked block's
+## own face"). [method get_attach_cell] unconditionally applies [method
+## derive_attach_cell]'s `+normal` offset, which is only correct for a
+## FRESH raycast hit (a genuine solid block needing the adjacent-empty-cell
+## offset) -- applying it a SECOND time to an already-surface-level
+## locked-plane cell silently shifted every real (frame-elapsed) drag's
+## release one cell too high. Every EXISTING test exercising this path did
+## so either via a synthetic click with zero elapsed frames between press
+## and release (so [member _current_pick] never actually advanced past the
+## press-time fresh-raycast value before this line ran) or by supplying
+## `press_cell`/`release_cell` directly into [CommitPipeline] without going
+## through this method at all -- neither shape could have caught it; this
+## story's [GhostPreview] live-preview re-rasterization is what first drove
+## a real per-frame pick update WHILE Dragging and surfaced the mismatch
+## (see `dda_placement_pick_test.gd`'s
+## `test_input_release_cell_matches_locked_plane_after_a_mid_drag_cursor_move`
+## regression proof).
 func _input(event: InputEvent) -> void:
 	if not is_set_up():
 		return
@@ -521,7 +562,7 @@ func _input(event: InputEvent) -> void:
 	)
 	var cursor_travel_px: float = _press_screen_pos.distance_to(release_screen_pos)
 	var was_drag: bool = PlacementPick.is_drag(cursor_travel_px, config.drag_threshold_px)
-	var release_cell: Vector3i = get_attach_cell()
+	var release_cell: Vector3i = _current_pick.cell
 	tool_state_machine.complete_drag()
 	_has_locked_plane = false
 	get_viewport().set_input_as_handled()

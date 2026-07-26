@@ -78,6 +78,21 @@ func _new_pick(grid: VoxelWorldGrid, machine: ToolStateMachine) -> PlacementPick
 	return pick
 
 
+## A [CameraInput] test double whose [method get_world_ray] returns a fixed,
+## test-controlled ray rather than deriving one from real camera/viewport
+## state (Story building-023 regression test) -- lets a real press-then-move
+## Dragging sequence be driven with two precisely known rays without the
+## heavier SubViewport + camera-rotation rigging this file's own
+## `test_press_with_valid_pick_starts_drag_then_release_completes_it` uses
+## (that test only needs a same-position click; this one needs a genuinely
+## DIFFERENT second ray).
+class _FixedRayCamera:
+	extends CameraInput
+	var ray: WorldRay = WorldRay.new(Vector3.ZERO, Vector3.DOWN)
+	func get_world_ray() -> WorldRay:
+		return ray
+
+
 ## Reads a single `.gd` source file, stripping full-line `#`/`##` doc-comment
 ## lines first — mirrors this codebase's established
 ## `_read_gd_source_without_comments` precedent (`mouse_world_ray_test.gd`,
@@ -371,6 +386,72 @@ func test_press_with_valid_pick_starts_drag_then_release_completes_it() -> void:
 	# actual commit is Story 021's separate, not-yet-built concern.
 	assert_int(machine.get_state()).is_equal(ToolStateMachine.State.TOOL_ARMED)
 	assert_str(String(machine.get_armed_tool())).is_equal("wall")
+
+
+func test_input_release_cell_matches_locked_plane_after_a_mid_drag_cursor_move() -> void:
+	# Regression (Story building-023 discovery): `_input()`'s emitted
+	# `release_cell` must read the locked-plane pick's cell DIRECTLY, never
+	# through `get_attach_cell()` — that method's `+normal` offset is only
+	# correct for a FRESH raycast hit (a genuine solid block needing the
+	# adjacent-empty-cell offset), and double-counts it against
+	# `derive_drag_plane_hit`'s already-surface-level cell (fixed `(0,1,0)`
+	# normal convention, not a real face normal — see that method's own doc
+	# comment). This ONLY manifests once at least one pick update happens
+	# WHILE Dragging, after the press (a same-frame click, as in this file's
+	# own `test_press_with_valid_pick_starts_drag_then_release_completes_it`,
+	# never advances `_current_pick` past the press-time fresh-raycast value
+	# before release runs, so it could never have caught this) — reproduced
+	# here via a fixed-ray test double so the mid-drag cursor move is
+	# deterministic.
+	var grid: VoxelWorldGrid = _new_grid_with_solid_cell(Vector3i(5, 3, 5))
+	var machine: ToolStateMachine = _new_machine_armed()
+	var camera := _FixedRayCamera.new()
+	camera.ray = WorldRay.new(Vector3(5.5, 20.0, 5.5), Vector3(0.0, -1.0, 0.0))
+	var pick: PlacementPick = auto_free(PlacementPick.new())
+	pick.camera_input = auto_free(camera)
+	pick.voxel_world = grid
+	pick.tool_state_machine = machine
+	pick.config = PlacementPickConfig.new()
+	pick.setup()
+	# A live Viewport is required — `_input()`'s release handler calls
+	# `get_viewport().set_input_as_handled()` (mirrors this file's own
+	# `test_press_with_valid_pick_starts_drag_then_release_completes_it`
+	# rigging).
+	var viewport := SubViewport.new()
+	add_child(viewport)
+	auto_free(viewport)
+	viewport.add_child(pick)
+
+	var received: Array = []
+	pick.build_committed.connect(func(is_drag: bool, press_cell: Vector3i, release_cell: Vector3i) -> void:
+		received.append([is_drag, press_cell, release_cell])
+	)
+
+	# Act — press at (5,4,5)'s attach height (4), locking the plane.
+	var press := InputEventMouseButton.new()
+	press.button_index = MOUSE_BUTTON_LEFT
+	press.pressed = true
+	pick._unhandled_input(press)
+	assert_int(machine.get_state()).is_equal(ToolStateMachine.State.DRAGGING)
+
+	# Act — cursor moves to a DIFFERENT XZ location while still Dragging, via
+	# a real per-frame `_process()` tick (exactly what a live drag does every
+	# engine frame — the shape no pre-existing test in this file exercised).
+	camera.ray = WorldRay.new(Vector3(20.5, 20.0, 20.5), Vector3(0.0, -1.0, 0.0))
+	pick._process(0.0)
+
+	# Act — release.
+	var release := InputEventMouseButton.new()
+	release.button_index = MOUSE_BUTTON_LEFT
+	release.pressed = false
+	pick._input(release)
+
+	# Assert — the locked plane holds at y=4 (the press's attach height)
+	# regardless of the moved XZ location; the pre-fix bug returned y=5.
+	assert_int(received.size()).is_equal(1)
+	var emitted: Array = received[0]
+	var release_cell: Vector3i = emitted[2]
+	assert_vector(release_cell).is_equal(Vector3i(20, 4, 20))
 
 
 func test_press_with_no_valid_pick_does_not_start_a_drag() -> void:

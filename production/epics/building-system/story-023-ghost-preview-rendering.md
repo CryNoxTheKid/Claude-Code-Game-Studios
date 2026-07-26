@@ -1,12 +1,12 @@
 # Story 023: Ghost preview rendering + drag re-rasterization + degradation + state tint
 
 > **Epic**: Building System
-> **Status**: Ready
+> **Status: Complete (2026-07-26 — 1175/1175 suite green 0 orphans, parent-verified; evidence captured against the real booting world)
 > **Layer**: Presentation
 > **Type**: Visual/Feel
 > **Estimate**: 1 day
 > **Manifest Version**: 2026-07-23
-> **Last Updated**: —
+> **Last Updated**: 2026-07-26
 
 ## Context
 

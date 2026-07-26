@@ -137,7 +137,7 @@ stories:
     name: "Ghost preview rendering + drag re-rasterization + degradation + state tint (Cluster 0) — THE PLAYER CURRENTLY DRAWS BLIND"
     file: "production/epics/building-system/story-023-ghost-preview-rendering.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete
     owner: "godot-specialist"
     estimate_days: 1.0
     blocker: "deps building-020/022/019 all Complete (S5/S6). R11: no external playtest is meaningful until this lands. Non-writer grep guard applies. SEQUENCING AMENDMENT 2026-07-26: run AFTER scene-005 — the pick DDA finds no cell in an empty grid, so no ghost renders and no Visual/Feel evidence screenshot is possible until the world exists"
