@@ -9,193 +9,362 @@
 #   done           ↔  Complete
 #   blocked        ↔  Blocked
 #
-# Active sprint: 9 (MILESTONE 02 OPENER — open the protected payoff spine: villager-ai-026 (TD-mandated,
-# gates the binding lane) → build-validation 001→002→003→004 and needs-mood 001→002→003; clear Cluster 0's
-# three loop-facing residue stories: building-023 ghost preview, building-001 build editor mode,
-# villager-ai-021 starting roster. NO Cluster B, C or D story starts this sprint.)
-# Sprint 1–8 history retained below the Sprint 9 block.
+# Active sprint: 10 (THE PAYOFF SPRINT — close milestone criterion #5. Complete the Needs & Mood formula
+# surface (nm-005 FIRST, it gates three; nm-004 parallel; then 006/007/008), land bed claiming
+# (villager-ai-018) and a real placeable bed (building-028 -> 016), then pull them tight in the UNMOCKED
+# live pair needs-mood-010 — THE CROWN. Give the villager a body (presentation-003) so criterion #5's
+# run-level capture is a picture, not a log, and so S11's three blocked villager-info-ui stories clear.
+# Sprint 1–9 history retained below the Sprint 10 block.)
 #
-# ⛑ PROVISIONAL RULINGS: this sprint is sized against two UNRATIFIED away-mode documents —
-#   production/architecture-decisions-m02-preflight-2026-07-26.md (TD: BV-1/BV-2/BV-4/NM-3/NM-5/NM-6/NM-7)
-#   production/creative-decisions-m02-preflight-2026-07-26.md   (CD: Ruling 1 pacing, Ruling 2 payoff signal)
-#   The plan proceeds AS IF ratified. BV-4 CREATES villager-ai-026. See sprint-09.md for the blast radius.
+# ⚑ THREE-LANE CONVERGENCE: needs-mood-010's inputs come from three separate lanes and it is sequenced
+#   LAST. This is strictly worse than S09's single cross-lane handoff. Day-one starts on all three lanes:
+#   nm-005 (lane B), villager-ai-018 (lane A), building-028 (lane C). All three are blocked on nothing.
+#   Trip-wire: if lane B is not clear by ~day 6, cut bv-008 and bv-009 immediately — never compress the crown.
 #
-# ⚑ AMENDMENT 2026-07-26 (TD Addendum D, also PROVISIONAL): vox-020 (mesh invalidation) and vox-021
-#   (boot-scoped mesh radius + view_radius_chunks 24->12) ADDED as Must. Sprint 15 -> 17 stories.
-#   Order on the gdscript lane is load-bearing: vox-020 -> vox-021 (same file), both BEFORE scene-005.
-#   The gdscript lane is now the sprint's longest AND still carries the binding build-validation chain —
-#   see sprint-09.md's amendment block for the honest over-commitment read and the recommended trim.
+# ⚑ presentation-003 HAS NO STORY FILE. It is scheduled as a Must. The spec is complete in
+#   production/architecture-decisions-m02-preflight-2026-07-26.md (VB-1 + VB-2); VB-2 says verbatim
+#   "Spec only. The producer authors the story file; I have not written one." DAY-ONE AUTHORING GATE:
+#   the producer transcribes VB-1/VB-2's ACs (invent nothing), then /story-readiness, then /dev-story.
+#
+# ⚑ TWO DEPENDENCY DEFECTS found by reading story headers rather than tables (see sprint-10.md F1/F2):
+#   F1 — needs-mood-010 contradicts itself: Dependencies demand the full furniture chain 028->016->017
+#        "landed and REAL"; Implementation Notes permit mocking "the bed's existence"; Out of Scope lists
+#        the chain. Resolved toward the Implementation Notes (028+016 real, 017 deferred). USER RULING D8.
+#   F2 — needs-mood-009 claims "Unlocks: 010", but 010's own Dependencies list omits 009. The consuming
+#        story's header is authoritative: 009 is NON-BLOCKING and deferred to S11 (D6(ii) unresolved).
+#
+# ⛑ PROVISIONAL RULINGS still unratified after a full sprint —
+#   production/architecture-decisions-m02-preflight-2026-07-26.md (TD) and
+#   production/creative-decisions-m02-preflight-2026-07-26.md (CD).
+#   Blast radius is SMALLER than S09: no S10 Must story is created by a ruling, and the only AC-shape
+#   exposure is bv-009 (CD Ruling 2), already Nice and already externally gated. NOT scheduled as work.
 
-sprint: 9
-goal: "Open Milestone 02's protected payoff spine and make the game presentable to a human. Land the TD-mandated VillagerWalkabilityRules extraction (villager-ai-026 — sequenced FIRST, it gates a serial depth-5 chain), then drive Build Validation from scaffold to Room/Sealed verdict (build-validation-001→002→003→004) and Needs & Mood from scaffold to the three-rung recovery ladder (needs-mood-001→002→003) — the two halves that converge on criterion #5. In parallel clear Cluster 0's three loop-facing residue stories: building-023 (ghost preview — the player draws blind today), villager-ai-021 (starting roster — the Valley boots empty), building-001 (build editor mode — R10's named unblocker for Building UI, independent of Cluster A). Capacity-permitting extend the analysis chain through build-validation-005 and stand up the milestone's riskiest test artifact, build-validation-010 (AC36 reachability corpus, R3). Cluster B, C and D do not start. At sprint close: /team-qa sprint — criterion #14, the habit starts here."
-start: "2026-07-26"
+sprint: 10
+goal: "Close milestone criterion #5 — the payoff loop, live-pair, no mocks at the Needs<->Villager-AI seam. Complete the Needs & Mood formula surface (nm-005 mood smoothing FIRST since it gates 006/007/008; nm-004 recovery interruption in parallel), land the two halves the payoff needs from outside — bed claiming (villager-ai-018) and a real placeable multi-cell bed (building-028 -> 016) — then converge all three lanes in needs-mood-010, THE CROWN (AC34). In parallel give the villager a body (presentation-003, story file to be authored from TD spec VB-1/VB-2) so criterion #5's run-level capture is a picture rather than a log and S11's three blocked villager-info-ui stories clear. Capacity-permitting extend Build Validation's signal surface (bv-007 -> 008, with bv-009 as the TD-gated criterion-#7 wiring) and clear the S09 carry-forward (building-011) plus the Cluster C tier C1 opener (building-009). At sprint close: /team-qa sprint sign-off AND a single consolidated smoke artifact (sign-off condition #4). END OF S10 IS THE MILESTONE'S CUT-LEVER CHECKPOINT #1 — its signal is criterion #5."
+start: "2026-07-27"
 end: ""
-generated: "2026-07-26"
-updated: "2026-07-26"
+generated: "2026-07-27"
+updated: "2026-07-27"
 
 stories:
-  - id: "villager-ai-026"
-    name: "Extract VillagerWalkabilityRules static twin (behavior-preserving) — TD-MANDATED, SEQUENCED FIRST, gates the binding lane"
-    file: "production/epics/villager-ai-behavior/story-026-walkability-rules-static-extraction.md"
+  - id: "villager-ai-018"
+    name: "Sleep & home — bed claim (THE MOVE-IN MOMENT); the crown's villager half"
+    file: "production/epics/villager-ai-behavior/story-018-sleep-and-home.md"
     priority: must-have
-    status: complete
+    status: ready-for-dev
     owner: "ai-programmer"
+    estimate_days: 1.0
+    blocker: "START DAY ONE on lane A — deps villager-ai-006/009/011 all Complete, blocked on nothing. Bed claiming REUSES story-011's atomic-claim primitive; do NOT write a second claim mechanism. Needs rates stay MOCKED here (they go live in needs-mood-010, not here). AC24's widened source enum matters: ground_no_bed_owned vs ground_bed_unreachable — the distinction feeds the why-string (nm-007), not the rates"
+    completed: ""
+  - id: "needs-mood-005"
+    name: "F3 mood smoothing, snap rule, mean_active & band events — FIRST on lane B, it gates three Must stories"
+    file: "production/epics/needs-mood-system/story-005-mood-smoothing-and-band-events.md"
+    priority: must-have
+    status: ready-for-dev
+    owner: "godot-gdscript-specialist"
+    estimate_days: 1.0
+    blocker: "START DAY ONE — gates nm-006, nm-007 and nm-008. Deps needs-mood-001/002 Complete. Domain review: systems-designer (per the S09 Lane-Korrektur — .gd implementation routes to godot-gdscript-specialist; the designer owns formulas and tuning tables, not the implementation). TRAP: use explicit float division (/ 40.0) — integer division on an int-typed mood_smoothing_ticks silently truncates the EMA step to zero. Band boundaries 70/40 are a DISPLAY CONTRACT shared verbatim with Villager Info UI — no second copy in UI code. Grep guard: zero mood references in work/scheduling code (Rule 8, statically checkable)"
+    completed: ""
+  - id: "needs-mood-004"
+    name: "Recovery interruption, mid-recovery re-rating & bed revocation — independent, run parallel to nm-005"
+    file: "production/epics/needs-mood-system/story-004-recovery-interruption-and-re-rating.md"
+    priority: must-have
+    status: ready-for-dev
+    owner: "godot-gdscript-specialist"
+    estimate_days: 1.0
+    blocker: "Depends on needs-mood-003 (Complete) and NOTHING else — fully parallel-safe. Domain review: systems-designer. AC30: a source change applies from the NEXT tick with no restart, no signal, no lost progress (and the mirror downgrade identically). AC31: interrupted at/below threshold re-enters Urgent BY VALUE with ZERO second urgent emission. stop_recovery's reason arg is DIAGNOSTIC ONLY — proven by three-reason identical-outcome test. This system NEVER subscribes to furniture_revoked and NEVER holds a bed id (the circular punt closed 2026-07-10 — do not re-open it)"
+    completed: ""
+  - id: "building-028"
+    name: "Furniture placement base — single-cell support + palette query; FIRST on lane C, it is the bed"
+    file: "production/epics/building-system/story-028-furniture-placement-base.md"
+    priority: must-have
+    status: ready-for-dev
+    owner: "godot-specialist"
+    estimate_days: 1.0
+    blocker: "START DAY ONE on lane C — deps building-021/022 + RID all Complete. ⚑ RE-READ AGAINST BV-1 BEFORE STARTING: it inherits TWO blocking ACs it did not have when it was written — (a) a FURNITURE-category completion NEVER bulk_writes to the grid (this is what makes build-validation-002's furniture-transparency guarantee true BY CONSTRUCTION; breaking it silently breaks a shipped, tested, green invariant with no test to catch it), and (b) the registry exposes a placed/removed signal + item enumeration as a duck-typed nil-safe provider. FOLD INTO ITS DoD: re-verify build-validation-006's is_need_functional TRUE branch non-vacuously against a real ItemDefinitionResource once this lands (sign-off section 13 carry-forward)"
+    completed: ""
+  - id: "needs-mood-006"
+    name: "F4 spawn initialization & new-need activation"
+    file: "production/epics/needs-mood-system/story-006-spawn-init-and-need-activation.md"
+    priority: must-have
+    status: ready-for-dev
+    owner: "godot-gdscript-specialist"
     estimate_days: 0.5
-    blocker: "SEQUENCE FIRST on day one — build-validation-001 hard-depends on it (BV-4). Deps villager-ai-002/003 Complete. Created by the PROVISIONAL BV-4 ruling. Acceptance bar: existing suite green with ZERO test edits — the 2-day buffer's primary named consumer"
+    blocker: "HARD: needs-mood-005 (in-sprint — needs mean_active/bands). Dep needs-mood-002 Complete. Domain review: systems-designer. Initialization in an explicitly-callable method reached from the boot path — NEVER _ready(), never inferred from scene state. Inactive needs are ABSENT, not zeroed. Mood is never initialized to 0 or to a literal: the ordering trap this AC exists to prevent is a zero-default mood displaying Low for ~10s at ticks_per_second 4.0 while the EMA catches up — a cold-start VISUAL bug, not a math bug"
     completed: ""
-  - id: "build-validation-001"
-    name: "Config resource, DI scaffold & blocking lockstep invariant — DI surface smaller than planned per BV-4 (call the static twin, inject nothing)"
-    file: "production/epics/build-validation-navigability/story-001-config-and-scaffold.md"
+  - id: "needs-mood-007"
+    name: "Why-string selection, templates & UI-slot precedence — consumed by the crown's unsheltered edge case"
+    file: "production/epics/needs-mood-system/story-007-why-string-templates-and-precedence.md"
     priority: must-have
-    status: complete
-    owner: "godot-gdscript-specialist"
-    estimate_days: 0.5
-    blocker: "HARD: villager-ai-026 (in-sprint) — the static call form does not exist until it lands. M01 Foundation boot/DI/config spine Complete"
-    completed: ""
-  - id: "build-validation-002"
-    name: "Candidate interior cell predicate (standable + roofed, furniture-transparent) — building-028 dependency DROPPED per BV-1"
-    file: "production/epics/build-validation-navigability/story-002-candidate-interior-cell-predicate.md"
-    priority: must-have
-    status: complete
+    status: ready-for-dev
     owner: "godot-gdscript-specialist"
     estimate_days: 1.0
-    blocker: "depends on build-validation-001 (in-sprint); transitively villager-ai-026. Furniture transparency proven BY CONSTRUCTION, no branch (BV-1)"
+    blocker: "HARD: needs-mood-005 (in-sprint — mood band for the empty case). Dep needs-mood-003 Complete. Domain review: systems-designer. Composed HERE, consumed VERBATIM by Villager Info UI — the UI never assembles its own from need values (ADR-0001 leaf rule). Pure function of current state: no cached last-reason, no sticky string. A why-string must NEVER name a fix the player cannot take (a trapped villager is never told 'no bed'). All templates in ONE table for a future localization pass"
     completed: ""
-  - id: "build-validation-003"
-    name: "Candidate region formation & affected-region scoping"
-    file: "production/epics/build-validation-navigability/story-003-region-formation-and-scoping.md"
+  - id: "needs-mood-008"
+    name: "Burst ordering, pause & warp determinism (full-cycle tick anchors) — the crown's determinism harness"
+    file: "production/epics/needs-mood-system/story-008-burst-pause-and-warp-determinism.md"
     priority: must-have
-    status: complete
+    status: ready-for-dev
     owner: "godot-gdscript-specialist"
     estimate_days: 1.0
-    blocker: "depends on build-validation-002 (in-sprint). Unbounded uncached flood-fill is the accepted MVP shape — do NOT build a cache"
+    blocker: "HARD: needs-mood-005 (in-sprint). Deps needs-mood-002/003 Complete. Domain review: systems-designer. ASSERT AGAINST TimeTickConfig.max_ticks_per_frame (landed default 12 per the S8 re-tune) — NEVER the literal 10 the GDD prose still says. Threshold signals are NEVER coalesced or deduplicated across a burst. SceneTree.paused and Engine.time_scale are project-wide forbidden — grep-guarded"
     completed: ""
-  - id: "build-validation-004"
-    name: "Outside-connection trace & Room/Sealed verdict — the epic's mechanical heart"
-    file: "production/epics/build-validation-navigability/story-004-outside-connection-trace-and-verdict.md"
+  - id: "building-016"
+    name: "Multi-cell furniture placement (footprint) — the bed is 2 cells"
+    file: "production/epics/building-system/story-016-multi-cell-furniture-placement.md"
     priority: must-have
-    status: complete
-    owner: "godot-gdscript-specialist"
-    estimate_days: 1.5
-    blocker: "depends on build-validation-003 + 002 (in-sprint). Largest single story; do NOT let it sit on the last day — 005 and 010 both wait on it. AC10: the cozy carport IS a valid room"
-    completed: ""
-  - id: "needs-mood-001"
-    name: "Config resource, DI scaffold, need schema & BLOCKING ladder invariant — ships CD Ruling 1's values (0.07 / 0.5 / 40)"
-    file: "production/epics/needs-mood-system/story-001-config-scaffold-and-ladder-invariant.md"
-    priority: must-have
-    status: complete
-    owner: "systems-designer"
-    estimate_days: 1.0
-    blocker: "no in-epic dependency; M01 Foundation spine Complete. Values are PROVISIONAL (CD Ruling 1) — an overturn is a config-only re-run"
-    completed: ""
-  - id: "needs-mood-002"
-    name: "F1 decay, per-need state machine & edge-triggered urgent signal — carries the TD-canonized has_urgent_need(villager_id) seam"
-    file: "production/epics/needs-mood-system/story-002-decay-state-machine-and-urgent-signal.md"
-    priority: must-have
-    status: complete
-    owner: "systems-designer"
-    estimate_days: 1.5
-    blocker: "depends on needs-mood-001 (in-sprint). BLOCKING TD-owned precondition (NM-6): architecture.md must document has_urgent_need(villager_id) -> bool BEFORE this story starts"
-    completed: ""
-  - id: "needs-mood-003"
-    name: "Recovery-report API, source→rate table & F2 recovery — THE THREE-RUNG LADDER"
-    file: "production/epics/needs-mood-system/story-003-recovery-report-api-and-source-rate-table.md"
-    priority: must-have
-    status: complete
-    owner: "systems-designer"
-    estimate_days: 1.5
-    blocker: "depends on needs-mood-001 + 002 (in-sprint). Three-arg start_recovery(villager_id, need, source_enum) per NM-5; THREE rungs via table lookup per NM-3 — the two-multiplier form is NEVER to be implemented"
-    completed: ""
-  - id: "vox-020"
-    name: "Mesh invalidation — dirty-marking + budgeted rebuild drain (drained FIRST, inside the EXISTING mesh_build_budget_ms) + chunk_became_resident (TD Addendum D / D7)"
-    file: "production/epics/voxel-world/story-020-mesh-invalidation-dirty-set-and-budgeted-rebuild.md"
-    priority: must-have
-    status: complete
-    owner: "godot-gdscript-specialist"
-    estimate_days: 1.5
-    blocker: "ADDED 2026-07-26 by TD Addendum D (PROVISIONAL pending user ratification). Blocked on nothing — vox-007/015/019 and the residency tier are all landed. SEQUENCES BEFORE scene-005 (it corrects scene-005's Guardrail and closes its Open Decision #4); PARALLEL-SAFE with building-023 (disjoint files). MUST BE SERIALIZED WITH vox-021 — both edit voxel_world_mesh_streamer.gd; vox-020 runs FIRST. Corrects a FALSE premise: the mesher DOES subscribe (voxel_world_mesher.gd:163) — the real defects are the unbudgeted synchronous in-handler rebuild (~69ms for a 9-chunk edit at 7.7ms/chunk) and residency page-in emitting no signal. NO NEW BUDGET KNOB: a separate rebuild budget would allow 7.7+7.7ms in one 16.6ms frame and regress vox-019's measured p95 of 16.947ms. 9 ACs. Evidence: tests/integration/voxel_world/mesh_invalidation_budget_test.gd"
-    completed: ""
-  - id: "vox-021"
-    name: "Boot-scoped mesh radius + view_radius_chunks 24 -> 12 retune (TD Addendum D / D2)"
-    file: "production/epics/voxel-world/story-021-boot-scoped-mesh-radius-and-view-radius-retune.md"
-    priority: must-have
-    status: complete
-    owner: "godot-gdscript-specialist"
-    estimate_days: 1.0
-    blocker: "ADDED 2026-07-26 by TD Addendum D (PROVISIONAL pending user ratification). SEQUENCES AFTER vox-020 (same-file serialization: voxel_world_mesh_streamer.gd) and BEFORE scene-005 (it pre-applies scene-005's named lever 1 and sets the boot ceiling scene-005's AC-BOOT-BUDGET is measured against). view_radius_chunks 24->12 in .tres + new boot_mesh_radius_chunks: int = 8 consumed ONLY by build_initial_window as a radius threaded into the existing _collect_window; growth to full via the existing budgeted update_view_window — no timer, no camera trigger, no new state. Boot ceiling 3.0s total / <=2.5s mesh phase (TD, replacing the producer's provisional 5s), measured windowed with VSync OFF, phase-split, to production/qa/evidence/. USER DECISION FLAGGED: visible extent halves 384 -> 192 world units — look-and-feel call, two named alternatives (accept longer fill-in, or fund greedy meshing / ADR-0014 §2 reserve sooner)"
-    completed: ""
-  - id: "scene-005"
-    name: "World genesis in the boot sequence — terrain, roster and nav graph before ACTIVE (THE VALLEY BOOTS AN EMPTY GRID TODAY)"
-    file: "production/epics/scene-world-management/story-005-world-genesis-boot-sequence.md"
-    priority: must-have
-    status: complete
-    owner: "godot-specialist"
-    estimate_days: 2.0
-    blocker: "AMENDMENT 2026-07-26 — SEQUENCE FIRST on the godot-specialist lane, AHEAD of building-023. NOW BLOCKED ON vox-020 + vox-021 (TD Addendum D): vox-020 corrects the false premise this story's Guardrail was written on and closes its Open Decision #4; vox-021 pre-applies its named lever (1) and sets the 3.0s boot ceiling AC-BOOT-BUDGET now measures against. Closes the gap three landed stories independently hit: valley.gd defers terrain + VillagerNavGraph.build + spawn_starting_roster to 'a future world-generation story' and this is it; villager-ai-021's roster surface is dead code until this lands; building-023's pick DDA has nothing to hit in an empty grid, so its evidence screenshot is impossible before this. Large-world shape RESOLVED: production genesis is ADR-0015 residency page-in of the boot window, NEVER a full-extent generate_terrain() (measured 52.2s at 900x900, no completion >200s at 1000x1000 — Dictionary rehash cliff, vox-018 evidence). AC-BOOT-BUDGET RE-POINTED 2026-07-26: TD ceiling 3.0s total / <=2.5s mesh phase (was 5s producer-provisional); the radius lever is SPENT (owned by vox-021); remaining levers are nav_region_size then the boot-drain ceiling, then escalate to technical-director"
-    completed: ""
-  - id: "building-023"
-    name: "Ghost preview rendering + drag re-rasterization + degradation + state tint (Cluster 0) — THE PLAYER CURRENTLY DRAWS BLIND"
-    file: "production/epics/building-system/story-023-ghost-preview-rendering.md"
-    priority: must-have
-    status: complete
+    status: ready-for-dev
     owner: "godot-specialist"
     estimate_days: 1.0
-    blocker: "deps building-020/022/019 all Complete (S5/S6). R11: no external playtest is meaningful until this lands. Non-writer grep guard applies. SEQUENCING AMENDMENT 2026-07-26: run AFTER scene-005 — the pick DDA finds no cell in an empty grid, so no ghost renders and no Visual/Feel evidence screenshot is possible until the world exists"
+    blocker: "Its OWN header depends only on building-002 (Complete). Sequenced after building-028 per the epic's stated direction (028's Unlocks names 016) but NOT serially blocked by it — a 028 slip does not stall 016. footprint authored on ItemDefinitionResource, exposed via the getter-only ItemDefinition, typed Array[Vector3i]. A commit is valid IFF EVERY offset cell independently satisfies support + availability. All footprint cells are ONE entity sharing ONE occupant id — never N entities. NO partial placement"
     completed: ""
-  - id: "building-001"
-    name: "Build/Editor Mode state machine (Cluster 0) — R10's named unblocker for the 18-story Building UI epic"
-    file: "production/epics/building-system/story-001-build-editor-mode.md"
+  - id: "presentation-003"
+    name: "Villager body view, hit proxy & slice hook — THE SUBSTRATE THREE EPICS ARE BLOCKED ON. ⛔ STORY FILE DOES NOT EXIST"
+    file: "production/epics/presentation-experience/story-003-villager-body-view-and-hit-proxy.md"
     priority: must-have
-    status: complete
+    status: blocked
     owner: "godot-specialist"
     estimate_days: 1.0
-    blocker: "deps Camera & Input action signals + tool state machine, all Complete. Must (not Should) because R10's mitigation names it — demoting it re-couples all 18 building-ui stories to Cluster A"
+    blocker: "⛔ THE STORY FILE DOES NOT EXIST. Spec is complete in production/architecture-decisions-m02-preflight-2026-07-26.md VB-1 (sections 1-6) + VB-2 (owner, type, tier, estimate, governing ADRs, sequencing, full AC list). VB-2 says verbatim: 'Spec only. The producer authors the story file; I have not written one.' DAY-ONE AUTHORING GATE — PRODUCER authors it, transcribing VB-1/VB-2 and inventing nothing, then /story-readiness, then /dev-story; flip this status to ready-for-dev at that point. Development dep: villager-ai-021 (Complete) is HARD for the integration AC only — every unit AC is testable against a mock roster. .gd review: godot-gdscript-specialist. Body lives in presentation-experience / src/presentation/, NEVER in the Core-layer villager-ai-behavior epic (VB-1 section 1 rejects that layering inversion by name). Area3D hit proxy on ADR-0004 layer 1; ADR-0009 two-layer position model with physics_interpolation_mode = OFF. ⚑ CROSS-CHECK TD DOWNSTREAM ITEM 13 FIRST: it adds get_visual_position() and RE-SCOPES the _visual_position grep guard from a filename check to a call-site allowlist (villager_ai.gd::_process + src/presentation/) — without that re-scope this story's own grep AC contradicts a landed guard. Buffer's SECONDARY named consumer; named lever = ship VB-1 only (body + accessor) and defer the hit proxy/slice hook to S11"
     completed: ""
-  - id: "villager-ai-021"
-    name: "Starting roster spawn at world generation (Cluster 0) — THE VALLEY BOOTS WITH ZERO VILLAGERS TODAY"
-    file: "production/epics/villager-ai-behavior/story-021-starting-roster-spawn.md"
+  - id: "needs-mood-010"
+    name: "⚑ THE CROWN — Live-pair shelter recovery round trip (AC34, MILESTONE CRITERION #5). Sequenced LAST"
+    file: "production/epics/needs-mood-system/story-010-live-pair-shelter-recovery.md"
     priority: must-have
-    status: complete
-    owner: "ai-programmer"
-    estimate_days: 1.0
-    blocker: "deps villager-ai-001/002 Complete. Fills the ai lane while villager-ai-026 runs — but must NOT start before 026. Makes the roster plural (the concrete case behind BV-4)"
-    completed: ""
-  - id: "build-validation-005"
-    name: "Analysis pass lifecycle, batched trigger, snapshot & never-blocks guards — trigger RESOLVED by BV-2, simpler than planned"
-    file: "production/epics/build-validation-navigability/story-005-analysis-pass-lifecycle-and-snapshot.md"
-    priority: should-have
-    status: complete
-    owner: "godot-gdscript-specialist"
-    estimate_days: 1.5
-    blocker: "depends on build-validation-001 + 004 (in-sprint). ONE subscription: cells_changed_batch, NEVER construction_completed (deferred-write hazard, ADR-0015). New AC covers a deferred/paged write. Last gate before 006, the payoff-chain unblocker and head of S10"
-    completed: ""
-  - id: "build-validation-006"
-    name: "Analysis pass lifecycle, batched trigger, snapshot & never-blocks guards — trigger RESOLVED by BV-2, simpler than planned"
-    file: "production/epics/build-validation-navigability/story-005-analysis-pass-lifecycle-and-snapshot.md"
-    priority: should-have
-    status: complete
-    owner: "godot-gdscript-specialist"
-    estimate_days: 1.5
-    blocker: "depends on build-validation-001 + 004 (in-sprint). ONE subscription: cells_changed_batch, NEVER construction_completed (deferred-write hazard, ADR-0015). New AC covers a deferred/paged write. Last gate before 006, the payoff-chain unblocker and head of S10"
-    completed: ""
-  - id: "build-validation-010"
-    name: "AC36 reachability property corpus (criterion #2) — THE MILESTONE'S RISKIEST SINGLE TEST ARTIFACT (R3)"
-    file: "production/epics/build-validation-navigability/story-010-reachability-property-corpus.md"
-    priority: should-have
-    status: complete
+    status: backlog
     owner: "ai-programmer"
     estimate_days: 1.5
-    blocker: "depends on build-validation-004 + 002 (in-sprint); villager-ai-002/007 Complete. Runnable in parallel with 005–009. Time-boxed, buffer's secondary consumer. 100 seeds x 50 pairs = 5000 verdicts, ≤ 60s CI. On MISS: REDUCE SAMPLED PAIRS BEFORE SEEDS, re-measure once, then escalate to technical-director"
+    blocker: "THREE-LANE CONVERGENCE, SEQUENCED LAST. Deps verified in its own header: needs-mood-003 (Complete) + 004/006/007/008 (all in-sprint, lane B) + villager-ai-018 (in-sprint, lane A) + the furniture chain building-028 -> 016 (in-sprint, lane C) + build-validation-006 shelter classification (Complete). ⚑ F1 — the story file CONTRADICTS ITSELF on whether the bed must be real: Dependencies demand 028->016->017 'landed and REAL', Implementation Notes permit mocking 'the bed's existence', Out of Scope lists the chain. Resolved toward the Implementation Notes (the only seam it forbids mocking is Needs<->Villager AI); 017 deferred because its own header pulls building-009 + 015, which pull 012, which pulls 011 — four extra stories for the demolition half criterion #5 never exercises. ESCALATED AS USER RULING D8. ⚑ F2 — needs-mood-009 claims 'Unlocks: 010' but 010's own Dependencies omit it; the consuming header is authoritative, so 009 is NON-BLOCKING. BUFFER'S PRIMARY NAMED CONSUMER; named lever from the story itself = seed the need lower for the fast path and run the full ~1072-tick anchor exactly once, then escalate to TD rather than relaxing the ordering assertion. THE SINGLE MOST VALUABLE ASSERTION is the poll-not-event variant: re-run with need_urgent deliberately UNCONNECTED and the round trip must still complete identically (state is truth, the event is a latency hint). CROSS-LANE FILE HANDOFF: the production-wiring AC edits GameWorld's Booting path — a godot-specialist file changed from the ai-programmer lane; serialize against anything lane C has open in game_world.gd. Evidence requires BOTH the integration test AND a run-level capture in production/qa/evidence/"
+    completed: ""
+  - id: "build-validation-007"
+    name: "room_recognized continuity & celebration pacing — lane A's gap-filler; unblocks bv-008 and bv-009"
+    file: "production/epics/build-validation-navigability/story-007-room-recognized-continuity-and-pacing.md"
+    priority: should-have
+    status: backlog
+    owner: "ai-programmer"
+    estimate_days: 1.0
+    blocker: "Deps build-validation-004/005 both Complete — blocked on nothing. Runs on lane A in the gap between villager-ai-018 and the crown; it is NOT on the crown's path, so it is safe to trim. The snapshot is EDGE-DETECTION MEMORY ONLY, never a compute cache. NEVER re-fire room_recognized on a re-analysis that keeps a room valid, or on merges/splits of existing valid rooms. At most one celebration EVENT per room_cue_cooldown_ticks — READ THE CONFIG, never the prose: the knob (20) was authored against an earlier tick rate and the shipped rate is 4.0/s. The cue itself is CD-protected (Art Bible 5.6); this story owns the signal contract and pacing only. ⚑ FIXTURE TRAP (hit independently TWICE in S09): sealing a gap with a solid block creates a legal step-up that reopens the escape — assert the seal is still sealed AFTER the sealing write. ⚑ Open item D6(i): the celebration stagger is unspecified in every document that mentions it and still has no presentation-layer owner"
+    completed: ""
+  - id: "build-validation-008"
+    name: "Warning/Info tiers, exclusivity & load-pass emissions"
+    file: "production/epics/build-validation-navigability/story-008-warning-info-tiers-and-load-pass.md"
+    priority: should-have
+    status: backlog
+    owner: "godot-gdscript-specialist"
+    estimate_days: 1.0
+    blocker: "HARD: build-validation-007 (in-sprint — AC31 asserts both silences). Deps bv-005/006 Complete. FIRST TRIM CANDIDATE after bv-009: its value is positional and bv-009 is its only consumer. Warning and Info are TWO SEPARATE TYPED SIGNALS, not severity payloads of one — do not collapse them. Level-triggered re-emission once per qualifying pass. There is deliberately NO 'cleared' signal — clearing IS the cessation of re-emission plus the queryable state. EXACTLY FOUR SIGNALS TOTAL from this system. Warning supersedes Info, mutually exclusive PER FURNITURE ITEM. shelter_status_changed (bv-006) is independent of both tiers. NO warning on a sealed space containing only decorative furniture or only a villager. Grace/dismissal-debounce/re-show timing is UI-owned (ADR-0011) — do NOT implement it here. Same fixture trap applies"
     completed: ""
   - id: "building-011"
-    name: "Plan-only undo/redo (Cluster 0, milestone criterion #12) — undo must NEVER mutate a Built cell"
+    name: "Plan-only undo/redo (criterion #12) — S09 CARRY-FORWARD, deferred not dropped"
     file: "production/epics/building-system/story-011-plan-only-undo-redo.md"
-    priority: nice-to-have
-    status: deferred-to-s10
+    priority: should-have
+    status: backlog
     owner: "godot-specialist"
     estimate_days: 1.0
-    blocker: "deps building-002 + building-032 (undo/redo stack core) both Complete S7. Pull only after building-023 + building-001 land with lane headroom"
+    blocker: "Deps building-002 + 032 both Complete (S7). Deliberately moved out of S09 mid-sprint on the producer's own trim recommendation; the QA sign-off's section 13 says 'deferred, not dropped; pull early in S10'. DEFERRING IT A SECOND TIME IS A SIGNAL WORTH NOTICING, not a free move — prefer trimming bv-008 first. Undo NEVER mutates a Built cell (the existing non-writer grep guard extended to the undo path): full undo of built geometry is rejected because it would make built geometry non-authoritative and bypass ADR-0009's occupancy/seal semantics and the worker-executed mutation contract. Redo re-creates only STILL-VALID cells, dropping invalidated ones with feedback. Stack bounded (undo_stack_depth 50) and EXCLUDED from serialize() (ADR-0012, TR-033). Also unblocks building-012, whose own header depends on 009 + 011"
     completed: ""
+  - id: "build-validation-009"
+    name: "Loop-payoff surface receives real signals (criterion #7) — ⚠ externally blocked"
+    file: "production/epics/build-validation-navigability/story-009-loop-payoff-real-signal-wiring.md"
+    priority: nice-to-have
+    status: blocked
+    owner: "godot-gdscript-specialist"
+    estimate_days: 0.5
+    blocker: "⛔ EXTERNAL: technical-director concurrence on CD Ruling 2's implementation form — DO NOT START WITHOUT IT. ⚑ THE COLLISION TO RESOLVE FIRST: CD Ruling 2 specifies PayoffDetail as a typed RefCounted sidecar, and S8 MEASURED that Godot 4.7 cannot @export RefCounted/Object. CD's own scope note permits TD to substitute an equivalent form (Resource vs RefCounted) provided the five assertable conditions hold — this is a DECISION, not a code workaround to improvise. FIRST TRIM CANDIDATE (it is externally blocked anyway; cutting it costs nothing this sprint). In-sprint dep: bv-007. Dep bv-006 Complete. Injected-tier binding only; grep-guard proves zero placeholder emitters remain on the payoff path; LoopPayoffSignalSurface's parameter list is NEVER reshaped (a new payoff kind is a new payoff_type value); NO CONNECT_DEFERRED on this path — it would break Rule 10's one-pass-one-frame reconciliation unit"
+    completed: ""
+  - id: "building-009"
+    name: "Demolition orders (blocks) — the Cluster C tier C1 opener, criterion #11"
+    file: "production/epics/building-system/story-009-demolition-orders-blocks.md"
+    priority: nice-to-have
+    status: backlog
+    owner: "godot-specialist"
+    estimate_days: 1.0
+    blocker: "Its OWN header depends on building-002 (Complete) and NOTHING ELSE — clean. Worker-executed block demolition with restore_value write-back; job-based and uniform, no instant-removal carve-out. WHY IT IS WORTH PULLING EVEN AS A NICE: its Unlocks line names 010 (Abriss), 012 (floor-excavation restore), 015 (removal-tool branch) AND 017 (furniture demolition reuses this contract) — it is the single head of the four-story chain that USER RULING D8 would need if criterion #5 is ruled to require a demolishable bed. Landing it here de-risks that ruling for one story. ⚑ DO NOT TRIM THIS if D8 is ruled toward option (b) or (c) — it becomes the head of a mandatory chain. C1 is criterion-#11-protected and never on the cut lever"
+    completed: ""
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SPRINT 9 HISTORY (retained; 18 stories shipped - 17/17 scheduled Complete + build-validation-006
+# landed untracked; building-011 deliberately moved to S10 mid-sprint on the producer trim recommendation.
+# Suite 953->1198 blocking, green 0 orphans on every story commit, parent-re-run at close (exit 0).
+# THE SPRINT THAT MADE THE GAME STARTABLE - the world now exists at boot (scene-005), terrain stays
+# visible (vox-020/021), the player sees a ghost preview (building-023), the roster spawns
+# (villager-ai-021), and BOTH halves of criterion #5 exist: build-validation 001-006 and needs-mood
+# 001-003. bv-010's corpus found ZERO disagreements across 9,600 verdicts. FIRST QA SIGN-OFF IN
+# PROJECT HISTORY (APPROVED WITH CONDITIONS). Ninth consecutive sprint with zero carryover.)
+# ─────────────────────────────────────────────────────────────────────────────
+sprint_9_history:
+  sprint: 9
+  goal: "Open Milestone 02's protected payoff spine and make the game presentable to a human. Land the TD-mandated VillagerWalkabilityRules extraction (villager-ai-026 — sequenced FIRST, it gates a serial depth-5 chain), then drive Build Validation from scaffold to Room/Sealed verdict (build-validation-001→002→003→004) and Needs & Mood from scaffold to the three-rung recovery ladder (needs-mood-001→002→003) — the two halves that converge on criterion #5. In parallel clear Cluster 0's three loop-facing residue stories: building-023 (ghost preview — the player draws blind today), villager-ai-021 (starting roster — the Valley boots empty), building-001 (build editor mode — R10's named unblocker for Building UI, independent of Cluster A). Capacity-permitting extend the analysis chain through build-validation-005 and stand up the milestone's riskiest test artifact, build-validation-010 (AC36 reachability corpus, R3). Cluster B, C and D do not start. At sprint close: /team-qa sprint — criterion #14, the habit starts here."
+  start: "2026-07-26"
+  end: "2026-07-26"
+  generated: "2026-07-26"
+  updated: "2026-07-26"
+  result: "18 stories shipped, 17/17 scheduled Complete + build-validation-006 landed untracked; building-011 deliberately moved to S10 mid-sprint on the producer trim recommendation. Suite 953 -> 1198 blocking, green 0 orphans on every story commit; independently re-run by the parent at close (1198 cases, 0 errors, 0 failures, 0 flaky, 0 skipped, exit 0). THE SPRINT THAT MADE THE GAME STARTABLE: three gaps between the-systems-work and you-can-play-it, none of which any green suite had ever revealed — no world existed at boot (scene-005 genesis, boot 2.59s vs a 3.0s ceiling), fresh terrain could stay invisible (vox-020 chunk_became_resident + budgeted rebuild drain), the player drew blind (building-023 ghost preview, which also exposed a real multi-frame drag release-cell off-by-one in already-shipped building-021 code). PAYOFF SPINE OPENED: build-validation 001-006 complete (candidate cells -> regions -> outside-connection trace -> ROOM/SEALED verdict -> analysis pass lifecycle -> shelter classification + shelter_status_changed) and needs-mood 001-003 complete (config + BLOCKING ladder invariant -> decay + urgent -> the three-rung recovery ladder). Criterion 5 two halves now exist; their live pairing is needs-mood-010, the S10 crown. bv-010 corpus found ZERO disagreements across 9,600 verdicts between Build Validation reachability trace and the villager nav graph — but ships at 1/10 the AC sampling density against a hard 60s CI ceiling (escalated to TD, not absorbed). FIRST QA SIGN-OFF IN PROJECT HISTORY produced (qa-signoff-sprint-9-2026-07-26.md, APPROVED WITH CONDITIONS) — criterion 14 habit started. Buffer consumed as designed again (nav-graph 6.7s -> 266.6ms via nav_region_size 200->40). Ninth consecutive sprint with zero carryover and zero unplanned rework. Findings carried to S10: the recurring fixture trap (sealing a gap with a solid block creates a legal step-up and reopens the escape — hit independently twice); Godot 4.7 cannot @export RefCounted/Object (blocks bv-009 CD-Ruling-2 sidecar form pending TD concurrence). Carried forward: building-011, presentation-003 (TD-specced, story file never authored), needs-mood 004-011, build-validation 007-009, the Cluster D UI epics."
+
+  stories:
+    - id: "villager-ai-026"
+      name: "Extract VillagerWalkabilityRules static twin (behavior-preserving) — TD-MANDATED, SEQUENCED FIRST, gates the binding lane"
+      file: "production/epics/villager-ai-behavior/story-026-walkability-rules-static-extraction.md"
+      priority: must-have
+      status: complete
+      owner: "ai-programmer"
+      estimate_days: 0.5
+      blocker: "SEQUENCE FIRST on day one — build-validation-001 hard-depends on it (BV-4). Deps villager-ai-002/003 Complete. Created by the PROVISIONAL BV-4 ruling. Acceptance bar: existing suite green with ZERO test edits — the 2-day buffer's primary named consumer"
+      completed: ""
+    - id: "build-validation-001"
+      name: "Config resource, DI scaffold & blocking lockstep invariant — DI surface smaller than planned per BV-4 (call the static twin, inject nothing)"
+      file: "production/epics/build-validation-navigability/story-001-config-and-scaffold.md"
+      priority: must-have
+      status: complete
+      owner: "godot-gdscript-specialist"
+      estimate_days: 0.5
+      blocker: "HARD: villager-ai-026 (in-sprint) — the static call form does not exist until it lands. M01 Foundation boot/DI/config spine Complete"
+      completed: ""
+    - id: "build-validation-002"
+      name: "Candidate interior cell predicate (standable + roofed, furniture-transparent) — building-028 dependency DROPPED per BV-1"
+      file: "production/epics/build-validation-navigability/story-002-candidate-interior-cell-predicate.md"
+      priority: must-have
+      status: complete
+      owner: "godot-gdscript-specialist"
+      estimate_days: 1.0
+      blocker: "depends on build-validation-001 (in-sprint); transitively villager-ai-026. Furniture transparency proven BY CONSTRUCTION, no branch (BV-1)"
+      completed: ""
+    - id: "build-validation-003"
+      name: "Candidate region formation & affected-region scoping"
+      file: "production/epics/build-validation-navigability/story-003-region-formation-and-scoping.md"
+      priority: must-have
+      status: complete
+      owner: "godot-gdscript-specialist"
+      estimate_days: 1.0
+      blocker: "depends on build-validation-002 (in-sprint). Unbounded uncached flood-fill is the accepted MVP shape — do NOT build a cache"
+      completed: ""
+    - id: "build-validation-004"
+      name: "Outside-connection trace & Room/Sealed verdict — the epic's mechanical heart"
+      file: "production/epics/build-validation-navigability/story-004-outside-connection-trace-and-verdict.md"
+      priority: must-have
+      status: complete
+      owner: "godot-gdscript-specialist"
+      estimate_days: 1.5
+      blocker: "depends on build-validation-003 + 002 (in-sprint). Largest single story; do NOT let it sit on the last day — 005 and 010 both wait on it. AC10: the cozy carport IS a valid room"
+      completed: ""
+    - id: "needs-mood-001"
+      name: "Config resource, DI scaffold, need schema & BLOCKING ladder invariant — ships CD Ruling 1's values (0.07 / 0.5 / 40)"
+      file: "production/epics/needs-mood-system/story-001-config-scaffold-and-ladder-invariant.md"
+      priority: must-have
+      status: complete
+      owner: "systems-designer"
+      estimate_days: 1.0
+      blocker: "no in-epic dependency; M01 Foundation spine Complete. Values are PROVISIONAL (CD Ruling 1) — an overturn is a config-only re-run"
+      completed: ""
+    - id: "needs-mood-002"
+      name: "F1 decay, per-need state machine & edge-triggered urgent signal — carries the TD-canonized has_urgent_need(villager_id) seam"
+      file: "production/epics/needs-mood-system/story-002-decay-state-machine-and-urgent-signal.md"
+      priority: must-have
+      status: complete
+      owner: "systems-designer"
+      estimate_days: 1.5
+      blocker: "depends on needs-mood-001 (in-sprint). BLOCKING TD-owned precondition (NM-6): architecture.md must document has_urgent_need(villager_id) -> bool BEFORE this story starts"
+      completed: ""
+    - id: "needs-mood-003"
+      name: "Recovery-report API, source→rate table & F2 recovery — THE THREE-RUNG LADDER"
+      file: "production/epics/needs-mood-system/story-003-recovery-report-api-and-source-rate-table.md"
+      priority: must-have
+      status: complete
+      owner: "systems-designer"
+      estimate_days: 1.5
+      blocker: "depends on needs-mood-001 + 002 (in-sprint). Three-arg start_recovery(villager_id, need, source_enum) per NM-5; THREE rungs via table lookup per NM-3 — the two-multiplier form is NEVER to be implemented"
+      completed: ""
+    - id: "vox-020"
+      name: "Mesh invalidation — dirty-marking + budgeted rebuild drain (drained FIRST, inside the EXISTING mesh_build_budget_ms) + chunk_became_resident (TD Addendum D / D7)"
+      file: "production/epics/voxel-world/story-020-mesh-invalidation-dirty-set-and-budgeted-rebuild.md"
+      priority: must-have
+      status: complete
+      owner: "godot-gdscript-specialist"
+      estimate_days: 1.5
+      blocker: "ADDED 2026-07-26 by TD Addendum D (PROVISIONAL pending user ratification). Blocked on nothing — vox-007/015/019 and the residency tier are all landed. SEQUENCES BEFORE scene-005 (it corrects scene-005's Guardrail and closes its Open Decision #4); PARALLEL-SAFE with building-023 (disjoint files). MUST BE SERIALIZED WITH vox-021 — both edit voxel_world_mesh_streamer.gd; vox-020 runs FIRST. Corrects a FALSE premise: the mesher DOES subscribe (voxel_world_mesher.gd:163) — the real defects are the unbudgeted synchronous in-handler rebuild (~69ms for a 9-chunk edit at 7.7ms/chunk) and residency page-in emitting no signal. NO NEW BUDGET KNOB: a separate rebuild budget would allow 7.7+7.7ms in one 16.6ms frame and regress vox-019's measured p95 of 16.947ms. 9 ACs. Evidence: tests/integration/voxel_world/mesh_invalidation_budget_test.gd"
+      completed: ""
+    - id: "vox-021"
+      name: "Boot-scoped mesh radius + view_radius_chunks 24 -> 12 retune (TD Addendum D / D2)"
+      file: "production/epics/voxel-world/story-021-boot-scoped-mesh-radius-and-view-radius-retune.md"
+      priority: must-have
+      status: complete
+      owner: "godot-gdscript-specialist"
+      estimate_days: 1.0
+      blocker: "ADDED 2026-07-26 by TD Addendum D (PROVISIONAL pending user ratification). SEQUENCES AFTER vox-020 (same-file serialization: voxel_world_mesh_streamer.gd) and BEFORE scene-005 (it pre-applies scene-005's named lever 1 and sets the boot ceiling scene-005's AC-BOOT-BUDGET is measured against). view_radius_chunks 24->12 in .tres + new boot_mesh_radius_chunks: int = 8 consumed ONLY by build_initial_window as a radius threaded into the existing _collect_window; growth to full via the existing budgeted update_view_window — no timer, no camera trigger, no new state. Boot ceiling 3.0s total / <=2.5s mesh phase (TD, replacing the producer's provisional 5s), measured windowed with VSync OFF, phase-split, to production/qa/evidence/. USER DECISION FLAGGED: visible extent halves 384 -> 192 world units — look-and-feel call, two named alternatives (accept longer fill-in, or fund greedy meshing / ADR-0014 §2 reserve sooner)"
+      completed: ""
+    - id: "scene-005"
+      name: "World genesis in the boot sequence — terrain, roster and nav graph before ACTIVE (THE VALLEY BOOTS AN EMPTY GRID TODAY)"
+      file: "production/epics/scene-world-management/story-005-world-genesis-boot-sequence.md"
+      priority: must-have
+      status: complete
+      owner: "godot-specialist"
+      estimate_days: 2.0
+      blocker: "AMENDMENT 2026-07-26 — SEQUENCE FIRST on the godot-specialist lane, AHEAD of building-023. NOW BLOCKED ON vox-020 + vox-021 (TD Addendum D): vox-020 corrects the false premise this story's Guardrail was written on and closes its Open Decision #4; vox-021 pre-applies its named lever (1) and sets the 3.0s boot ceiling AC-BOOT-BUDGET now measures against. Closes the gap three landed stories independently hit: valley.gd defers terrain + VillagerNavGraph.build + spawn_starting_roster to 'a future world-generation story' and this is it; villager-ai-021's roster surface is dead code until this lands; building-023's pick DDA has nothing to hit in an empty grid, so its evidence screenshot is impossible before this. Large-world shape RESOLVED: production genesis is ADR-0015 residency page-in of the boot window, NEVER a full-extent generate_terrain() (measured 52.2s at 900x900, no completion >200s at 1000x1000 — Dictionary rehash cliff, vox-018 evidence). AC-BOOT-BUDGET RE-POINTED 2026-07-26: TD ceiling 3.0s total / <=2.5s mesh phase (was 5s producer-provisional); the radius lever is SPENT (owned by vox-021); remaining levers are nav_region_size then the boot-drain ceiling, then escalate to technical-director"
+      completed: ""
+    - id: "building-023"
+      name: "Ghost preview rendering + drag re-rasterization + degradation + state tint (Cluster 0) — THE PLAYER CURRENTLY DRAWS BLIND"
+      file: "production/epics/building-system/story-023-ghost-preview-rendering.md"
+      priority: must-have
+      status: complete
+      owner: "godot-specialist"
+      estimate_days: 1.0
+      blocker: "deps building-020/022/019 all Complete (S5/S6). R11: no external playtest is meaningful until this lands. Non-writer grep guard applies. SEQUENCING AMENDMENT 2026-07-26: run AFTER scene-005 — the pick DDA finds no cell in an empty grid, so no ghost renders and no Visual/Feel evidence screenshot is possible until the world exists"
+      completed: ""
+    - id: "building-001"
+      name: "Build/Editor Mode state machine (Cluster 0) — R10's named unblocker for the 18-story Building UI epic"
+      file: "production/epics/building-system/story-001-build-editor-mode.md"
+      priority: must-have
+      status: complete
+      owner: "godot-specialist"
+      estimate_days: 1.0
+      blocker: "deps Camera & Input action signals + tool state machine, all Complete. Must (not Should) because R10's mitigation names it — demoting it re-couples all 18 building-ui stories to Cluster A"
+      completed: ""
+    - id: "villager-ai-021"
+      name: "Starting roster spawn at world generation (Cluster 0) — THE VALLEY BOOTS WITH ZERO VILLAGERS TODAY"
+      file: "production/epics/villager-ai-behavior/story-021-starting-roster-spawn.md"
+      priority: must-have
+      status: complete
+      owner: "ai-programmer"
+      estimate_days: 1.0
+      blocker: "deps villager-ai-001/002 Complete. Fills the ai lane while villager-ai-026 runs — but must NOT start before 026. Makes the roster plural (the concrete case behind BV-4)"
+      completed: ""
+    - id: "build-validation-005"
+      name: "Analysis pass lifecycle, batched trigger, snapshot & never-blocks guards — trigger RESOLVED by BV-2, simpler than planned"
+      file: "production/epics/build-validation-navigability/story-005-analysis-pass-lifecycle-and-snapshot.md"
+      priority: should-have
+      status: complete
+      owner: "godot-gdscript-specialist"
+      estimate_days: 1.5
+      blocker: "depends on build-validation-001 + 004 (in-sprint). ONE subscription: cells_changed_batch, NEVER construction_completed (deferred-write hazard, ADR-0015). New AC covers a deferred/paged write. Last gate before 006, the payoff-chain unblocker and head of S10"
+      completed: ""
+    - id: "build-validation-006"
+      name: "Shelter classification + shelter_status_changed — the payoff-chain unblocker (CORRECTED 2026-07-27: this entry previously carried build-validation-005's name, file and blocker verbatim; the story landed untracked mid-sprint and was back-filled by copy-paste)"
+      file: "production/epics/build-validation-navigability/story-006-shelter-classification-and-status-signal.md"
+      priority: must-have
+      status: complete
+      owner: "godot-gdscript-specialist"
+      estimate_days: 1.0
+      blocker: "LANDED UNTRACKED — present in neither the Sprint 9 QA plan nor this file until the sign-off's Parent Verification Addendum back-filled it (commit b8d1653). Depends on build-validation-004 + 005 (both in-sprint). Its is_need_functional TRUE branch is untestable until building-028 lands (S10) — re-verify non-vacuously then"
+      completed: ""
+    - id: "build-validation-010"
+      name: "AC36 reachability property corpus (criterion #2) — THE MILESTONE'S RISKIEST SINGLE TEST ARTIFACT (R3)"
+      file: "production/epics/build-validation-navigability/story-010-reachability-property-corpus.md"
+      priority: should-have
+      status: complete
+      owner: "ai-programmer"
+      estimate_days: 1.5
+      blocker: "depends on build-validation-004 + 002 (in-sprint); villager-ai-002/007 Complete. Runnable in parallel with 005–009. Time-boxed, buffer's secondary consumer. 100 seeds x 50 pairs = 5000 verdicts, ≤ 60s CI. On MISS: REDUCE SAMPLED PAIRS BEFORE SEEDS, re-measure once, then escalate to technical-director"
+      completed: ""
+    - id: "building-011"
+      name: "Plan-only undo/redo (Cluster 0, milestone criterion #12) — undo must NEVER mutate a Built cell"
+      file: "production/epics/building-system/story-011-plan-only-undo-redo.md"
+      priority: nice-to-have
+      status: deferred-to-s10
+      owner: "godot-specialist"
+      estimate_days: 1.0
+      blocker: "deps building-002 + building-032 (undo/redo stack core) both Complete S7. Pull only after building-023 + building-001 land with lane headroom"
+      completed: ""
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SPRINT 8 HISTORY (retained; 13/13 Complete, suite 843→951 blocking, green 0 orphans on every commit;
