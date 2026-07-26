@@ -140,14 +140,14 @@ the raycast/picking mechanism shared by Building System and Villager Info UI
 | Module | Owns | Exposes | Consumes | Engine APIs (risk) |
 |---|---|---|---|---|
 | Building System ⚠️ | Blueprint 4-state lifecycle; construction job queue; undo/redo stack; placement-validity engine; tool state machine | `commit_command`, `claim_job`/`release_job`/`on_site_check`, combined occupancy query, `undo()`/`redo()`, `construction_completed_batch` signal, `furniture_revoked` signal, tool-state query | Voxel World (read + `bulk_write`); Resource & Item Database (palette query); Time & Tick (`tick`); Camera & Input (`world_ray`, `action_fired`); Scene/World Management (`transition_ended` → clear undo stack) | Raycast pick (⚠️ shared ADR with Voxel World); pooled MeshInstance3D ghost rendering (ADR-0014); `InputEventKey.echo` for undo/redo repeat |
-| Villager AI & Behavior ⚠️ | Per-villager state machine; walkability predicates (**canonical ground truth**); bed ownership; F1–F4 formulas; injected RNG | State/position/activity query (read by UI); `start_recovery`/`stop_recovery` calls (into Needs); walkability query (consumed by Build Validation) | Voxel World (occupancy read + write-signal subscribe); Time & Tick (`tick`); Building System (`claim_job`/`release`/`on_site`); Needs & Mood (poll need state); Building System's `furniture_revoked` | `NavigationServer3D`/`NavigationAgent3D` vs. custom `AStar3D`/`AStarGrid3D` (⚠️ open ADR); typed `Dictionary` (⚠️) |
+| Villager AI & Behavior ⚠️ | Per-villager state machine; walkability predicates (**canonical ground truth**); bed ownership; F1–F4 formulas; injected RNG | State/position/activity query (read by UI); `start_recovery`/`stop_recovery` calls (into Needs); walkability query (consumed by Build Validation) | Voxel World (occupancy read + write-signal subscribe); Time & Tick (`tick`); Building System (`claim_job`/`release`/`on_site`); Needs & Mood (polls `has_urgent_need(villager_id)` at every decision point — never trusts the threshold-cross events alone); Building System's `furniture_revoked` | `NavigationServer3D`/`NavigationAgent3D` vs. custom `AStar3D`/`AStarGrid3D` (⚠️ open ADR); typed `Dictionary` (⚠️) |
 
 **Feature Layer**
 
 | Module | Owns | Exposes | Consumes | Engine APIs (risk) |
 |---|---|---|---|---|
 | Build Validation & Navigability ⚠️ | Room/enclosure classification; transient (non-persisted) snapshot | 4-signal typed bus: `shelter_status_changed`, `room_recognized`, `sealed_space_warning`, `unsheltered_furniture_info`; queryable room-status/warnings state | Voxel World (read-only occupancy); Building System's `construction_completed_batch` (trigger); Villager AI's walkability constants (read-only reference — **zero** calls into either system's mutators, verified by mock call-count) | Same flood-fill vs. `NavigationServer3D` rebake question as Villager AI (⚠️ shared ADR) |
-| Needs & Mood System | Per-villager need floats; mood EMA; recovery source→rate table; why-string precedence | Need/mood/why-string query; urgency/satisfied threshold-cross events (latency hints only) | Time & Tick (`tick`); Villager AI's `start_recovery`/`stop_recovery` (Needs is the callee); Build Validation's `shelter_status_changed`; Building System's `furniture_revoked` | None engine-specific — pure GDScript logic (LOW risk) |
+| Needs & Mood System | Per-villager need floats; mood EMA; recovery source→rate table; why-string precedence | `get_need_value`/`get_mood`/`get_why_string` query; `has_urgent_need` (pure urgency gate, polled by Villager AI's decision loop — ADR-0008); urgency/satisfied threshold-cross events (latency hints only) | Time & Tick (`tick`); Villager AI's `start_recovery`/`stop_recovery` (Needs is the callee); Build Validation's `shelter_status_changed`; Building System's `furniture_revoked` | None engine-specific — pure GDScript logic (LOW risk) |
 
 **Presentation Layer**
 
@@ -355,7 +355,8 @@ func get_state(villager_id: int) -> VillagerState   # 6-value activity enum + po
 func is_walkable(cell: Vector3i) -> bool            # CANONICAL ground truth — Build Validation must reuse, not redefine
 func is_standable(cell: Vector3i) -> bool
 # Villager AI CONSUMES (does not expose) Needs & Mood's start_recovery/stop_recovery
-# as the caller — see Needs & Mood block below.
+# as the caller, and polls its has_urgent_need(villager_id) at every decision
+# point — see Needs & Mood block below.
 # GUARANTEE: never teleports/clips/despawns a trapped villager. Deterministic
 # same-tick claim-contention resolution via stable villager processing order.
 
@@ -375,10 +376,18 @@ func stop_recovery(villager_id: int, need: StringName, reason: StringName) -> vo
 func get_need_value(villager_id: int, need: StringName) -> float   # 0-100
 func get_mood(villager_id: int) -> float                            # 0-100, EMA-smoothed
 func get_why_string(villager_id: int) -> String
+func has_urgent_need(villager_id: int) -> bool   # REQUIRED — the urgency gate Villager AI's
+                                                  # decision loop polls every tick (ADR-0008)
 signal need_urgent(villager_id: int, need: StringName)      # latency hint only
 signal need_satisfied(villager_id: int, need: StringName)   # latency hint only
 # GUARANTEE: mood has ZERO consuming references in scheduling/work code (MVP,
 # display-only — statically checkable).
+# GUARANTEE: has_urgent_need is a PURE QUERY — emits no signal, mutates no state,
+# and never lazily initializes a villager's need record as a side effect of being
+# asked. An unknown/despawned villager_id returns false WITHOUT creating a record.
+# Nil-safety for an unwired provider belongs to the CALLER
+# (VillagerAi._has_urgent_need's existing guard) — Needs & Mood carries no
+# null-provider branch of its own.
 
 # ── Building UI ⚠️ (leaf — exposes one shared flag, nothing else outward) ─
 func is_hover_suppressing_world_pick() -> bool   # shared contract: read by
