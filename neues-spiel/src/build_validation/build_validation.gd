@@ -59,8 +59,31 @@
 ## `sealed_space_warning`/`unsheltered_furniture_info`) is explicitly deferred
 ## to stories 006/007/008 (Out of Scope) -- this story builds the snapshot
 ## those stories diff against and emits nothing of its own.
+##
+## Story build-validation-006 (this revision) lands [signal
+## shelter_status_changed] -- the payoff-chain unblocker Needs & Mood's sleep
+## recovery ladder consumes. Shelter classification is a LIVE lookup
+## ([BuildValidationShelterClassifier], never a read of [member
+## _region_snapshot] -- see that class's doc comment for why), re-run from
+## THREE call sites: the end of every batched structural pass ([method
+## _run_analysis_pass] -- Edge Case 7's roof-hole re-classification), the
+## furniture registry's own placed/removed signal ([method
+## _on_furniture_changed], BV-2's second trigger), and [method run_load_pass]
+## (silently -- Rule 11/AC31). [member _shelter_snapshot] is patched and
+## edge-detected by [method _patch_shelter_flag] so the signal fires exactly
+## once per transition. Per BV-1 §5, [member furniture_registry] stays
+## duck-typed and nil-safe -- a `null` provider yields zero items, zero
+## emissions, no error; every dynamic call/connection onto it is guarded with
+## [method Object.has_method]/[method Object.has_signal].
 class_name BuildValidation
 extends Node
+
+## Fires when one furniture item's sheltered flag TRANSITIONS (Rule 5/10,
+## [TR-build-validation-navigability-036]) -- exactly once per transition,
+## for ALL furniture types. Needs & Mood and the UI subscribe to this SAME
+## emission (AC16: emission COUNT of 1, not consumer count). Silent on the
+## load pass (Rule 11/AC31) -- see [method run_load_pass].
+signal shelter_status_changed(item_id: String, sheltered: bool)
 
 ## Tuning config (ADR-0002). Wired via a scene file's Inspector in
 ## production, or assigned directly in a headless test. Asserted wired by
@@ -76,6 +99,17 @@ extends Node
 ## yet; `building-028` is a future story) and deliberately NOT asserted by
 ## [method setup] -- `null` means "no furniture exists," a correct default,
 ## exactly true until `building-028` lands.
+##
+## Story build-validation-006's shape for this provider (guarded with [method
+## Object.has_method]/[method Object.has_signal] at every call/connect site,
+## never assumed): `func get_placed_furniture() -> Array[Dictionary]`,
+## returning one record per placed item shaped `{"item_id": String,
+## "definition_id": StringName, "cells": Array[Vector3i]}` (BV-1 -- item id,
+## occupied cells from `ItemDefinition.get_footprint()`, definition id); and
+## an optional `signal furniture_changed` (BV-2's second trigger) this module
+## reacts to by RE-ENUMERATING via `get_placed_furniture()` -- it never reads
+## a payload from that signal, matching [method _on_cells_changed_batch]'s own
+## "re-query, don't inspect the payload" discipline.
 var furniture_registry: Object = null
 
 ## True once [method setup] has completed at least once.
@@ -96,12 +130,13 @@ var _boot_blocking_issues: Array[String] = []
 var _region_snapshot: Dictionary[Vector3i, BuildValidationReachability.Verdict] = {}
 
 ## Per-item shelter-flag snapshot -- Rule 11's OTHER named map ("the snapshot
-## is two maps"), scaffolded here alongside [member _region_snapshot] but
-## deliberately left UNPOPULATED by this story: no furniture exists in the
-## landed build yet ([member furniture_registry] is always `null` until
-## `building-028`), so there is nothing yet to classify. Story 006 populates
-## and patches this map; this story only reserves its shape so 006 does not
-## need to also touch the pass lifecycle.
+## is two maps"), keyed by placed-item id (`String`, matching [member
+## furniture_registry]'s own record shape). Populated and patched by [method
+## _reclassify_all_furniture]/[method _patch_shelter_flag] (story
+## build-validation-006) -- edge-detection memory ONLY (Rule 11): a re-run
+## that leaves a flag unchanged patches the entry but never re-emits [signal
+## shelter_status_changed]. Stays empty whenever [member furniture_registry]
+## is `null` (correct -- no furniture exists, BV-1).
 var _shelter_snapshot: Dictionary[String, bool] = {}
 
 ## Instrumented analysis-pass count (AC19/AC20/BV-2's Gate 2 -- "assert
@@ -145,6 +180,13 @@ func setup() -> void:
 	# data has not landed yet).
 	if not voxel_world.cells_changed_batch.is_connected(_on_cells_changed_batch):
 		voxel_world.cells_changed_batch.connect(_on_cells_changed_batch)
+	# Story build-validation-006 / BV-2's SECOND trigger -- the furniture
+	# registry's own placed/removed signal. Fully duck-typed and nil-safe: a
+	# `null` provider, or one that simply does not expose this signal, is a
+	# valid, silent no-op (BV-1 §5 -- correct until `building-028` lands).
+	if furniture_registry != null and furniture_registry.has_signal(&"furniture_changed"):
+		if not furniture_registry.is_connected(&"furniture_changed", _on_furniture_changed):
+			furniture_registry.connect(&"furniture_changed", _on_furniture_changed)
 	_is_set_up = true
 
 
@@ -179,6 +221,14 @@ func get_analysis_pass_count() -> int:
 ## never a sentinel/error value.
 func get_region_status(cell: Vector3i) -> BuildValidationReachability.Verdict:
 	return _region_snapshot.get(cell, BuildValidationReachability.Verdict.OPEN)
+
+
+## Queryable per-item shelter status (Rule 10, story build-validation-006).
+## Returns `false` for an item id this module has never classified -- the
+## same "no status = the ordinary default" convention [method
+## get_region_status] already establishes, never a sentinel/error value.
+func get_shelter_status(item_id: String) -> bool:
+	return _shelter_snapshot.get(item_id, false)
 
 
 ## The one full-world pass (Rule 11, Edge Case 11, AC31): rebuilds [member
@@ -219,6 +269,10 @@ func run_load_pass() -> void:
 		for cell: Vector3i in region.cell_list():
 			already_covered[cell] = true
 			_region_snapshot[cell] = verdict
+	# Story build-validation-006, Rule 11 silent seeding (AC31): the load
+	# pass classifies every enumerated furniture item but fires NO
+	# `shelter_status_changed` transitions -- statuses become queryable only.
+	_reclassify_all_furniture(true)
 
 
 ## [signal VoxelWorldGrid.cells_changed_batch] handler -- THE single
@@ -249,18 +303,23 @@ func _on_cells_changed_batch(changes: Array[CellChangeRecord]) -> void:
 ## batch spanning two disjoint regions is still ONE pass, two regions
 ## evaluated) -- the counter tracks PASSES, not regions or cells.
 ##
-## Emission of this GDD's own signal contract (`room_recognized`/
-## `shelter_status_changed`/`sealed_space_warning`/`unsheltered_furniture_info`)
-## is explicitly OUT OF SCOPE here (Out of Scope: "Story 006/007/008: the four
-## signals' payloads, edge-detection semantics, and pacing") -- this method
-## builds the snapshot those stories diff against; it emits nothing of its
-## own.
+## Emission of this GDD's own signal contract's REGION-facing signals
+## (`room_recognized`/`sealed_space_warning`/`unsheltered_furniture_info`) is
+## explicitly OUT OF SCOPE here (Out of Scope: "Story 007/008") -- this method
+## builds the region snapshot those stories diff against; it emits none of
+## its own. Story build-validation-006 (this revision) DOES additionally
+## re-classify every enumerated furniture item at the end of this same pass
+## ([method _reclassify_all_furniture]) and may emit [signal
+## shelter_status_changed] -- Edge Case 7's roof-hole re-classification is
+## exactly this: a structural change reaches furniture ONLY through this
+## pass, never a separate counter or a separate signal subscription.
 ##
 ## Never calls any Building System or Villager AI API beyond the shared,
 ## static [VillagerWalkabilityRules] predicates (Rule 9's second half, AC33):
 ## [method BuildValidationRegionFormation.form_affected_regions] and [method
-## BuildValidationReachability.classify_region] are this method's only calls,
-## and neither holds nor accepts a villager/gameplay-entity reference.
+## BuildValidationReachability.classify_region] are this method's only
+## structural calls, and neither holds nor accepts a villager/gameplay-entity
+## reference.
 func _run_analysis_pass(changed_cells: Array[Vector3i]) -> void:
 	_analysis_pass_count += 1
 	var regions: Array[BuildValidationRegion] = BuildValidationRegionFormation.form_affected_regions(
@@ -272,3 +331,82 @@ func _run_analysis_pass(changed_cells: Array[Vector3i]) -> void:
 		)
 		for cell: Vector3i in region.cell_list():
 			_region_snapshot[cell] = verdict
+	_reclassify_all_furniture(false)
+
+
+## [member furniture_registry]'s own placed/removed signal handler (BV-2's
+## SECOND trigger, story build-validation-006). Re-enumerates via [method
+## _reclassify_all_furniture] -- never reads a payload from the triggering
+## signal (this module's established "re-query, don't inspect the payload"
+## discipline, [method _on_cells_changed_batch]). Never silent -- a
+## placement/removal is not the load pass, so ordinary edge-detected
+## emissions apply.
+func _on_furniture_changed() -> void:
+	_reclassify_all_furniture(false)
+
+
+## Re-classifies every currently-enumerated placed-furniture item (story
+## build-validation-006) via a LIVE lookup ([BuildValidationShelterClassifier]
+## -- never a read of [member _region_snapshot], see that class's own doc
+## comment for why) and patches [member _shelter_snapshot] through [method
+## _patch_shelter_flag], emitting [signal shelter_status_changed] per
+## transition UNLESS [param silent] is `true` (the load pass, Rule 11/AC31).
+## A `null` [member furniture_registry], or one that does not (yet) expose
+## `get_placed_furniture`, is a silent, correct no-op -- zero items, zero
+## emissions, no error (BV-1 §5). An item id no longer present in the current
+## enumeration is untracked from [member _shelter_snapshot] WITHOUT emitting
+## -- Rule 10 fires on a flag TRANSITION for an existing item, never on an
+## item's own removal.
+func _reclassify_all_furniture(silent: bool) -> void:
+	if furniture_registry == null:
+		return
+	if not furniture_registry.has_method(&"get_placed_furniture"):
+		return
+	@warning_ignore("unsafe_method_access")
+	var records: Array = furniture_registry.get_placed_furniture()
+
+	var current_ids: Dictionary[String, bool] = {}
+	for entry: Variant in records:
+		var record: Dictionary = entry as Dictionary
+		var item_id: String = String(record.get("item_id", ""))
+		if item_id == "":
+			continue
+		current_ids[item_id] = true
+		var cells: Array[Vector3i] = _cells_from_record(record)
+		var sheltered: bool = BuildValidationShelterClassifier.is_sheltered(
+			voxel_world, cells, config.min_room_cells, config.max_room_height
+		)
+		_patch_shelter_flag(item_id, sheltered, silent)
+
+	for tracked_id: String in _shelter_snapshot.keys():
+		if not current_ids.has(tracked_id):
+			_shelter_snapshot.erase(tracked_id)
+
+
+## Patches [member _shelter_snapshot][[param item_id]] to [param sheltered]
+## and emits [signal shelter_status_changed] iff this is a TRANSITION (the
+## item was never classified before, or its flag flipped) AND [param silent]
+## is `false` (Rule 11: "a re-analysis that leaves a flag unchanged emits
+## nothing"; the load pass silences even a first-time classification, AC31).
+func _patch_shelter_flag(item_id: String, sheltered: bool, silent: bool) -> void:
+	var is_transition: bool = (
+		not _shelter_snapshot.has(item_id) or _shelter_snapshot[item_id] != sheltered
+	)
+	_shelter_snapshot[item_id] = sheltered
+	if silent or not is_transition:
+		return
+	shelter_status_changed.emit(item_id, sheltered)
+
+
+## Extracts [param record]'s `"cells"` entry as a typed [code]Array[Vector3i][/code]
+## (BV-1's record shape -- see [member furniture_registry]'s own doc comment).
+## An explicit element-by-element cast rather than relying on an implicit
+## typed-array conversion from a Dictionary's `Variant` value, so a malformed
+## or missing entry fails predictably (an empty result, never a crash) rather
+## than depending on GDScript's own untyped-to-typed array coercion rules.
+func _cells_from_record(record: Dictionary) -> Array[Vector3i]:
+	var cells: Array[Vector3i] = []
+	var raw: Array = record.get("cells", [])
+	for value: Variant in raw:
+		cells.append(value as Vector3i)
+	return cells

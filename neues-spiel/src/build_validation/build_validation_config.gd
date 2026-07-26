@@ -97,6 +97,23 @@ const GROUND_PENALTY_ADVISORY_REFERENCE: float = 0.4
 ## of scope here.
 @export var room_cue_cooldown_ticks: int = 20
 
+## Need-functional furniture identification (Story build-validation-006, BV-1
+## §6 -- `production/architecture-decisions-m02-preflight-2026-07-26.md`; GDD
+## Rule 8: "need-functional furniture -- furniture with a need-recovery
+## function -- MVP: the bed; decorative/inert furniture never warns"). A
+## typed, data-driven `@export` list of need-functional item ids (ADR-0002) --
+## NOT a new [ItemDefinitionResource] field (BV-1 §6 explicitly rules that
+## out) -- so a future need-functional item is a data change here, never a
+## code change. [method is_need_functional] is the sole consumer of this
+## field; [BuildValidationShelterClassifier]'s own shelter/unsheltered
+## predicate never reads it -- `shelter_status_changed` fires for ALL
+## furniture regardless of need-functional status (GDD Rule 10 /
+## [TR-build-validation-navigability-036]). This field exists so story 008's
+## sealed-space Warning tier has a config seam ready to consume without a new
+## story -- story 006 itself does not call [method is_need_functional]
+## anywhere in its own signal logic.
+@export var need_functional_item_ids: Array[StringName] = [&"bed"]
+
 
 ## See [ConfigResource.validate]. Clamps every single-field range issue to
 ## its documented safe bound in place (the sole sanctioned runtime write to
@@ -172,3 +189,19 @@ func validate() -> Array[String]:
 		)
 
 	return issues
+
+
+## Whether [param definition_id] identifies need-functional furniture (Story
+## build-validation-006, BV-1 §6): resolved through [method
+## ResourceItemDatabase.get_by_id] -- NEVER a hardcoded `&"bed"` comparison
+## anywhere in this predicate; membership in [member need_functional_item_ids]
+## is the only thing that decides the answer, so a retune is a data edit to
+## this field, never a code edit here. An id [ResourceItemDatabase] cannot
+## resolve (unauthored, or the database not yet Ready) is never
+## need-functional -- a fail-safe default consistent with this module's own
+## Rule 9 (never fail loudly at the player), not an error.
+func is_need_functional(definition_id: StringName) -> bool:
+	var definition: ItemDefinition = ResourceItemDatabase.get_by_id(definition_id)
+	if definition == null:
+		return false
+	return need_functional_item_ids.has(definition.get_id())

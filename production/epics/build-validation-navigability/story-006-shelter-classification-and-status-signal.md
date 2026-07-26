@@ -1,7 +1,7 @@
 # Story 006: Shelter classification & `shelter_status_changed`
 
 > **Epic**: Build Validation & Navigability
-> **Status**: Ready
+> **Status: Complete (2026-07-26 — 1115/1115 suite green 0 orphans, parent-verified)
 > **Layer**: Feature
 > **Type**: Logic
 > **Estimate**: ~1 agent-day
