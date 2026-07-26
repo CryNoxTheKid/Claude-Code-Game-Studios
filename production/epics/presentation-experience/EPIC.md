@@ -5,7 +5,7 @@
 > **Architecture Module**: No single module — Presentation/experience layer. Per `production/epics/index.md` §"CD-protected items — mapping gap", neither CD item maps to any Foundation or Core architectural module in architecture.md; this micro-epic is their sanctioned home so they are not silently deferred to polish.
 > **Manifest Version**: 2026-07-23
 > **Status**: Ready
-> **Stories**: 2 stories created (2026-07-24)
+> **Stories**: 3 stories created (002 Complete; 003 added 2026-07-26 from TD ruling VB-1/VB-2)
 
 ## Overview
 
@@ -44,7 +44,9 @@ sources for the epic's scope:
 |-----|-------------|-------------|
 | ADR-0008: Villager AI Execution & Threading | Context — the villager idle-behaviors hook (story-001 sub-scope B) *reads* the villager FSM's Idle/Wandering state; it must not add simulation, only presentation of existing state | HIGH (villager AI domain) |
 | ADR-0014: Chunked Voxel Rendering | Context — environmental ambient motion (smoke/sway/clutter/flicker) attaches to and is seen against the mesher's rendered world; nothing bakes into committed-block materials | HIGH (rendering domain) |
-| ADR-0001: Inter-System Reference & DI Pattern | Context — the loop-payoff scaffolding (story-002) is a signal/event surface built on the spine's DI + signal contract; injected-tier, headless-mockable | MEDIUM |
+| ADR-0001: Inter-System Reference & DI Pattern | Context — the loop-payoff scaffolding (story-002) is a signal/event surface built on the spine's DI + signal contract; injected-tier, headless-mockable. Also **governing** for story-003's injected-tier `setup()` + duck-typed nil-safe providers | MEDIUM |
+| ADR-0004: Physics Backend & Picking Strategy | **Governing for story-003** — the villager hit proxy is an `Area3D` + `CollisionShape3D` on collision layer 1, hosted on `VillagerBodyView`. Not a manifest violation: the manifest's physics prohibitions are scoped to *block/world* picking (lines 89/98); villager hit-testing is affirmatively required by lines 64/82/152/219 | HIGH (physics/picking) |
+| ADR-0009: Deterministic Movement & Occupancy Ordering | **Governing for story-003** — two-layer position model; the view is a pure per-frame mirror of `VillagerAi.get_visual_position()`, stores nothing, interpolates nothing, and sets `physics_interpolation_mode = OFF` explicitly | HIGH (villager AI domain) |
 
 **Engine risk (highest touch-point): HIGH** — the visible ambient elements sit on
 the rendering domain and the idle-behaviors hook sits on the villager-AI domain,
@@ -91,7 +93,10 @@ art-director/CD approval as its acceptance evidence.
 ## Definition of Done
 
 This epic is complete when:
-- Both stories are implemented, reviewed, and closed via `/story-done`
+- All three stories are implemented, reviewed, and closed via `/story-done`
+- The villager body substrate (story-003) exists: a presentation-tier `VillagerBodyView` per villager that
+  can be **seen, clicked (ADR-0004 layer 1), hidden by a slice, and hung an icon on** — with `VillagerAi`
+  still `extends Node` and the pure-mirror/no-new-simulation invariants grep-verified
 - Ambient-life wave 1 renders all five confirmed elements to the Art Bible §6.5 bar,
   with art-director/CD sign-off (Visual/Feel evidence in `production/qa/evidence/`)
 - Torch/lantern flicker is verified sub-3Hz (A5)
@@ -107,6 +112,20 @@ This epic is complete when:
 |---|-------|------|--------|-----|
 | 001 | Ambient-life wave 1 (chimney smoke, foliage sway, villager idle-behaviors hook, interior clutter, torch flicker) | Visual/Feel | Ready | N/A (Art Bible §6.5; ADR-0008/0014 context) |
 | 002 | Loop-payoff communication scaffolding (event/signal surface) | Integration | Ready | ADR-0001 (signal/DI surface) |
+| 003 | Villager body view, hit proxy & slice hook — **the substrate three epics are blocked on** (CORE tier) | Integration | Ready | ADR-0004 · ADR-0009 · ADR-0001 (Art Bible §5.2/§5.3) |
+
+**Story 003 note (added 2026-07-26).** Authored by the producer from technical-director rulings **VB-1**
+(the ruling) + **VB-2** (the story spec) in
+`production/architecture-decisions-m02-preflight-2026-07-26.md` — **PROVISIONAL, pending user
+ratification**. It is scheduled as a Sprint 10 **Must**. Two epic-level consequences:
+
+- **It is this epic's first CORE-tier story** — a hard blocker for `villager-info-ui-002/005/006`,
+  `building-ui-016`'s characters clause, and this epic's own `presentation-001` **Sub-B**. Its
+  Art-Bible-traced, TR-less requirement shape follows the same precedent as 001/002.
+- **`presentation-001` Sub-B (villager idle behaviors) now has an in-epic prerequisite it did not have when
+  it was deferred to S10/S11** (TD downstream action #16). Sub-B is invisible until 003 lands — villagers
+  have no body to idle with. The ordering costs nothing at current scheduling, but it must not be
+  re-ordered ahead of 003.
 
 ## Next Step
 

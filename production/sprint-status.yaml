@@ -21,10 +21,12 @@
 #   nm-005 (lane B), villager-ai-018 (lane A), building-028 (lane C). All three are blocked on nothing.
 #   Trip-wire: if lane B is not clear by ~day 6, cut bv-008 and bv-009 immediately — never compress the crown.
 #
-# ⚑ presentation-003 HAS NO STORY FILE. It is scheduled as a Must. The spec is complete in
-#   production/architecture-decisions-m02-preflight-2026-07-26.md (VB-1 + VB-2); VB-2 says verbatim
-#   "Spec only. The producer authors the story file; I have not written one." DAY-ONE AUTHORING GATE:
-#   the producer transcribes VB-1/VB-2's ACs (invent nothing), then /story-readiness, then /dev-story.
+# ✅ presentation-003 AUTHORING GATE CLOSED (2026-07-26). The story file now exists at
+#   production/epics/presentation-experience/story-003-villager-body-view-and-hit-proxy.md, transcribed
+#   from VB-1 + VB-2 with nothing invented, and registered in that epic's EPIC.md. Status: ready-for-dev.
+#   Cross-check result: TD downstream item 13's "the grep guard will now trip" premise is FALSE — no
+#   _visual_position grep guard is landed as a test (prose only), and VB-2's AC list has no such AC. The
+#   real open question (who owns writing the re-scoped guard) is in the story's Open Decisions, not an AC.
 #
 # ⚑ TWO DEPENDENCY DEFECTS found by reading story headers rather than tables (see sprint-10.md F1/F2):
 #   F1 — needs-mood-010 contradicts itself: Dependencies demand the full furniture chain 028->016->017
@@ -120,13 +122,13 @@ stories:
     blocker: "Its OWN header depends only on building-002 (Complete). Sequenced after building-028 per the epic's stated direction (028's Unlocks names 016) but NOT serially blocked by it — a 028 slip does not stall 016. footprint authored on ItemDefinitionResource, exposed via the getter-only ItemDefinition, typed Array[Vector3i]. A commit is valid IFF EVERY offset cell independently satisfies support + availability. All footprint cells are ONE entity sharing ONE occupant id — never N entities. NO partial placement"
     completed: ""
   - id: "presentation-003"
-    name: "Villager body view, hit proxy & slice hook — THE SUBSTRATE THREE EPICS ARE BLOCKED ON. ⛔ STORY FILE DOES NOT EXIST"
+    name: "Villager body view, hit proxy & slice hook — THE SUBSTRATE THREE EPICS ARE BLOCKED ON"
     file: "production/epics/presentation-experience/story-003-villager-body-view-and-hit-proxy.md"
     priority: must-have
-    status: blocked
+    status: ready-for-dev
     owner: "godot-specialist"
     estimate_days: 1.0
-    blocker: "⛔ THE STORY FILE DOES NOT EXIST. Spec is complete in production/architecture-decisions-m02-preflight-2026-07-26.md VB-1 (sections 1-6) + VB-2 (owner, type, tier, estimate, governing ADRs, sequencing, full AC list). VB-2 says verbatim: 'Spec only. The producer authors the story file; I have not written one.' DAY-ONE AUTHORING GATE — PRODUCER authors it, transcribing VB-1/VB-2 and inventing nothing, then /story-readiness, then /dev-story; flip this status to ready-for-dev at that point. Development dep: villager-ai-021 (Complete) is HARD for the integration AC only — every unit AC is testable against a mock roster. .gd review: godot-gdscript-specialist. Body lives in presentation-experience / src/presentation/, NEVER in the Core-layer villager-ai-behavior epic (VB-1 section 1 rejects that layering inversion by name). Area3D hit proxy on ADR-0004 layer 1; ADR-0009 two-layer position model with physics_interpolation_mode = OFF. ⚑ CROSS-CHECK TD DOWNSTREAM ITEM 13 FIRST: it adds get_visual_position() and RE-SCOPES the _visual_position grep guard from a filename check to a call-site allowlist (villager_ai.gd::_process + src/presentation/) — without that re-scope this story's own grep AC contradicts a landed guard. Buffer's SECONDARY named consumer; named lever = ship VB-1 only (body + accessor) and defer the hit proxy/slice hook to S11"
+    blocker: "✅ AUTHORING GATE CLOSED 2026-07-26 — story file written by the producer, transcribed from production/architecture-decisions-m02-preflight-2026-07-26.md VB-1 (sections 1-6) + VB-2 (full AC list), nothing invented; registered in the presentation-experience EPIC.md. Next: /story-readiness, then /dev-story. Development dep: villager-ai-021 (Complete) is HARD for the integration AC only — every unit AC is testable against a mock roster. .gd review: godot-gdscript-specialist. Body lives in presentation-experience / src/presentation/, NEVER in the Core-layer villager-ai-behavior epic (VB-1 section 1 rejects that layering inversion by name). Area3D hit proxy on ADR-0004 layer 1; ADR-0009 two-layer position model with physics_interpolation_mode = OFF. ⚑ GREP-GUARD CROSS-CHECK DONE, PREMISE CORRECTED: the earlier note here said 'without TD item 13's re-scope this story's own grep AC contradicts a landed guard'. FALSE on both halves. (a) There is NO landed _visual_position grep guard anywhere in neues-spiel/tests/ — the only src/villager_ai grep guards are in tests/integration/villager_ai/config_and_scaffold_test.gd and assert only: no _physics_process, _process(_delta present, no Navigation*3D, no Thread/WorkerThreadPool. The invariant exists as PROSE only (ADR-0009 Validation Criteria, control-manifest.md, villager-ai-004's Forbidden line). (b) VB-2's AC list contains NO _visual_position grep AC — its three grep ACs (zero lerp( in villager_body_view.gd, zero Selection refs, zero mutating calls into VillagerAi) contradict nothing and do not depend on item 13. Nothing will trip in CI. REAL OPEN QUESTION, recorded in the story's Open Decisions for the user/TD: does THIS story own writing the re-scoped guard as an actual call-site-allowlist test (~+0.1 agent-day), or does item 13 stay a doc-only ADR amendment leaving the invariant unenforced-by-test? The producer deliberately did NOT invent that AC. Buffer's SECONDARY named consumer; named lever = ship VB-1 only (body + accessor) and defer the hit proxy/slice hook to S11"
     completed: ""
   - id: "needs-mood-010"
     name: "⚑ THE CROWN — Live-pair shelter recovery round trip (AC34, MILESTONE CRITERION #5). Sequenced LAST"
