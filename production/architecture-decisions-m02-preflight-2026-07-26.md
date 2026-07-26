@@ -1021,3 +1021,191 @@ module contract, not an architectural decision.
 | 15 | `build-validation-009` spec update: `PayoffDetail` = `RefCounted`, `cells: Array[Vector3i]`, `Dictionary[String, PayoffDetail]` with a parse-check first step; `get_payoff_detail()` is **kept** (the dropped back-query was into Build Validation, not the surface) | producer / build-validation | nothing (S10 story) |
 | 16 | Producer note: `presentation-001` Sub-B (villager idle behaviors) now has an in-epic prerequisite (`presentation-003`) it did not have when it was deferred to S10/S11 | producer | nothing |
 | 17 | Still open, **not** ruled here: `building-ui-016`'s clip-plane-uniform vs. per-chunk-re-mesh mechanism (TD + `godot-shader-specialist`); target hardware class + VSync mode (sprint-09 D4); villager names (D5, creative-director) | technical-director / creative-director | `building-ui-016`, `villager-info-ui-003` |
+
+---
+
+# Addendum D — Mesh invalidation (D7) and the boot-scoped mesh radius
+
+**Status: PROVISIONAL — pending user ratification.** Both rulings below are
+technical-director decisions taken against the code as it stands on `main`
+(65bc05b). Neither has been implemented; no production code was changed.
+
+## D7 — Mesh invalidation: the escalated premise is FALSE
+
+**Verdict: REJECT the premise as stated. RE-SCOPE the story.**
+
+The escalation states that *"`VoxelWorldMeshStreamer` subscribes to NO grid
+signal, so a chunk already inside the window is never re-meshed"* and concludes
+that *"a block the player places is written to the grid and never appears."*
+scene-005's Control Manifest Guardrail repeats this as verified fact.
+
+The verification behind it — *"zero occurrences of `cells_changed_batch` in
+`voxel_world_mesh_streamer.gd`"* — is true about that **file**. The conclusion
+drawn from it is not. The invalidation path exists one layer down:
+
+- `voxel_world_mesher.gd:163-164` — `setup()` connects **both**
+  `grid.cell_changed` and `grid.cells_changed_batch`.
+- `_on_cell_changed` / `_on_cells_changed_batch` → `_chunk_keys_touched_by()`
+  → `build_chunk()` for every **tracked** touched chunk, deduped.
+- `_chunk_keys_touched_by()` already dirties the **cross-chunk X/Z neighbour**
+  when the cell sits on a chunk seam — the exact counterpart to
+  `_is_chunk_local_air()` case 3, which resolves a seam face through
+  `_is_air()`/`get_cell()` against the neighbour chunk. This is correct and
+  must not be touched.
+- `setup()` is genuinely reached in production: `Valley.get_injected_tier_modules()`
+  returns `_voxel_world_mesher`, and `GameWorld._setup_injected_tier()` calls
+  `setup()` on every entry.
+- The write path is live end-to-end: `CommitPipeline` → job → `ConstructionTickLoop._on_tick`
+  (connected to the `TimeTickSystem` autoload in its own `setup()`) →
+  `voxel_world.bulk_write(changes)` → `cells_changed_batch` → mesher rebuild.
+
+So the streamer subscribing to nothing is **correct layering**, not a bug: the
+mesher owns chunk *content*, the streamer owns chunk *membership*. Adding a
+streamer subscription would duplicate `_chunk_keys_touched_by()` and
+double-rebuild every dirty chunk.
+
+Two of the escalation's sub-questions dissolve on inspection:
+
+- **"What happens to a dirty chunk that is currently unloaded?"** Nothing, and
+  nothing is needed. `build_chunk()` always reads *current* grid state, so a
+  chunk re-entering the window is correct by construction. No dirty-set
+  persistence across unload. Pin this with a test; do not build bookkeeping for it.
+- **"Must neighbour chunks of a boundary cell also be dirtied?"** Yes, and they
+  already are. Keep `_chunk_keys_touched_by()` unchanged; add a regression test.
+
+### What IS actually broken (two real defects)
+
+**Defect 1 — the rebuild is unbudgeted and synchronous inside the signal
+handler.** `_on_cells_changed_batch` rebuilds every touched tracked chunk in one
+pass, on the main thread, with no time budget. At the measured **7.7 ms/chunk**
+(vox-019), a demolition or a large floor commit spanning 9 chunks is a ~69 ms
+frame spike. This violates the control manifest's "no unbounded work in the
+frame path". This is the real D7 bug: a *performance* bug, not a correctness one.
+
+**Defect 2 — residency page-in emits no signal, so an early-meshed chunk is a
+permanent hole.** `VoxelWorldGrid` has exactly three emit sites (`set_cell` 1036,
+`bulk_write` 1090, `_apply_pending_writes` 1191). Neither
+`_integrate_one_finished_read` (1651) nor `_try_serve_from_in_flight_write`
+(1556) emits anything when a chunk becomes resident. `get_chunk_snapshot()`
+returns `null` for a non-resident chunk and `build_chunk()` writes `.mesh = null`.
+The mesh window and the residency window share the same `view_radius_chunks`, so
+in steady state a chunk routinely enters the mesh window before its async,
+budgeted page-in lands — and then **never re-meshes**. This is the more likely
+cause of any "terrain/blocks missing" symptom actually observed in game, and it
+is the hole class scene-005's guardrail was reaching for.
+
+### Ruling
+
+1. The streamer continues to subscribe to **nothing**. Layering confirmed.
+2. `VoxelWorldMesher`'s two handlers change from *rebuild now* to *mark dirty
+   now* — a private `_dirty_chunks: Dictionary[Vector2i, bool]`, populated only
+   for keys already in `_chunk_nodes`. Expose `get_dirty_chunk_keys()` and
+   `clear_dirty(key)`; `unload_chunk()` erases the key from the dirty set.
+3. `VoxelWorldGrid` gains `signal chunk_became_resident(chunk_key: Vector2i)`,
+   emitted from `_integrate_one_finished_read` and
+   `_try_serve_from_in_flight_write` after `_chunks[chunk_key]` is assigned. The
+   mesher subscribes and marks the key dirty if tracked. This closes Defect 2
+   through the same machinery, with no second mechanism.
+4. `VoxelWorldMeshStreamer._sync_window` gains a **rebuild phase, drained first**,
+   before the build-new phase and before the unload phase, through the existing
+   `_drain_budgeted`.
+5. **Budget: reuse `mesh_build_budget_ms` as ONE shared window covering
+   rebuild-then-build. No new knob.** Rationale: an independent rebuild budget
+   would let the progress guarantee integrate one chunk in *each* phase — worst
+   case 7.7 + 7.7 = 15.4 ms of meshing in a 16.6 ms frame, which would regress
+   vox-019's measured p95 of 16.947 ms. A shared window keeps the worst case at
+   exactly one chunk per frame, i.e. today's measured profile, while giving the
+   player's own edit priority over a distant window-edge chunk.
+   `mesh_unload_budget_ms` keeps its own separate window (different work class —
+   `queue_free`, not meshing). `build_initial_window` passes unbounded to the
+   rebuild phase too; the dirty set is empty at boot regardless.
+6. Latency cost: at most one frame for a single-block placement (the progress
+   guarantee always integrates one dirty chunk per call). Imperceptible, and the
+   same guarantee entry-meshing already ships.
+
+Residual risk, accepted and named: a multi-chunk demolition now settles over
+~1 chunk/frame instead of one spike — ~9 frames for a 9-chunk edit. The real
+lever is the 7.7 ms per-chunk cost; greedy meshing remains ADR-0014's named
+optimisation reserve and is **not** in this story.
+
+**ADR home**: ADR-0014 amendment (Decision §2 gains the dirty-set/budgeted-drain
+contract; §3 gains the rebuild phase's ordering and shared-window rule). ADR-0015
+amendment for the new `chunk_became_resident` signal on the residency tier.
+
+## D2 — Boot-scoped mesh radius
+
+**Verdict: APPROVE a boot-scoped radius, but the radius is not the whole
+problem — `view_radius_chunks = 24` is unaffordable at boot AND in steady state.**
+
+Arithmetic at the measured 7.7 ms/chunk, `CHUNK_SIZE` 16, `CELL_SIZE` 1.0:
+
+| Radius | Chunks | Mesh cost | Visible extent |
+|---|---|---|---|
+| 24 (current) | 49x49 = 2401 | **18.5 s** | 384 u |
+| 12 | 25x25 = 625 | 4.8 s | 192 u |
+| 8 | 17x17 = 289 | 2.2 s | 128 u |
+
+The decisive point the escalation does not state: **shrinking only the boot
+radius moves the cost, it does not remove it.** `_collect_window` uses
+`view_radius_chunks`, so `update_view_window` grows the window back to full
+every frame at ~1 chunk/frame (7.7 ms/chunk exceeds the 4.0 ms budget, so the
+progress guarantee yields exactly one). Booting at radius 8 while
+`view_radius_chunks` stays 24 trades an 18.5 s freeze for **~35 s of visible
+pop-in** — strictly worse for playability.
+
+### Ruling
+
+1. **`VoxelWorldConfig.view_radius_chunks: 24 -> 12.`** A pure `.tres` data
+   change (scene-005's own lever #2), instantly reversible, no code. This is the
+   knob that makes the steady-state window actually maintainable at the current
+   mesher cost. `visibility_range_end` is derived from it, so the distance fade
+   stays consistent automatically.
+2. **New `VoxelWorldConfig.boot_mesh_radius_chunks: int = 8.`** Consumed *only*
+   by `build_initial_window`, threaded as a radius parameter into the existing
+   `_collect_window` — no new state, no timer, no camera-move trigger, no second
+   code path. Validated in `validate()` against new
+   `BOOT_MESH_RADIUS_CHUNKS_MIN/MAX` (2 / `VIEW_RADIUS_CHUNKS_MAX`), plus a
+   clamp+warn (non-BLOCKING, ADR-0002 two-tier) when it exceeds
+   `view_radius_chunks`.
+3. **Growth to full: over frames, via the already-budgeted `update_view_window`.
+   No new mechanism.** Filling 289 -> 625 = 336 chunks at ~1 chunk/frame ≈ **5.6 s**
+   of gradual fill, during which the player is already interactive — this is the
+   correct place to spend it, not in a frozen boot window.
+4. ADR-0005 holds unchanged: `build_initial_window` still runs inside WIRING,
+   strictly before `ACTIVE`, only with a smaller radius. No sync I/O and no
+   unbounded frame work is introduced — the growth path is the existing budgeted
+   step.
+5. **Boot budget (closes scene-005 Open Decision #1): total boot-to-ACTIVE
+   ceiling 3.0 s, of which the initial mesh phase <= 2.5 s.** This replaces the
+   producer's provisional 5 s. Rationale: this codebase has no boot loading
+   overlay (`game_world.gd`'s own honest note), so boot is a frozen window, and
+   ~3 s is the threshold above which a frozen window reads as a hang. Projected
+   mesh phase under this ruling: ~2.2 s. PASS with headroom.
+
+**Knobs named**: `view_radius_chunks` (retuned 24 -> 12),
+`boot_mesh_radius_chunks` (new, default 8), `mesh_build_budget_ms` (unchanged
+at 4.0, now a shared rebuild+build window).
+
+## Corrections this addendum files
+
+- **scene-005 Control Manifest Guardrail** — *"`VoxelWorldMeshStreamer`
+  subscribes to nothing and has no invalidation path"* is **incorrect**. The
+  invalidation path lives in `VoxelWorldMesher.setup()`. The real hazard is
+  Defect 2 (page-in emits no signal), which the guardrail's boot-ordering rule
+  mitigates at boot but not in steady state. Reword.
+- **scene-005 Open Decision #4** (*"mesh invalidation has no owner"*) — closed by
+  story `vox-020`.
+- **`TR-voxel-world-026`'s "~2.6 s initial view-window mesh build"** — confirmed
+  stale (ADR-0014 prototype figure). Correct to ~2.2 s at the newly-ruled
+  `boot_mesh_radius_chunks = 8`, and note the 18.5 s figure applied to the
+  now-superseded radius 24.
+
+## Summary of downstream actions this addendum creates
+
+| # | Action | Owner | Blocks |
+|---|--------|-------|--------|
+| 18 | **New story `vox-020`** (mesh invalidation budgeting + `chunk_became_resident`) — spec in D7, file not written | producer | `scene-005` |
+| 19 | **New story `vox-021`** (boot-scoped mesh radius + `view_radius_chunks` retune) — spec in D2, file not written | producer | `scene-005` AC-BOOT-BUDGET |
+| 20 | ADR-0014 amendment: dirty-set + budgeted rebuild drain (§2), rebuild phase ordering + shared budget window (§3), boot-scoped initial radius (§3) | technical-director | `vox-020`, `vox-021` |
+| 21 | ADR-0015 amendment: `chunk_became_resident` signal on the residency tier | technical-director | `vox-020` |
+| 22 | `scene-005` edits: reword the Guardrail, close Open Decision #4, adopt the 3.0 s boot ceiling in AC-BOOT-BUDGET, drop lever (1) (now pre-applied by `vox-021`) | producer | `scene-005` |
