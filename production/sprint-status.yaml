@@ -83,7 +83,7 @@ stories:
     name: "Config resource, DI scaffold, need schema & BLOCKING ladder invariant — ships CD Ruling 1's values (0.07 / 0.5 / 40)"
     file: "production/epics/needs-mood-system/story-001-config-scaffold-and-ladder-invariant.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete
     owner: "systems-designer"
     estimate_days: 1.0
     blocker: "no in-epic dependency; M01 Foundation spine Complete. Values are PROVISIONAL (CD Ruling 1) — an overturn is a config-only re-run"

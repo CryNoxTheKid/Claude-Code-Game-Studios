@@ -1,7 +1,7 @@
 # Story 001: Config resource, DI scaffold, need schema & BLOCKING ladder invariant
 
 > **Epic**: Needs & Mood System
-> **Status**: Ready
+> **Status: Complete (2026-07-26 — 1031/1031 suite green 0 orphans, agent-verified; parent re-verifies after the concurrent vox-020 lands)
 > **Layer**: Feature
 > **Type**: Integration
 > **Estimate**: ~1 agent-day
