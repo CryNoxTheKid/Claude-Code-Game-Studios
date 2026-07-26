@@ -32,7 +32,7 @@ stories:
     name: "Extract VillagerWalkabilityRules static twin (behavior-preserving) — TD-MANDATED, SEQUENCED FIRST, gates the binding lane"
     file: "production/epics/villager-ai-behavior/story-026-walkability-rules-static-extraction.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete
     owner: "ai-programmer"
     estimate_days: 0.5
     blocker: "SEQUENCE FIRST on day one — build-validation-001 hard-depends on it (BV-4). Deps villager-ai-002/003 Complete. Created by the PROVISIONAL BV-4 ruling. Acceptance bar: existing suite green with ZERO test edits — the 2-day buffer's primary named consumer"

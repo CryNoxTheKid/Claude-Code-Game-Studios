@@ -1,7 +1,7 @@
 # Story 026: Extract `VillagerWalkabilityRules` static twin (behavior-preserving)
 
 > **Epic**: Villager AI & Behavior
-> **Status**: Ready
+> **Status: Complete (2026-07-26 — 958/958 suite green 0 orphans, parent-verified; zero-test-edit gate held: only one additive test file)
 > **Layer**: Core
 > **Type**: Logic
 > **Estimate**: ~0.5 agent-day
