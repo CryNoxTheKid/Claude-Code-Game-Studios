@@ -167,3 +167,40 @@ Proves ADR-0016 completeness. Ranked by player expectation:
 | 5 | Run `/team-qa sprint` for Sprint 8 and adopt it as a standing per-sprint step | qa-lead | M01 close or M02 S1 |
 | 6 | Re-baseline M02 in stories/sessions rather than agent-days; negotiate Cluster C scope | producer | M02 planning |
 | 7 | Escalate the VSync-mode decision and define the mid-range hardware baseline | technical-director | M02 S1 |
+
+
+---
+
+## Addendum — Conditions C3 & C4 executed (2026-07-26, parent-verified)
+
+**C4 — ambient visible in the build**: TorchFlicker + AmbientTorchLight are now real hosted Valley
+children, boot-gated through the injected tier (commit b52df18); golden-hour capture taken from the
+REAL game_world.tscn (2 PNGs in production/qa/evidence/). Honestly NOT wired: chimney smoke, interior
+clutter, foliage sway — each needs an occupancy/room/vegetation host that does not exist yet (Valley
+boots an empty grid). **Criterion #9 disposition: the "visible in the build" clause is now satisfied
+for the components that have a real host; Sub-B and the remaining three components stay M02 work.**
+
+**C3 — telemetry observation**: harness added (advisory tier) plus the run.
+- Adversarial (story-016 sealed-room fixture, production defaults): watchdog fires 2, recoveries 2,
+  search-failed 0, permanent stuck 0 — the positive proof clause 3 asked for.
+- Natural (15 villagers, 600 ticks): **found a real defect the test suite could not see** — every
+  builder self-sealing on its own final cell stayed permanently distressed (permanent stuck = 15),
+  because its own "Cell Built" transition left Working the same tick the seal became true, so the
+  watchdog counter never reached threshold. **Fixed** (commit 7dff4a8, root-caused, two BLOCKING
+  regression tests added): the self-sealed sub-condition is now rescue-eligible in every state while
+  the walled-in-but-standable sub-condition stays Traveling/Working-scoped.
+- **After the fix**: permanent stuck 15 -> 0, fires 79, recoveries 79, search-failed 0 — and built
+  cells rose 15 -> 79, since freed builders keep building. Adversarial scenario unchanged.
+
+**Criterion #13 disposition: clause 3 is now SATISFIED** (observed, not merely unit-tested), and the
+observation earned its keep by surfacing a defect that every green suite had missed.
+
+Suite at addendum time: 953/953, 0 orphans, exit 0.
+
+### Remaining to declare M01 CLOSED (user-owned)
+1. **C1** — ratify (or overturn) the CD Scope Ruling 2026-07-25 (scopes #6/#7/#9).
+2. **C2** — ratify the re-tune values quick-spec 2026-07-25 (#4's numbers).
+3. **C3 human half** — the build-and-inhabit demo walkthrough: a person draws a walled/floored/roofed
+   room, workers build it, a villager moves in.
+
+Nothing else is outstanding on the development side.
