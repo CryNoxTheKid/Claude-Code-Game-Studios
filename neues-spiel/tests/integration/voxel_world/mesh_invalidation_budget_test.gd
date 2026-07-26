@@ -261,6 +261,7 @@ func test_rebuild_precedes_new_build_precedes_unload_in_ordered_call_log() -> vo
 	# Arrange -- track a 3x3 window at focus_a, dirty its center chunk.
 	var grid: VoxelWorldGrid = _make_grid(2048)
 	grid.config.view_radius_chunks = 1  # 3x3 = 9
+	grid.config.boot_mesh_radius_chunks = 1  # Story vox-021: build_initial_window now reads THIS, not view_radius_chunks -- match it so this pre-vox-021 test's own 3x3 scenario is unaffected
 	var mesher: _InstrumentedMesher = _make_instrumented_mesher(grid)
 	var streamer: VoxelWorldMeshStreamer = _make_streamer(grid, mesher)
 	var focus_a := Vector3i(160, 0, 160)  # chunk (10, 10)
@@ -521,6 +522,7 @@ func test_build_initial_window_rebuild_phase_also_unbounded_and_dirty_set_empty_
 	# Arrange
 	var grid: VoxelWorldGrid = _make_grid(1024)
 	grid.config.view_radius_chunks = 1  # 3x3 = 9
+	grid.config.boot_mesh_radius_chunks = 1  # Story vox-021: build_initial_window now reads THIS, not view_radius_chunks -- match it so this pre-vox-021 test's own 3x3 scenario is unaffected
 	grid.config.mesh_build_budget_ms = 4.0
 	var mesher: VoxelWorldMesher = _make_mesher(grid)
 	var streamer: VoxelWorldMeshStreamer = _make_streamer(grid, mesher)

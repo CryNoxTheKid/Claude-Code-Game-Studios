@@ -119,7 +119,7 @@ stories:
     name: "Boot-scoped mesh radius + view_radius_chunks 24 -> 12 retune (TD Addendum D / D2)"
     file: "production/epics/voxel-world/story-021-boot-scoped-mesh-radius-and-view-radius-retune.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete
     owner: "godot-gdscript-specialist"
     estimate_days: 1.0
     blocker: "ADDED 2026-07-26 by TD Addendum D (PROVISIONAL pending user ratification). SEQUENCES AFTER vox-020 (same-file serialization: voxel_world_mesh_streamer.gd) and BEFORE scene-005 (it pre-applies scene-005's named lever 1 and sets the boot ceiling scene-005's AC-BOOT-BUDGET is measured against). view_radius_chunks 24->12 in .tres + new boot_mesh_radius_chunks: int = 8 consumed ONLY by build_initial_window as a radius threaded into the existing _collect_window; growth to full via the existing budgeted update_view_window — no timer, no camera trigger, no new state. Boot ceiling 3.0s total / <=2.5s mesh phase (TD, replacing the producer's provisional 5s), measured windowed with VSync OFF, phase-split, to production/qa/evidence/. USER DECISION FLAGGED: visible extent halves 384 -> 192 world units — look-and-feel call, two named alternatives (accept longer fill-in, or fund greedy meshing / ADR-0014 §2 reserve sooner)"

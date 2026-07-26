@@ -1,7 +1,7 @@
 # Story 021: Boot-scoped mesh radius + `view_radius_chunks` 24 → 12 retune (TD ruling D2)
 
 > **Epic**: Voxel World / Grid Data
-> **Status**: Ready
+> **Status: Complete (2026-07-26 — boot 2.44-2.52s vs the 3.0s ceiling, PASS; story scope 208/208 green; parent re-verifies the full gate once bv-004 lands)
 > **Layer**: Presentation (mesher/streamer tier) + Config/Data (`.tres`)
 > **Type**: Integration (boot-phase radius threading) + Config/Data (retune) + one Advisory measurement
 > **Estimate**: **S–M** *(relative-complexity anchor, not a calendar prediction — sprint-09.md sizing convention)*

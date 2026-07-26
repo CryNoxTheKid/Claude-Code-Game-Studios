@@ -147,15 +147,29 @@ func test_build_initial_window_runs_synchronously_during_boot_before_any_process
 	# instead of GameWorld's own synchronous boot/WIRING sequence.
 	var valley: Valley = _boot_valley()
 	var mesher: VoxelWorldMesher = valley.get_voxel_world_mesher()
-	var streamer: VoxelWorldMeshStreamer = valley.get_voxel_world_mesh_streamer()
 
-	# Assert -- the initial window (centered on CameraInput's default
-	# Vector3.ZERO orbit target, per that class's own doc comment) is ALREADY
-	# fully built the instant add_child() returned.
-	var expected: Array[Vector2i] = streamer.get_desired_window_keys(Vector3i.ZERO)
-	assert_int(expected.size()).is_greater(0)
-	assert_int(mesher.get_tracked_chunk_keys().size()).is_equal(expected.size())
-	for key: Vector2i in expected:
+	# Story vox-021 (TD ruling Addendum D / D2): build_initial_window() is
+	# threaded with config.boot_mesh_radius_chunks (the boot-scoped radius),
+	# NEVER config.view_radius_chunks (get_desired_window_keys' own
+	# steady-state radius, AC-STEADY-STATE-UNCHANGED -- deliberately not
+	# reused here) -- so this test computes the expected boot window directly
+	# from the boot radius instead of the previous vox-018-era shortcut of
+	# comparing against get_desired_window_keys(). CameraInput's default
+	# Vector3.ZERO orbit target is a world CORNER (chunk (0,0)), so only the
+	# +x/+z quadrant survives the world's own lower-bound clip -- (radius+1)^2
+	# chunks, mirroring VoxelWorldMeshStreamer's own `_is_chunk_in_world`
+	# lower-bound check (a deliberate local copy, same rationale that
+	# method's own doc comment gives for why VoxelWorldGrid/
+	# VoxelWorldMeshStreamer each keep one).
+	var boot_radius: int = valley.get_voxel_world().config.boot_mesh_radius_chunks
+	var expected_keys: Array[Vector2i] = []
+	for dz in range(0, boot_radius + 1):
+		for dx in range(0, boot_radius + 1):
+			expected_keys.append(Vector2i(dx, dz))
+
+	assert_int(expected_keys.size()).is_greater(0)
+	assert_int(mesher.get_tracked_chunk_keys().size()).is_equal(expected_keys.size())
+	for key: Vector2i in expected_keys:
 		assert_bool(mesher.is_chunk_tracked(key)).is_true()
 
 
@@ -167,25 +181,32 @@ func test_valley_process_tracks_moving_camera_focus_and_stays_window_bounded() -
 	# Arrange -- boot, then confirm the initial (near-origin) window is live.
 	# The production default boot focus is CameraInput's Vector3.ZERO orbit
 	# target -- the world's (0,0,0) corner -- so the initial window is
-	# WORLD-EDGE-CLIPPED (measured: 625 of a possible 2401 chunks at this
-	# config's `view_radius_chunks = 24` default). This is a real, empirically
-	# measured characteristic of the CURRENT mesher (an empty/un-generated
-	# chunk still costs ~8-9 ms to build -- [VoxelWorldMesher._build_chunk_arrays]
-	# reads every one of a chunk's ~4,300 cells even when all are air --
-	# comfortably exceeding [VoxelWorldConfig.mesh_build_budget_ms]'s 4.0 ms
-	# default, so the budgeted per-frame path integrates the progress-
-	# guaranteed FIRST item per call, one chunk per frame; this is a landed
-	# vox-007/vox-015 characteristic, not something this wiring-only story
-	# changes or needs to fix). This test's own pan distance is chosen small
-	# enough (2 chunks) that the real per-frame live loop settles in well
-	# under a second of real wall-clock, rather than requiring the full
-	# ~21s a full-window relocation would cost.
+	# WORLD-EDGE-CLIPPED. Story vox-021 (TD ruling Addendum D / D2): the boot
+	# window is now sized by `config.boot_mesh_radius_chunks` (8), NOT
+	# `config.view_radius_chunks` (12, get_desired_window_keys' own
+	# steady-state radius) -- so the original/boot window below is computed
+	# directly from the boot radius, mirroring
+	# `test_build_initial_window_runs_synchronously_during_boot_before_any_process_frame`'s
+	# own fix immediately above. This is a real, empirically-landed
+	# characteristic of the CURRENT mesher (an empty/un-generated chunk's
+	# build cost, whatever it is on this machine, is bounded by
+	# [VoxelWorldConfig.mesh_build_budget_ms]'s 4.0 ms default per call, so
+	# the budgeted per-frame path integrates at least the progress-guaranteed
+	# FIRST item per call; this is a landed vox-007/vox-015/vox-020
+	# characteristic, not something this wiring-only story changes or needs
+	# to fix). This test's own pan distance is chosen small enough (2 chunks)
+	# that the real per-frame live loop settles well within this suite's own
+	# frame budget.
 	var valley: Valley = _boot_valley()
 	var mesher: VoxelWorldMesher = valley.get_voxel_world_mesher()
 	var streamer: VoxelWorldMeshStreamer = valley.get_voxel_world_mesh_streamer()
 	var camera_input: CameraInput = valley.get_camera_input()
 	var original_focus := Vector3i.ZERO
-	var original_window: Array[Vector2i] = streamer.get_desired_window_keys(original_focus)
+	var boot_radius: int = valley.get_voxel_world().config.boot_mesh_radius_chunks
+	var original_window: Array[Vector2i] = []
+	for dz in range(0, boot_radius + 1):
+		for dx in range(0, boot_radius + 1):
+			original_window.append(Vector2i(dx, dz))
 	assert_int(mesher.get_tracked_chunk_keys().size()).is_equal(original_window.size())
 
 	# Act -- move the camera's orbit target a SMALL distance (2 chunks

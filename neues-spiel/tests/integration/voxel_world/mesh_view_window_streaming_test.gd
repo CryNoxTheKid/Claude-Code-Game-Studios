@@ -86,6 +86,7 @@ func test_build_initial_window_meshes_only_the_view_window_not_the_full_world() 
 	# per axis = 1024 possible chunks; view_radius_chunks=1 -> 3x3=9 desired.
 	var grid: VoxelWorldGrid = _make_grid(512)
 	grid.config.view_radius_chunks = 1
+	grid.config.boot_mesh_radius_chunks = 1  # Story vox-021: build_initial_window reads THIS, not view_radius_chunks -- match it, this test is about window-vs-world-size, not the boot/steady split
 	var mesher: VoxelWorldMesher = _make_mesher(grid)
 	var streamer: VoxelWorldMeshStreamer = _make_streamer(grid, mesher)
 
@@ -100,6 +101,7 @@ func test_get_desired_window_keys_matches_actually_built_chunks() -> void:
 	# Arrange
 	var grid: VoxelWorldGrid = _make_grid(512)
 	grid.config.view_radius_chunks = 2  # 5x5 = 25
+	grid.config.boot_mesh_radius_chunks = 2  # Story vox-021: match view_radius_chunks so build_initial_window's window equals get_desired_window_keys' steady-state window, exactly this test's own point
 	var mesher: VoxelWorldMesher = _make_mesher(grid)
 	var streamer: VoxelWorldMeshStreamer = _make_streamer(grid, mesher)
 	var focus := Vector3i(256, 0, 256)
@@ -118,6 +120,7 @@ func test_moving_camera_focus_builds_entering_chunks_and_unloads_leaving_chunks(
 	# Arrange -- two NON-overlapping windows far apart in a large world.
 	var grid: VoxelWorldGrid = _make_grid(2048)
 	grid.config.view_radius_chunks = 1  # 3x3 = 9
+	grid.config.boot_mesh_radius_chunks = 1  # Story vox-021: build_initial_window reads THIS, not view_radius_chunks
 	var mesher: VoxelWorldMesher = _make_mesher(grid)
 	var streamer: VoxelWorldMeshStreamer = _make_streamer(grid, mesher)
 	var focus_a := Vector3i(160, 0, 160)  # chunk (10, 10)
@@ -173,6 +176,7 @@ func test_built_chunk_mesh_instance_gets_visibility_range_end_set() -> void:
 	# Arrange
 	var grid: VoxelWorldGrid = _make_grid(512)
 	grid.config.view_radius_chunks = 4
+	grid.config.boot_mesh_radius_chunks = 4  # Story vox-021: match view_radius_chunks (harmless either way here -- the center chunk is built under any positive boot radius -- kept for consistency)
 	var mesher: VoxelWorldMesher = _make_mesher(grid)
 	var streamer: VoxelWorldMeshStreamer = _make_streamer(grid, mesher)
 	var focus := Vector3i(256, 0, 256)
@@ -198,6 +202,7 @@ func test_build_initial_window_ignores_budget_and_builds_entire_window_in_one_ca
 	# rest. build_initial_window must build the WHOLE window regardless.
 	var grid: VoxelWorldGrid = _make_grid(512)
 	grid.config.view_radius_chunks = 1  # 3x3 = 9
+	grid.config.boot_mesh_radius_chunks = 1  # Story vox-021: build_initial_window reads THIS, not view_radius_chunks
 	grid.config.mesh_build_budget_ms = 4.0
 	var mesher: VoxelWorldMesher = _make_mesher(grid)
 	var streamer: VoxelWorldMeshStreamer = _make_streamer(grid, mesher)
@@ -227,6 +232,7 @@ func test_update_view_window_build_dispatch_count_varies_with_simulated_per_item
 
 	var grid_a: VoxelWorldGrid = _make_grid(1024)
 	grid_a.config.view_radius_chunks = 3
+	grid_a.config.boot_mesh_radius_chunks = 3  # Story vox-021: the "settle" build_initial_window call below now reads THIS, not view_radius_chunks -- match it so the settle target stays the same 7x7=49 window
 	grid_a.config.mesh_build_budget_ms = 4.0
 	var mesher_a: VoxelWorldMesher = _make_mesher(grid_a)
 	var streamer_a: VoxelWorldMeshStreamer = _make_streamer(grid_a, mesher_a)
@@ -236,6 +242,7 @@ func test_update_view_window_build_dispatch_count_varies_with_simulated_per_item
 
 	var grid_b: VoxelWorldGrid = _make_grid(1024)
 	grid_b.config.view_radius_chunks = 3
+	grid_b.config.boot_mesh_radius_chunks = 3  # Story vox-021: see grid_a's own matching comment above
 	grid_b.config.mesh_build_budget_ms = 4.0
 	var mesher_b: VoxelWorldMesher = _make_mesher(grid_b)
 	var streamer_b: VoxelWorldMeshStreamer = _make_streamer(grid_b, mesher_b)
@@ -290,6 +297,7 @@ func test_update_view_window_unload_burst_bounded_per_call_and_settles_across_la
 	# apart, in a world large enough to hold both without clipping.
 	var grid: VoxelWorldGrid = _make_grid(2048)
 	grid.config.view_radius_chunks = 2  # 5x5 = 25
+	grid.config.boot_mesh_radius_chunks = 2  # Story vox-021: the build_initial_window call below (A's setup phase) now reads THIS, not view_radius_chunks -- match it so A's window stays exactly 5x5=25
 	grid.config.mesh_build_budget_ms = 1000.0  # generous -- never the limiter here
 	grid.config.mesh_unload_budget_ms = 4.0  # 4000 us
 	var mesher: VoxelWorldMesher = _make_mesher(grid)

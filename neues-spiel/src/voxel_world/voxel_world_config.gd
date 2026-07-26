@@ -73,6 +73,17 @@ const REGION_SIZE_CHUNKS_MAX: int = 128
 const VIEW_RADIUS_CHUNKS_MIN: int = 2
 const VIEW_RADIUS_CHUNKS_MAX: int = 64
 
+## Safe range for [member boot_mesh_radius_chunks] (Story vox-021, TD ruling
+## `production/architecture-decisions-m02-preflight-2026-07-26.md` Addendum D
+## / D2). Floor matches [constant VIEW_RADIUS_CHUNKS_MIN] (a boot window
+## smaller than 2 has no meaning); ceiling is [constant VIEW_RADIUS_CHUNKS_MAX]
+## itself, NOT [member view_radius_chunks]'s current value -- the separate
+## `> view_radius_chunks` check in [method validate] is its own clamp+warn
+## tier (a boot window larger than the steady-state window is a configuration
+## error, non-BLOCKING, ADR-0002 two-tier) rather than a second range bound.
+const BOOT_MESH_RADIUS_CHUNKS_MIN: int = 2
+const BOOT_MESH_RADIUS_CHUNKS_MAX: int = VIEW_RADIUS_CHUNKS_MAX
+
 ## Safe range for [member settlement_radius_chunks] (Story vox-010, ADR-0015
 ## Decision §1's "active-settlement chunks (ADR-0007 nav region)"; spike
 ## default 8 -- see [member settlement_radius_chunks]'s own doc comment).
@@ -177,7 +188,7 @@ const REGION_DIRECTORY_DEFAULT: String = "user://regions"
 ## Camera-near residency window radius, in chunks (ADR-0015 Decision §1's
 ## "camera-near chunks (ADR-0014 view radius)"; spike default 24).
 ##
-## Story vox-015 (this revision, ADR-0014 Decision §3): this is the SAME knob
+## Story vox-015 (ADR-0014 Decision §3): this is the SAME knob
 ## [VoxelWorldMeshStreamer] reads for the MESH view window's own radius --
 ## the reconciliation this doc comment previously named as pending is now
 ## resolved by reuse, not by a second, independent mesh-radius field. The two
@@ -188,7 +199,47 @@ const REGION_DIRECTORY_DEFAULT: String = "user://regions"
 ## Villager AI needing its DATA resident), but both windows are centered on
 ## the same camera focus concept at the same radius. [TR-voxel-world-053]
 ## [TR-voxel-world-025]
+##
+## Story vox-021 re-tune (TD ruling
+## `production/architecture-decisions-m02-preflight-2026-07-26.md` Addendum D
+## / D2), 24 -> 12: at the MEASURED 7.7 ms/chunk mesh-build cost
+## (`voxel-world-60fps-culling-evidence-20260725-vox019.md`), radius 24 is
+## 49x49 = 2401 chunks = **18.5 s** of meshing -- a window
+## [method VoxelWorldMeshStreamer.update_view_window] can never maintain
+## (the budgeted per-frame path integrates at most ~1 chunk/frame once the
+## window is already full, so ANY further edit/regrowth at this radius stays
+## perpetually behind). Radius 12 is 25x25 = 625 chunks = **4.8 s** -- still
+## too slow for a synchronous boot window (see [member
+## boot_mesh_radius_chunks] for the boot-scoped answer to that), but
+## affordable for [method update_view_window]'s own budgeted, amortized
+## per-frame growth in STEADY STATE, which is what this knob actually governs
+## day to day. **This is the knob that makes the steady-state window
+## actually maintainable at the current mesher cost** -- a pure `.tres` data
+## change, instantly reversible, no code.
 @export var view_radius_chunks: int = 24
+
+## Boot-scoped initial mesh-window radius, in chunks (Story vox-021, TD ruling
+## Addendum D / D2) -- consumed ONLY by [method
+## VoxelWorldMeshStreamer.build_initial_window], threaded as a radius
+## parameter into the existing [method VoxelWorldMeshStreamer._collect_window]
+## -- no new state, no timer, no camera-move trigger, no second code path.
+## [method VoxelWorldMeshStreamer.update_view_window] (and [method
+## VoxelWorldMeshStreamer.get_desired_window_keys]) continue to read [member
+## view_radius_chunks], unchanged -- growth from this boot window to the full
+## steady-state window happens over frames via that ALREADY-budgeted path,
+## never a second mechanism.
+##
+## Rationale (D2 arithmetic at the measured 7.7 ms/chunk): radius 8 is
+## 17x17 = 289 chunks = **~2.2 s** -- comfortably inside the 2.5 s boot mesh-
+## phase ceiling this story's own evidence doc measures against. The decisive
+## point: shrinking ONLY this knob while [member view_radius_chunks] stayed
+## at its old value of 24 would have moved the cost, not removed it --
+## [method VoxelWorldMeshStreamer.update_view_window] would grow the window
+## back to the full (unaffordable) radius at ~1 chunk/frame, trading an
+## 18.5 s freeze for ~35 s of visible pop-in. Both knobs had to move together
+## (this field new at 8; [member view_radius_chunks] retuned 24 -> 12) --
+## see that member's own doc comment for its half of the arithmetic.
+@export var boot_mesh_radius_chunks: int = 8
 
 ## Active-settlement residency window radius, in chunks, around an injected
 ## settlement anchor (ADR-0015 Decision §1's "active-settlement chunks
@@ -398,6 +449,20 @@ func validate() -> Array[String]:
 			[VIEW_RADIUS_CHUNKS_MIN, VIEW_RADIUS_CHUNKS_MAX, view_radius_chunks]
 		)
 		view_radius_chunks = clampi(view_radius_chunks, VIEW_RADIUS_CHUNKS_MIN, VIEW_RADIUS_CHUNKS_MAX)
+	if boot_mesh_radius_chunks < BOOT_MESH_RADIUS_CHUNKS_MIN or boot_mesh_radius_chunks > BOOT_MESH_RADIUS_CHUNKS_MAX:
+		issues.append(
+			"boot_mesh_radius_chunks out of range [%s, %s], got %s -- clamped" %
+			[BOOT_MESH_RADIUS_CHUNKS_MIN, BOOT_MESH_RADIUS_CHUNKS_MAX, boot_mesh_radius_chunks]
+		)
+		boot_mesh_radius_chunks = clampi(boot_mesh_radius_chunks, BOOT_MESH_RADIUS_CHUNKS_MIN, BOOT_MESH_RADIUS_CHUNKS_MAX)
+	if boot_mesh_radius_chunks > view_radius_chunks:
+		issues.append(
+			(
+				"boot_mesh_radius_chunks (%s) exceeds view_radius_chunks (%s) -- a boot window larger" +
+				" than the steady-state window is a configuration error -- clamped to view_radius_chunks"
+			) % [boot_mesh_radius_chunks, view_radius_chunks]
+		)
+		boot_mesh_radius_chunks = view_radius_chunks
 	if settlement_radius_chunks < SETTLEMENT_RADIUS_CHUNKS_MIN or settlement_radius_chunks > SETTLEMENT_RADIUS_CHUNKS_MAX:
 		issues.append(
 			"settlement_radius_chunks out of range [%s, %s], got %s -- clamped" %

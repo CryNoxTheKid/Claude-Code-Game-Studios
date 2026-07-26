@@ -37,8 +37,18 @@
 ##   story's own AC-3 require to run BEHIND Scene/World Management's
 ##   transition overlay, not on a visible frozen frame. A caller (Scene/World
 ##   Management's boot sequence) calls this once per session, before the
-##   transition overlay lifts.
-## - [method update_view_window]: budgeted -- [member
+##   transition overlay lifts. Story vox-021 (TD ruling Addendum D / D2):
+##   this entry point's radius is [member
+##   VoxelWorldConfig.boot_mesh_radius_chunks] -- deliberately SMALLER than
+##   [member VoxelWorldConfig.view_radius_chunks] -- so the boot-time freeze
+##   this method's own synchronous, unbounded nature would otherwise impose at
+##   the measured 7.7 ms/chunk mesh-build cost stays inside the 2.5 s boot
+##   mesh-phase ceiling; the window then grows to the full steady-state
+##   radius over subsequent frames via [method update_view_window]'s own
+##   ALREADY-budgeted path, never a second growth mechanism.
+## - [method update_view_window]: budgeted -- this entry point's radius is
+##   [member VoxelWorldConfig.view_radius_chunks], unchanged by vox-021 --
+##   [member
 ##   VoxelWorldConfig.mesh_build_budget_ms] bounds a SINGLE shared drain
 ##   covering BOTH the rebuild phase and the build-new phase (Story vox-020,
 ##   TD ruling Addendum D §D7 -- see below), [member
@@ -144,8 +154,18 @@ func set_time_source_for_test(source: Callable) -> void:
 ## VoxelWorldConfig.mesh_build_budget_ms]/[member
 ## VoxelWorldConfig.mesh_unload_budget_ms] entirely -- not merely a very
 ## generous reading of them.
+##
+## Story vox-021 (TD ruling Addendum D / D2): the ONE call site of [member
+## VoxelWorldConfig.boot_mesh_radius_chunks] -- passed as [method
+## _sync_window]'s radius parameter, distinct from [method update_view_window]'s
+## own [member VoxelWorldConfig.view_radius_chunks] radius. This is what makes
+## the boot-time window SMALLER than the steady-state window it later grows
+## into (via [method update_view_window]'s own already-budgeted per-frame
+## path -- no new growth mechanism).
 func build_initial_window(camera_focus_cell: Vector3i) -> void:
-	_sync_window(camera_focus_cell, -1.0, -1.0)
+	assert(grid != null, "VoxelWorldMeshStreamer.grid not wired")
+	assert(grid.config != null, "VoxelWorldMeshStreamer.grid.config not wired")
+	_sync_window(camera_focus_cell, -1.0, -1.0, grid.config.boot_mesh_radius_chunks)
 
 
 ## Budgeted per-frame streaming step (AC-1/AC-2, TR-voxel-world-025) -- a live
@@ -159,17 +179,25 @@ func build_initial_window(camera_focus_cell: Vector3i) -> void:
 func update_view_window(camera_focus_cell: Vector3i) -> void:
 	assert(grid != null, "VoxelWorldMeshStreamer.grid not wired")
 	assert(grid.config != null, "VoxelWorldMeshStreamer.grid.config not wired")
-	_sync_window(camera_focus_cell, grid.config.mesh_build_budget_ms, grid.config.mesh_unload_budget_ms)
+	_sync_window(camera_focus_cell, grid.config.mesh_build_budget_ms, grid.config.mesh_unload_budget_ms, grid.config.view_radius_chunks)
 
 
-## Every chunk key the CURRENT view window desires around [param
+## Every chunk key the CURRENT STEADY-STATE view window desires around [param
 ## camera_focus_cell] -- test/tool introspection convenience exposing the
-## exact same computation [method _sync_window] performs internally, not
-## itself part of the streaming algorithm's build/unload side effects.
+## exact same computation [method _sync_window] performs internally for
+## [method update_view_window], not itself part of the streaming algorithm's
+## build/unload side effects. Story vox-021: deliberately ALWAYS reads [member
+## VoxelWorldConfig.view_radius_chunks], never [member
+## VoxelWorldConfig.boot_mesh_radius_chunks] -- this method's meaning is
+## "the steady-state window", and callers/tests must not overload it with the
+## boot radius (that radius has no public introspection getter of its own;
+## [method build_initial_window]'s own effect is the only place it is
+## observable).
 func get_desired_window_keys(camera_focus_cell: Vector3i) -> Array[Vector2i]:
 	assert(grid != null, "VoxelWorldMeshStreamer.grid not wired")
+	assert(grid.config != null, "VoxelWorldMeshStreamer.grid.config not wired")
 	var desired: Dictionary[Vector2i, bool] = {}
-	_collect_window(desired, _center_key(camera_focus_cell))
+	_collect_window(desired, _center_key(camera_focus_cell), grid.config.view_radius_chunks)
 	var keys: Array[Vector2i] = []
 	for key: Vector2i in desired:
 		keys.append(key)
@@ -177,10 +205,14 @@ func get_desired_window_keys(camera_focus_cell: Vector3i) -> Array[Vector2i]:
 
 
 ## Shared window-sync implementation (class doc comment) -- computes the
-## desired chunk set from [param camera_focus_cell] and [member
-## VoxelWorldConfig.view_radius_chunks] (the SAME radius knob [VoxelWorldGrid]
-## itself reads for data residency's own camera-near half, per that config
-## field's own reconciliation note), then:
+## desired chunk set from [param camera_focus_cell] and [param radius] (Story
+## vox-021: the caller-supplied radius, [member
+## VoxelWorldConfig.view_radius_chunks] from [method update_view_window] --
+## the SAME radius knob [VoxelWorldGrid] itself reads for data residency's own
+## camera-near half, per that config field's own reconciliation note -- or
+## [member VoxelWorldConfig.boot_mesh_radius_chunks] from [method
+## build_initial_window]; this method itself is radius-agnostic, never reading
+## either config field directly), then:
 ## 1. Rebuilds every dirty, still-tracked chunk ([method
 ##    VoxelWorldMesher.get_dirty_chunk_keys], filtered) and builds every
 ##    desired chunk NOT already tracked ([method VoxelWorldMesher.build_chunk]
@@ -214,13 +246,18 @@ func get_desired_window_keys(camera_focus_cell: Vector3i) -> Array[Vector2i]:
 ## so [method build_initial_window]'s boot contract covers both (AC-BOOT-
 ## UNBOUNDED); harmless in practice since the dirty set is always empty at
 ## boot (nothing has been marked dirty yet).
-func _sync_window(camera_focus_cell: Vector3i, build_budget_ms: float, unload_budget_ms: float) -> void:
+func _sync_window(camera_focus_cell: Vector3i, build_budget_ms: float, unload_budget_ms: float, radius: int) -> void:
 	assert(grid != null, "VoxelWorldMeshStreamer.grid not wired")
 	assert(mesher != null, "VoxelWorldMeshStreamer.mesher not wired")
 	assert(grid.config != null, "VoxelWorldMeshStreamer.grid.config not wired")
 
 	var desired: Dictionary[Vector2i, bool] = {}
-	_collect_window(desired, _center_key(camera_focus_cell))
+	_collect_window(desired, _center_key(camera_focus_cell), radius)
+	# NOTE: visibility_range_end stays derived from view_radius_chunks alone
+	# (AC-VISIBILITY-RANGE-DERIVED), regardless of which radius built this
+	# particular window -- the distance fade is a STEADY-STATE property, so a
+	# chunk built at the smaller boot radius still fades at the same distance
+	# a chunk built later via update_view_window would.
 	var range_end: float = _visibility_range_end()
 
 	var to_rebuild: Array[Vector2i] = []
@@ -267,15 +304,18 @@ func _center_key(camera_focus_cell: Vector3i) -> Vector2i:
 	return grid.chunk_key_for_cell(camera_focus_cell)
 
 
-## The square view-window chunk set around [param center], radius [member
-## VoxelWorldConfig.view_radius_chunks], bounds-filtered against the
-## configured world extent -- mirrors [VoxelWorldGrid]'s own private
-## `_collect_window`/`_is_chunk_in_world` shape exactly (that pair is private
-## to [VoxelWorldGrid], so this is a deliberate, behavior-identical local
-## copy rather than a cross-class private call). Populates [param desired] in
-## place, matching that same private method's in/out-parameter signature.
-func _collect_window(desired: Dictionary[Vector2i, bool], center: Vector2i) -> void:
-	var radius: int = grid.config.view_radius_chunks
+## The square view-window chunk set around [param center], radius [param
+## radius] (Story vox-021: caller-supplied -- [member
+## VoxelWorldConfig.view_radius_chunks] or [member
+## VoxelWorldConfig.boot_mesh_radius_chunks] depending on caller, see [method
+## _sync_window]'s own doc comment; this method reads neither config field
+## directly), bounds-filtered against the configured world extent -- mirrors
+## [VoxelWorldGrid]'s own private `_collect_window`/`_is_chunk_in_world` shape
+## exactly (that pair is private to [VoxelWorldGrid], so this is a deliberate,
+## behavior-identical local copy rather than a cross-class private call).
+## Populates [param desired] in place, matching that same private method's
+## in/out-parameter signature.
+func _collect_window(desired: Dictionary[Vector2i, bool], center: Vector2i, radius: int) -> void:
 	for dz in range(-radius, radius + 1):
 		for dx in range(-radius, radius + 1):
 			var candidate := center + Vector2i(dx, dz)
