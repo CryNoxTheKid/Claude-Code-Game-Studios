@@ -1,7 +1,7 @@
 # Story 003: Candidate region formation & affected-region scoping
 
 > **Epic**: Build Validation & Navigability
-> **Status**: Ready
+> **Status: Complete (2026-07-26 — 1053/1053 suite green 0 orphans, agent-verified; parent re-verifies with the concurrent vox-021)
 > **Layer**: Feature
 > **Type**: Logic
 > **Estimate**: ~1 agent-day
