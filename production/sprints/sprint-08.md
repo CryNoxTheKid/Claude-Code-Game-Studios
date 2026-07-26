@@ -273,3 +273,21 @@ Two watched paths this sprint — not one binding lane:
   lane-days inside 8 available; 2-day buffer reserved for the vox-018 unknown and the anti-stuck join.
 - **Next step:** run `/qa-plan sprint` to define test cases per story before `/dev-story`, then sequence
   `vox-018` (gdscript, FIRST) and `villager-ai-014` (ai, FIRST) as the two critical-path openers.
+
+
+---
+
+## Sprint Result — CLOSED 2026-07-26
+
+**13/13 complete** (10 Must + vox-019 remediation + 2 Nice). Suite 843 -> 951, green with 0 orphans on every story commit.
+
+Milestone criteria closed this sprint:
+- **#4 re-tune** — tick-007 (max_ticks_per_frame 12) + villager-ai-022 (K=5, decision_interval 4): worst-case deciding wait at pop 30 measured 30 -> 6 ticks; burst amplification measured 23.1ms, isolated and non-recurring.
+- **#12 60 FPS with culling** — vox-018 measured an honest MISS (p95 51.5ms) and root-caused it to build_chunk's per-cell read loop; vox-019 (planned buffer) replaced it with a bulk ChunkSnapshot: 40.4 -> 7.7ms per chunk, byte-identical output, p95 13.06ms true compute (21% headroom), draw calls 709, culling proven ON. PASS.
+- **#6 building playable (CD-ruled scope)** — all four drawing verbs land: wall (F1), floor (F2), roof (Flat MVP), block (place). Every tool is a pure resolver behind CommitPipeline; grep-guarded as non-writers.
+- **#7 villager AI (CD-ruled scope)** — anti-stuck ladder complete: rescue-target BFS (014), watchdog + F3 telemetry (015), seal prevention + livelock escape proven against the REAL build write (016).
+- **#5 residency** — upgraded from banked certification to MEASURED values: C1 (cap 32 confirmed, gen-cost guard 1.0ms, worst frame 5.5ms) and C4 (completion-driven drain: 1.24x cost across 10x queue size).
+
+Findings recorded: the spike's 144 cells/s camera speed is stale (real: 42.0); vsync floors frame-time measurements at 16.67ms (measure true compute with vsync off); Godot 4.7 cannot @export RefCounted/Object.
+
+Deferred per CD ruling (M02): building 006/007/008/009, villager-ai-013, presentation-001 Sub-B + the golden-hour ambient re-shoot, roof formations beyond Flat, block remove-mode.

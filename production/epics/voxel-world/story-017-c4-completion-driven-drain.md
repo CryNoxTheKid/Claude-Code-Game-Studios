@@ -1,12 +1,12 @@
 # Story 017: ADR-0015 C4 — completion-driven residency drain loop
 
 > **Epic**: Voxel World / Grid Data
-> **Status**: Ready
+> **Status: Complete (2026-07-26 — 951/951 suite green, parent-verified; #5 measured-values upgrade complete)
 > **Layer**: Presentation (world-storage residency tier)
 > **Type**: Integration
 > **Estimate**: 1 day
 > **Manifest Version**: 2026-07-23
-> **Last Updated**: (set by /dev-story)
+> **Last Updated**: 2026-07-26
 
 ## Context
 
@@ -29,8 +29,8 @@
 
 ## Acceptance Criteria
 
-- [ ] The residency drain loop re-examines only items whose background task just completed, never polling `is_task_completed` across the whole queue each tick. [TR-voxel-world-053]
-- [ ] Drain work per tick scales with the number of completions, not with total in-flight queue size. [TR-voxel-world-053]
+- [x] The residency drain loop re-examines only items whose background task just completed, never polling `is_task_completed` across the whole queue each tick. [TR-voxel-world-053]
+- [x] Drain work per tick scales with the number of completions, not with total in-flight queue size. [TR-voxel-world-053]
 
 ---
 
@@ -68,7 +68,7 @@
 
 **Story Type**: Integration
 **Required evidence**: `tests/integration/voxel_world/completion_driven_drain_test.gd` OR documented playtest — must exist and pass
-**Status**: [ ] Not yet created
+**Status**: [x] Created — 7 test functions, all passing (see `production/qa/evidence/voxel-world-completion-driven-drain-evidence-20260726-vox017.md` for the quantitative AC-2 measurement)
 
 ---
 

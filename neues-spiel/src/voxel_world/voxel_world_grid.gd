@@ -183,6 +183,55 @@
 ## framing, scoped ONLY to the far-write case residency introduces; a
 ## residency-inactive grid (opt-in, unchanged) or a bulk write entirely within
 ## resident chunks still emits exactly one signal, exactly as before.
+##
+## Story vox-017 (this revision, ADR-0015 §6 production note; TR-voxel-world-053)
+## makes [method update_residency]'s own per-tick drain COMPLETION-DRIVEN
+## instead of polled: the spike's own drain loop re-scanned every not-yet-ready
+## queued item every tick ("`deferred_pagein_events`/`deferred_evict_events`
+## reach tens of millions across a run" -- the ADR's own production note), by
+## calling [method WorkerThreadPool.is_task_completed] once per still-desired/
+## still-in-flight chunk EVERY call, for as long as that chunk stayed desired
+## and unfinished. [method _reap_finished_async_writes] already had this shape
+## verbatim (a `for chunk_key in _write_tasks: if is_task_completed(...)` scan
+## over the WHOLE in-flight write queue every call); the read side had the
+## same shape one level removed, via [method _request_resident] opportunistically
+## calling [method _try_integrate_read] (a poll) for every chunk in the desired
+## window each tick. Both are now replaced with a genuinely completion-driven
+## mechanism that needs NO new signal/callback machinery: a background task
+## ([method _bg_read_from_disk]/[method _bg_regenerate_from_seed]/[method
+## _bg_flush_chunk]) already writes its own result into the MUTEX-GUARDED
+## [member _read_results]/[member _write_results] EXACTLY ONCE, the instant its
+## own work finishes -- that dictionary entry's PRESENCE already IS the
+## completion signal Story 011 built, self-reported by the completing task, not
+## something the calling thread has to repeatedly ask the engine about. [method
+## _reap_finished_async_writes] (rewritten) and the new [method
+## _reap_finished_async_reads] each simply snapshot their OWN result
+## dictionary's current keys under [member _task_mutex] -- ONLY items that have
+## ALREADY posted completion -- and drain (budgeted, Story vox-012) exactly
+## those; an item still in flight is never touched, never re-examined, and
+## [method WorkerThreadPool.is_task_completed] is never called anywhere in
+## [method update_residency]'s own call graph any more (grep-verifiable). Both
+## reap phases run at the TOP of [method update_residency], each its own fresh
+## budget window (never shared/cumulative, same Story vox-012 discipline) --
+## [method _reap_finished_async_reads] against [member
+## VoxelWorldConfig.page_budget_ms] (a completed PAGE-IN settling), [method
+## _reap_finished_async_writes] against [member VoxelWorldConfig.evict_budget_ms]
+## (unchanged). [method _request_resident] (used by the pending-write-retry and
+## desired-window page-in phases, AND by [method get_cell]'s own bare
+## opportunistic page-in) no longer calls [method _try_integrate_read] itself --
+## a chunk already in [member _read_tasks] simply stays queued, exactly like a
+## concurrency-cap-miss already did (Story vox-011); the completion-driven reap
+## phase above integrates it the instant it actually reports done, whether that
+## call originated from [method update_residency] or (with a slight extra-frame
+## lag versus before) a subsequent bare [method get_cell] call -- still matching
+## [method get_cell]'s own pre-existing "a later get_cell/update_residency call
+## resolves it" contract. [method _try_integrate_read] itself is UNCHANGED
+## (still polls [method WorkerThreadPool.is_task_completed], now a thin wrapper
+## around the extracted [method _integrate_one_finished_read] body) and remains
+## in use ONLY by [method wait_for_async_residency_idle]/[method
+## drain_pending_async_reads] -- explicit, bounded, non-per-frame test/sync
+## helpers the ADR's production note does not target (it names "the drain
+## loop," i.e. [method update_residency]'s own per-tick path, specifically).
 class_name VoxelWorldGrid
 extends Node
 
@@ -397,7 +446,10 @@ var _write_in_flight_data: Dictionary[Vector2i, PackedByteArray] = {}
 ## Drained -- and the queued cells actually applied onto the just-loaded
 ## resident copy -- by [method _apply_pending_writes], called the instant a
 ## chunk transitions to resident via [method _try_serve_from_in_flight_write]
-## or [method _try_integrate_read]; a chunk_key present here is by
+## or [method _integrate_one_finished_read] (Story vox-017 extraction of the
+## former [method _try_integrate_read] body -- reached either via the
+## completion-driven [method _reap_finished_async_reads] or, for tests, via
+## [method _try_integrate_read]'s own poll); a chunk_key present here is by
 ## construction never simultaneously a key in [member _chunks] (queuing only
 ## ever happens while the chunk is absent from [member _chunks], and the key
 ## is erased from here in the SAME call that adds it to [member _chunks]).
@@ -827,16 +879,18 @@ func get_cell(cell: Vector3i) -> CellContents:
 		# change.
 		#
 		# Story vox-011 (ADR-0015 Decision §6): the page-in itself is now
-		# NON-BLOCKING -- [method _request_resident] either integrates an
-		# already-finished background result right now (no disk/regen touch
-		# on THIS thread, just consuming a completed task), dispatches a
-		# fresh background task (best-effort, cap-checked), or -- if the pool
-		# is already at capacity -- leaves the chunk queued for a later call.
-		# In every case this method returns WITHOUT blocking; if the chunk
-		# still isn't resident afterward, this read serves a transparent
-		# empty result for now (never a synchronous fallback) -- a later
-		# get_cell/update_residency call resolves it once the background task
-		# lands.
+		# NON-BLOCKING -- [method _request_resident] either finds the chunk
+		# already served from the in-flight-write cache, notices it is
+		# already dispatched and simply leaves it queued (Story vox-017: no
+		# longer opportunistically polls for completion here -- see that
+		# method's own doc comment), or dispatches a fresh background task
+		# (best-effort, cap-checked). In every case this method returns
+		# WITHOUT blocking; if the chunk still isn't resident afterward, this
+		# read serves a transparent empty result for now (never a synchronous
+		# fallback) -- a later get_cell/update_residency call resolves it once
+		# the background task lands and a completion-driven reap (Story
+		# vox-017's [method _reap_finished_async_reads], or an explicit test
+		# settle helper) integrates it.
 		if _residency_active and _region_has_chunk(key):
 			_request_resident(key)
 		if not _chunks.has(key):
@@ -1318,11 +1372,37 @@ func _drain_budgeted(items: Array, start_usec: int, budget_usec: int, action: Ca
 ## SAME call (budget permitting) -- exactly the "let staggered eviction flush
 ## it" half of the load-before-write rule, with no special-cased "far write"
 ## flush path of its own.
+##
+## Story vox-017 (this revision, ADR-0015 §6 production note; TR-voxel-world-053)
+## adds a FIFTH budgeted phase -- [method _reap_finished_async_reads],
+## COMPLETION-DRIVEN like the (rewritten) eviction-flush reap it mirrors -- run
+## FIRST, before every other phase, with its own fresh budget window against
+## [member VoxelWorldConfig.page_budget_ms]. Both reap phases now consume their
+## own mutex-guarded result dictionary's current keys directly ([member
+## _read_results]/[member _write_results]) instead of polling [method
+## WorkerThreadPool.is_task_completed] over the full in-flight task set every
+## call -- see this file's own class doc comment (Story vox-017 paragraph) for
+## the full rationale. Running the reads-reap FIRST means any chunk that just
+## completed is already resident by the time the pending-write-retry and
+## desired-window page-in phases below call [method _request_resident] --
+## which itself no longer polls (Story vox-017) -- so nothing downstream of
+## this new phase needed to change shape, only [method _request_resident]'s
+## OWN internal poll was removed.
 func update_residency(camera_focus_cell: Vector3i, settlement_anchor_cell: Vector3i) -> void:
 	assert(config != null, "VoxelWorldGrid.update_residency: config not wired")
 	_residency_active = true
 	_last_camera_focus_cell = camera_focus_cell
 	_last_settlement_anchor_cell = settlement_anchor_cell
+
+	# Story vox-017 (ADR-0015 §6 production note): completion-driven reap
+	# phases run FIRST, each its own fresh budget window -- any chunk either
+	# integrates here (page-in) or reaps here (eviction-flush) BEFORE the
+	# phases below ever call [method _request_resident]/[method _request_evict],
+	# so those phases see already-up-to-date [member _chunks]/[member
+	# _write_in_flight_data] state and never need to poll
+	# [method WorkerThreadPool.is_task_completed] themselves.
+	var reap_reads_start_usec: int = _now_usec()
+	_reap_finished_async_reads(reap_reads_start_usec, _budget_usec(config.page_budget_ms))
 
 	var reap_start_usec: int = _now_usec()
 	_reap_finished_async_writes(reap_start_usec, _budget_usec(config.evict_budget_ms))
@@ -1403,22 +1483,36 @@ func get_in_flight_async_task_count() -> int:
 ## not-yet-durable bytes ([method _try_serve_from_in_flight_write], Story
 ## vox-013, ADR-0015 Decision §3 -- checked FIRST, before either read path, so
 ## an in-flight chunk NEVER races a genuine region-file read against its own
-## still-in-flight write), has a just-finished background result integrated
-## into [member _chunks] right now ([method _try_integrate_read],
-## non-blocking), or was freshly dispatched onto the [WorkerThreadPool] this
-## call ([method _try_dispatch_read]). Returns FALSE only when the chunk still
-## has no finished result AND could not be dispatched because [member
+## still-in-flight write), is already dispatched and simply awaiting its
+## background task ([member _read_tasks] has an entry -- left queued, no-op),
+## or was freshly dispatched onto the [WorkerThreadPool] this call ([method
+## _try_dispatch_read]). Returns FALSE only when the chunk still has no
+## finished result AND could not be dispatched because [member
 ## VoxelWorldConfig.max_concurrent_async_tasks] is already saturated -- the
 ## caller ([method update_residency]/[method get_cell]) simply leaves [param
 ## chunk_key] queued and retries on a later call (ADR-0015 Decision §6:
 ## cap-miss stays queued, never a synchronous read/regen fallback).
+##
+## Story vox-017 (ADR-0015 §6 production note): this method NO LONGER polls
+## [method WorkerThreadPool.is_task_completed] itself (it used to, via [method
+## _try_integrate_read], the instant a requested chunk's task happened to
+## already be done) -- that integration is now exclusively the job of [method
+## update_residency]'s own completion-driven [method _reap_finished_async_reads]
+## phase, which runs BEFORE this method is ever called from [method
+## update_residency]'s other phases, so a chunk that just completed is already
+## resident (short-circuits at the top `_chunks.has` check above) by the time
+## this method sees it. A chunk requested from OUTSIDE that call graph ([method
+## get_cell]'s own bare opportunistic page-in) simply observes "still in
+## flight, come back later" here now, instead of opportunistically resolving
+## in the same call -- consistent with [method get_cell]'s own pre-existing
+## "a later get_cell/update_residency call resolves it" contract.
 func _request_resident(chunk_key: Vector2i) -> bool:
 	if _chunks.has(chunk_key):
 		return true
 	if _try_serve_from_in_flight_write(chunk_key):
 		return true
-	if _try_integrate_read(chunk_key):
-		return true
+	if _read_tasks.has(chunk_key):
+		return true  # already in flight -- completion-driven reap integrates it once actually done; never poll here
 	return _try_dispatch_read(chunk_key)
 
 
@@ -1467,23 +1561,87 @@ func _try_serve_from_in_flight_write(chunk_key: Vector2i) -> bool:
 ## Non-blocking: TRUE and integrates [param chunk_key] into [member _chunks]
 ## if (and only if) its background read task has already finished --
 ## [method WorkerThreadPool.is_task_completed] is a pure poll, never a wait.
-## The finished payload is consumed from [member _read_results] under
-## [member _task_mutex] -- [method WorkerThreadPool.wait_for_task_completion]
-## IS still called here, but only to join/free an ALREADY-complete task (it
-## never blocks in that case), and its [Error]-code return is discarded,
-## never treated as the chunk's data (ADR-0015 Decision §6 engine note;
-## TR-voxel-world-053 QA AC-3).
-##
-## Story vox-014 addition: also applies any far write queued for [param
-## chunk_key] ([method _apply_pending_writes]) the instant this integration
-## succeeds -- see [method _try_serve_from_in_flight_write]'s matching note
-## (the other transition-to-resident point).
+## Story vox-017: this is now a thin wrapper around [method
+## _integrate_one_finished_read] (the extracted, poll-free integration body) --
+## used ONLY by [method wait_for_async_residency_idle]/[method
+## drain_pending_async_reads], the two explicit, bounded, non-per-frame test/
+## sync helpers that must actively ask "is this specific in-flight task done
+## yet" rather than wait for a completion record to show up on its own. The
+## PER-TICK production path ([method update_residency], via [method
+## _reap_finished_async_reads]) never calls this -- see this file's own class
+## doc comment (Story vox-017 paragraph) for why: polling every still-desired,
+## not-yet-ready chunk's [method WorkerThreadPool.is_task_completed] every tick
+## is exactly the anti-pattern ADR-0015 §6's production note names.
 func _try_integrate_read(chunk_key: Vector2i) -> bool:
 	if not _read_tasks.has(chunk_key):
 		return false
-	var task_id: int = _read_tasks[chunk_key]
-	if not WorkerThreadPool.is_task_completed(task_id):
+	if not WorkerThreadPool.is_task_completed(_read_tasks[chunk_key]):
 		return false
+	_integrate_one_finished_read(chunk_key)
+	return true
+
+
+## Non-blocking, COMPLETION-DRIVEN drain of every background page-in (read)
+## task that has ALREADY posted its result into the mutex-guarded [member
+## _read_results] (Story vox-017, ADR-0015 §6 production note; TR-voxel-world-053)
+## -- the write-side counterpart of [method _reap_finished_async_writes],
+## same shape. [param chunk_key]'s mere PRESENCE in [member _read_results] IS
+## the completion signal (written exactly once, by the background task itself,
+## the instant its own work finishes -- [method _bg_read_from_disk]/[method
+## _bg_regenerate_from_seed]) -- so this NEVER calls [method
+## WorkerThreadPool.is_task_completed] and NEVER iterates the full [member
+## _read_tasks] in-flight set: only items that just completed are ever
+## touched, so drain work here scales with COMPLETIONS, never with how many
+## reads happen to be currently in flight or currently desired (TR-voxel-
+## world-053 QA AC-1/AC-2). A tick with zero completions does zero per-item
+## work -- `done` is empty and [method _drain_budgeted] is never even called
+## with a non-empty list.
+##
+## Story vox-012's per-item time budget applies identically here ([param
+## start_usec]/[param budget_usec], its own fresh window -- see [method
+## update_residency]'s doc comment): a burst of many finished reads settling
+## in the same call cannot collectively exceed [member
+## VoxelWorldConfig.page_budget_ms] either; any finished-but-not-yet-integrated
+## read simply stays in [member _read_results] and integrates on a later call
+## (harmless -- the bytes are already computed, just not yet applied). Default
+## parameter values ([param start_usec] = -1, [param budget_usec] = -1) mean
+## UNBOUNDED, matching [method _reap_finished_async_writes]'s own default-
+## parameter contract (no existing bare call site needs this -- [method
+## update_residency] is this method's only caller, and always supplies both).
+func _reap_finished_async_reads(start_usec: int = -1, budget_usec: int = -1) -> void:
+	_task_mutex.lock()
+	var done: Array[Vector2i] = _read_results.keys()
+	_task_mutex.unlock()
+	if done.is_empty():
+		return
+	_drain_budgeted(done, start_usec, budget_usec, Callable(self, "_integrate_one_finished_read"))
+
+
+## Per-item body of [method _reap_finished_async_reads] (Story vox-017
+## extraction from the former [method _try_integrate_read] body,
+## behavior-preserving for every existing call path -- see that method's own
+## updated doc comment) -- integrates [param chunk_key]'s already-COMPLETE
+## background read result into [member _chunks]. Callers MUST already know
+## this task is done (either via [member _read_results] containing [param
+## chunk_key], as [method _reap_finished_async_reads] guarantees, or via
+## [method _try_integrate_read]'s own completion poll (that method's ONLY
+## remaining caller, [method wait_for_async_residency_idle]/[method
+## drain_pending_async_reads]) -- this method itself never checks completion, it only joins
+## (instant, since already confirmed done -- [method
+## WorkerThreadPool.wait_for_task_completion]'s [Error] return discarded, same
+## discipline as every other background-task join in this file), consumes the
+## MUTEX-GUARDED [member _read_results] entry, and deserializes it into
+## [member _chunks].
+##
+## Story vox-014 addition (carried unchanged from the former [method
+## _try_integrate_read] body): also applies any far write queued for [param
+## chunk_key] ([method _apply_pending_writes]) the instant this integration
+## succeeds -- see [method _try_serve_from_in_flight_write]'s matching note
+## (the other transition-to-resident point).
+func _integrate_one_finished_read(chunk_key: Vector2i) -> void:
+	if not _read_tasks.has(chunk_key):
+		return  # defensive -- should not happen by construction (see doc comment)
+	var task_id: int = _read_tasks[chunk_key]
 	WorkerThreadPool.wait_for_task_completion(task_id)  # instant join/free of an already-finished task; Error return discarded
 	_read_tasks.erase(chunk_key)
 	_task_mutex.lock()
@@ -1492,7 +1650,6 @@ func _try_integrate_read(chunk_key: Vector2i) -> bool:
 	_task_mutex.unlock()
 	_chunks[chunk_key] = _deserialize_chunk_buffer(result["data"])
 	_apply_pending_writes(chunk_key)  # Story vox-014: apply any far write that queued while this chunk paged in
-	return true
 
 
 ## Dispatches a background page-in task for [param chunk_key] if [member
@@ -1662,36 +1819,49 @@ func _bg_flush_chunk(chunk_key: Vector2i, path: String, slot: int, offset: int, 
 	_task_mutex.unlock()
 
 
-## Non-blocking bookkeeping (Story vox-011): joins any FINISHED flush tasks --
-## consumed from the MUTEX-GUARDED [member _write_results], never from
+## Non-blocking, COMPLETION-DRIVEN bookkeeping (Story vox-011; rewritten Story
+## vox-017, ADR-0015 §6 production note): integrates any FINISHED flush tasks
+## -- consumed from the MUTEX-GUARDED [member _write_results], never from
 ## [method WorkerThreadPool.wait_for_task_completion]'s return value
-## (TR-voxel-world-053 QA AC-3). A failed flush `push_error`s (ADR-0015
-## Decision §3's "never applied to disk blind, and never dropped" principle
-## still applies off-thread) -- this story does not yet re-queue a failed
-## flush for retry, a real, deliberately deferred gap in the same spirit as
-## Story vox-010's documented load-before-write gap. Called at the top of
-## every [method update_residency] call, and by [method
+## (TR-voxel-world-053 QA AC-3). Story vox-017 additionally removes the
+## PREVIOUS `for chunk_key in _write_tasks: if is_task_completed(...)` scan --
+## a poll over the WHOLE in-flight write queue every single call, exactly the
+## anti-pattern ADR-0015 §6's production note names ("the spike's drain loop
+## re-scans every not-yet-ready queued item every tick"). [param chunk_key]'s
+## mere PRESENCE in [member _write_results] already IS the completion signal
+## ([method _bg_flush_chunk] writes it there exactly once, the instant its own
+## work finishes) -- so `done` below is simply that dictionary's current key
+## set, snapshotted under [member _task_mutex]: ONLY items that just
+## completed, never the full [member _write_tasks] set, and [method
+## WorkerThreadPool.is_task_completed] is no longer called anywhere in this
+## method (TR-voxel-world-053 QA AC-1, grep-verifiable). A failed flush
+## `push_error`s (ADR-0015 Decision §3's "never applied to disk blind, and
+## never dropped" principle still applies off-thread) -- this story does not
+## yet re-queue a failed flush for retry, a real, deliberately deferred gap in
+## the same spirit as Story vox-010's documented load-before-write gap. Called
+## at the top of every [method update_residency] call, and by [method
 ## wait_for_async_residency_idle].
 ##
-## Story vox-012 (this revision) adds [param start_usec]/[param budget_usec] --
-## the SAME per-item time-budget drain [method update_residency]'s page-in/
-## eviction-dispatch phases use ([method _drain_budgeted]), so a burst of
-## MANY finished flushes settling in the same call cannot collectively exceed
-## [member VoxelWorldConfig.evict_budget_ms] either; any not-yet-reaped
-## finished task simply stays in [member _write_tasks] and is reaped on a
+## Story vox-012's [param start_usec]/[param budget_usec] -- the SAME per-item
+## time-budget drain [method update_residency]'s other phases use ([method
+## _drain_budgeted]) -- is unchanged by this rewrite: a burst of MANY finished
+## flushes settling in the same call still cannot collectively exceed [member
+## VoxelWorldConfig.evict_budget_ms]; any not-yet-reaped finished task simply
+## stays in [member _write_results]/[member _write_tasks] and is reaped on a
 ## later call (harmless -- it is already durable on disk, just not yet
 ## bookkept as such). Defaults ([param start_usec] = -1, [param budget_usec] =
 ## -1) mean UNBOUNDED, preserving every existing bare `_reap_finished_async_writes()`
 ## call site's "drain everything currently finished" behavior verbatim (Story
 ## vox-011's [method wait_for_async_residency_idle], a test/non-per-frame
-## sync point that must fully settle).
+## sync point that must fully settle). A tick with zero completions does zero
+## per-item work -- `done` is empty and [method _drain_budgeted] is never even
+## called with a non-empty list (TR-voxel-world-053 QA AC-1 edge case).
 func _reap_finished_async_writes(start_usec: int = -1, budget_usec: int = -1) -> void:
-	if _write_tasks.is_empty():
+	_task_mutex.lock()
+	var done: Array[Vector2i] = _write_results.keys()
+	_task_mutex.unlock()
+	if done.is_empty():
 		return
-	var done: Array[Vector2i] = []
-	for chunk_key: Vector2i in _write_tasks:
-		if WorkerThreadPool.is_task_completed(_write_tasks[chunk_key]):
-			done.append(chunk_key)
 	_drain_budgeted(done, start_usec, budget_usec, Callable(self, "_reap_one_finished_write"))
 
 
