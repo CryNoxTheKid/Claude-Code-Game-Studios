@@ -100,6 +100,19 @@ var category: Category
 ## material selection (see class doc comment).
 var contents: CellContents
 
+## The RID `furniture_fixture` item id this cell represents (e.g. `&"bed"`)
+## -- Story building-028 addition, GDD Rule 8 / [TR-building-system-048].
+## Empty (`&""`) for every [constant Category.BLOCK] cell; only ever
+## non-empty when [member category] is [constant Category.FURNITURE].
+## [CommitPipeline.commit] is the sole writer (resolved from whichever item
+## was selected via [method CommitPipeline.set_selected_item] at commit
+## time). [ConstructionTickLoop]'s completion write reads this to route a
+## completing furniture cell to the Building System's own furniture
+## registry INSTEAD OF [VoxelWorldGrid] (ADR-0016 BV-1 ruling,
+## `production/architecture-decisions-m02-preflight-2026-07-26.md`:
+## "furniture is not voxel data -- it never enters VoxelWorldGrid").
+var furniture_definition_id: StringName = &""
+
 ## See class doc comment (Story building-030 addition, GDD Edge Case 5,
 ## [TR-building-system-087]). Defaults `false` -- a freshly-created cell is
 ## never unreachable until [method ConstructionJobQueue.report_unreachable]
@@ -121,9 +134,11 @@ func _init(
 	p_cell: Vector3i,
 	p_state: MicroState = MicroState.PLANNED,
 	p_category: Category = Category.BLOCK,
-	p_contents: CellContents = null
+	p_contents: CellContents = null,
+	p_furniture_definition_id: StringName = &""
 ) -> void:
 	cell = p_cell
 	state = p_state
 	category = p_category
 	contents = p_contents if p_contents != null else CellContents.new(1, 0)
+	furniture_definition_id = p_furniture_definition_id

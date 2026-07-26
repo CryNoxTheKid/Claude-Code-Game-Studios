@@ -1,12 +1,12 @@
 # Story 018: Sleep & home — bed claim (move-in moment)
 
 > **Epic**: Villager AI & Behavior
-> **Status**: Ready
+> **Status: Complete (2026-07-27 — 1241/1241 suite green 0 orphans, parent-verified)
 > **Layer**: Core
 > **Type**: Integration
 > **Estimate**: ~1 agent-day
 > **Manifest Version**: 2026-07-23
-> **Last Updated**: —
+> **Last Updated**: 2026-07-26
 
 ## Context
 
@@ -31,12 +31,12 @@
 
 *From GDD `design/gdd/villager-ai-behavior.md`, scoped to this story:*
 
-- [ ] Given a first urgent sleep need and an unowned reachable bed, the villager claims that bed permanently — the move-in moment (AC22).
-- [ ] Given an owned reachable bed and urgent sleep, the villager sleeps in its own bed (AC23); given an owned reachable bed AND a closer unowned free bed, it goes to its OWNED bed — never the closer one (AC44).
-- [ ] Given no reachable bed and urgent sleep, the villager sleeps on the ground at its current cell and reports the correct ground source enum — `ground_no_bed_owned` if it owns no bed, `ground_bed_unreachable` if it owns one it cannot reach (AC24; rates mocked).
-- [ ] Given the sleep need restored above the wake threshold (mocked), the villager wakes and re-enters Deciding (AC25).
-- [ ] Given a bed removed while the villager sleeps in it, it wakes immediately and ownership dissolves (AC26, Edge Case 5, via the furniture-revocation event).
-- [ ] Given an owned but unoccupied bed removed, ownership dissolves and a new bed is claimed at the next urgent sleep (AC27, Edge Case 6).
+- [x] Given a first urgent sleep need and an unowned reachable bed, the villager claims that bed permanently — the move-in moment (AC22).
+- [x] Given an owned reachable bed and urgent sleep, the villager sleeps in its own bed (AC23); given an owned reachable bed AND a closer unowned free bed, it goes to its OWNED bed — never the closer one (AC44).
+- [x] Given no reachable bed and urgent sleep, the villager sleeps on the ground at its current cell and reports the correct ground source enum — `ground_no_bed_owned` if it owns no bed, `ground_bed_unreachable` if it owns one it cannot reach (AC24; rates mocked).
+- [x] Given the sleep need restored above the wake threshold (mocked), the villager wakes and re-enters Deciding (AC25).
+- [x] Given a bed removed while the villager sleeps in it, it wakes immediately and ownership dissolves (AC26, Edge Case 5, via the furniture-revocation event).
+- [x] Given an owned but unoccupied bed removed, ownership dissolves and a new bed is claimed at the next urgent sleep (AC27, Edge Case 6).
 
 ---
 
@@ -74,7 +74,7 @@
 **Story Type**: Integration
 **Required evidence**: `tests/integration/villager_ai/sleep_and_home_test.gd` — must exist and pass (mocked Needs & Mood + Building furniture-revocation).
 
-**Status**: [ ] Not yet created
+**Status**: [x] Created, 10/10 passing (`neues-spiel/tests/integration/villager_ai/sleep_and_home_test.gd`)
 
 ---
 

@@ -25,8 +25,12 @@
 ##    never keep traveling toward a dead target.
 ## 6. **Per-target fallback (GDD Edge Case 1)**: abandonment releases the
 ##    held job claim ONLY when `PursuedActivity.WORK` was being pursued —
-##    never for `NEED`/`NONE` (bed/wander fallback, Story 018/019's own
-##    future scope).
+##    never for `NEED`/`NONE`. Story villager-ai-018 (this revision) fills in
+##    `NEED`'s own fallback for real: an unreachable owned bed falls back to
+##    ground sleep (`State.SLEEPING`, still pursuing `NEED`, source enum
+##    `ground_bed_unreachable`) rather than the pre-018 placeholder
+##    (`State.DECIDING`/`PursuedActivity.NONE`) — `NONE` (wander-reselection)
+##    remains Story 019's own future scope, unchanged.
 ##
 ## NOTE (accumulated pitfall): signal-fire counters use a captured [Array]
 ## with `.append()`/`.size()`, never a captured scalar `+= 1` inside a
@@ -275,6 +279,9 @@ func test_start_traveling_unreachable_target_abandons_and_releases_work_claim() 
 
 
 func test_start_traveling_unreachable_target_abandons_without_releasing_claim_when_pursuing_need() -> void:
+	# Story villager-ai-018: an owned-but-unreachable bed's own AC24/Edge
+	# Case 1 fallback is ground sleep, still pursuing NEED — not the pre-018
+	# placeholder (abandon to Deciding, reset to NONE).
 	var grid: VoxelWorldGrid = _make_disconnected_islands_grid()
 	var predicate_source: VillagerAi = _make_bare_villager_ai(grid)
 	var graph := VillagerNavGraph.new()
@@ -287,8 +294,8 @@ func test_start_traveling_unreachable_target_abandons_without_releasing_claim_wh
 
 	villager.start_traveling(Vector3i(4, 1, 4), VillagerAi.State.SLEEPING)
 
-	assert_int(villager.get_state()).is_equal(VillagerAi.State.DECIDING)
-	assert_int(villager.get_pursued_activity()).is_equal(VillagerAi.PursuedActivity.NONE)
+	assert_int(villager.get_state()).is_equal(VillagerAi.State.SLEEPING)
+	assert_int(villager.get_pursued_activity()).is_equal(VillagerAi.PursuedActivity.NEED)
 	assert_int(jobs.release_claim_call_count).is_equal(0)
 
 

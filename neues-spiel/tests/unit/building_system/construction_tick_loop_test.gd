@@ -27,6 +27,11 @@
 ## 7. AC45 [TR-building-system-080]: two independently-claimed jobs on
 ##    distinct cells advance independently within the same tick burst; a
 ##    job's completion never affects the other job's own progress.
+## 8. Story building-028 (ADR-0016 BV-1 ruling): a FURNITURE-category claim
+##    is refused without a Built support cell (AC49); a completing FURNITURE
+##    job is BUILT as a job but NEVER written into VoxelWorldGrid, and is
+##    routed to a wired [FurnitureRegistry] instead (or silently dropped when
+##    none is wired — never a grid-write fallback).
 ##
 ## Per the tick-system test precedent (`tick_accumulator_test.gd`,
 ## `pause_warp_state_test.gd`): `time_tick_system.gd` deliberately carries no
@@ -169,12 +174,16 @@ func test_fewer_ticks_than_required_leaves_cell_under_construction() -> void:
 
 func test_furniture_category_uses_the_furniture_tick_count() -> void:
 	# Arrange — F3's separate `base_build_ticks[furniture]` knob (default 8).
+	# A support cell directly below is required for `claim_job` to accept a
+	# FURNITURE-category claim at all (Story building-028, AC49 — "construction
+	# cannot start until the support cell is Built").
 	var grid: VoxelWorldGrid = _new_grid()
+	grid.set_cell(Vector3i(3, 0, 3), CellContents.new(1, 0))
 	var mock_tick: MockTimeTickSystem = auto_free(MockTimeTickSystem.new())
 	var loop_config := ConstructionTickLoopConfig.new()
 	var loop: ConstructionTickLoop = _new_loop(grid, mock_tick, loop_config)
-	var cell := BlueprintCell.new(Vector3i(3, 0, 3), BlueprintCell.MicroState.PLANNED, BlueprintCell.Category.FURNITURE)
-	loop.claim_job(cell, 1)
+	var cell := BlueprintCell.new(Vector3i(3, 1, 3), BlueprintCell.MicroState.PLANNED, BlueprintCell.Category.FURNITURE)
+	assert_bool(loop.claim_job(cell, 1)).is_true()
 
 	# Act — one short of the furniture total; still UnderConstruction.
 	for i in range(loop_config.base_build_ticks_furniture - 1):
@@ -184,9 +193,70 @@ func test_furniture_category_uses_the_furniture_tick_count() -> void:
 	# Act — the final tick completes it.
 	mock_tick.fire_tick()
 
-	# Assert
+	# Assert — Story building-028 (ADR-0016 BV-1 ruling): a completing
+	# FURNITURE-category job is BUILT as a job, but NEVER written into
+	# VoxelWorldGrid — furniture is not voxel data. (Prior to building-028
+	# this asserted the opposite; that was the pre-ruling behavior this story
+	# was tasked with overturning.)
 	assert_int(cell.state).is_equal(BlueprintCell.MicroState.BUILT)
-	assert_bool(grid.get_cell(cell.cell).is_empty()).is_false()
+	assert_bool(grid.get_cell(cell.cell).is_empty()).is_true()
+
+
+func test_furniture_claim_without_a_built_support_cell_is_refused() -> void:
+	# Story building-028, AC49 — the support cell below is EMPTY (never
+	# built); claim_job must refuse a FURNITURE-category claim outright.
+	var grid: VoxelWorldGrid = _new_grid()
+	var loop: ConstructionTickLoop = _new_loop(grid, auto_free(MockTimeTickSystem.new()))
+	var cell := BlueprintCell.new(Vector3i(9, 0, 9), BlueprintCell.MicroState.PLANNED, BlueprintCell.Category.FURNITURE)
+
+	var claimed: bool = loop.claim_job(cell, 1)
+
+	assert_bool(claimed).is_false()
+	assert_int(cell.state).is_equal(BlueprintCell.MicroState.PLANNED)
+	assert_bool(loop.is_job_active(cell.cell)).is_false()
+
+
+func test_completing_furniture_job_routes_to_the_furniture_registry() -> void:
+	# Story building-028 (ADR-0016 BV-1 ruling) — a completing FURNITURE cell
+	# is routed to the furniture registry instead of VoxelWorldGrid.
+	var grid: VoxelWorldGrid = _new_grid()
+	grid.set_cell(Vector3i(4, 0, 4), CellContents.new(1, 0))
+	var mock_tick: MockTimeTickSystem = auto_free(MockTimeTickSystem.new())
+	var loop_config := ConstructionTickLoopConfig.new()
+	var loop: ConstructionTickLoop = _new_loop(grid, mock_tick, loop_config)
+	var registry := FurnitureRegistry.new()
+	loop.furniture_registry = registry
+	var cell := BlueprintCell.new(
+		Vector3i(4, 1, 4), BlueprintCell.MicroState.PLANNED, BlueprintCell.Category.FURNITURE, null, &"bed"
+	)
+	assert_bool(loop.claim_job(cell, 3)).is_true()
+
+	for i in range(loop_config.base_build_ticks_furniture):
+		mock_tick.fire_tick()
+
+	assert_bool(grid.get_cell(cell.cell).is_empty()).is_true()
+	var placed: Array[Dictionary] = registry.get_placed_furniture()
+	assert_int(placed.size()).is_equal(1)
+	assert_str(String(placed[0]["definition_id"])).is_equal("bed")
+	assert_bool((placed[0]["cells"] as Array).has(Vector3i(4, 1, 4))).is_true()
+
+
+func test_completing_furniture_job_with_no_registry_wired_never_writes_the_grid() -> void:
+	# Story building-028 — a null furniture_registry silently drops the
+	# placement record; it never falls back to writing the grid.
+	var grid: VoxelWorldGrid = _new_grid()
+	grid.set_cell(Vector3i(5, 0, 5), CellContents.new(1, 0))
+	var mock_tick: MockTimeTickSystem = auto_free(MockTimeTickSystem.new())
+	var loop_config := ConstructionTickLoopConfig.new()
+	var loop: ConstructionTickLoop = _new_loop(grid, mock_tick, loop_config)
+	var cell := BlueprintCell.new(Vector3i(5, 1, 5), BlueprintCell.MicroState.PLANNED, BlueprintCell.Category.FURNITURE)
+	assert_bool(loop.claim_job(cell, 1)).is_true()
+
+	for i in range(loop_config.base_build_ticks_furniture):
+		mock_tick.fire_tick()
+
+	assert_int(cell.state).is_equal(BlueprintCell.MicroState.BUILT)
+	assert_bool(grid.get_cell(cell.cell).is_empty()).is_true()
 
 
 func test_required_ticks_for_reads_the_matching_config_field() -> void:

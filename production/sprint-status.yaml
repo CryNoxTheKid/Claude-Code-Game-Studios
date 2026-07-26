@@ -53,7 +53,7 @@ stories:
     name: "Sleep & home — bed claim (THE MOVE-IN MOMENT); the crown's villager half"
     file: "production/epics/villager-ai-behavior/story-018-sleep-and-home.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete
     owner: "ai-programmer"
     estimate_days: 1.0
     blocker: "START DAY ONE on lane A — deps villager-ai-006/009/011 all Complete, blocked on nothing. Bed claiming REUSES story-011's atomic-claim primitive; do NOT write a second claim mechanism. Needs rates stay MOCKED here (they go live in needs-mood-010, not here). AC24's widened source enum matters: ground_no_bed_owned vs ground_bed_unreachable — the distinction feeds the why-string (nm-007), not the rates"
@@ -62,7 +62,7 @@ stories:
     name: "F3 mood smoothing, snap rule, mean_active & band events — FIRST on lane B, it gates three Must stories"
     file: "production/epics/needs-mood-system/story-005-mood-smoothing-and-band-events.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete
     owner: "godot-gdscript-specialist"
     estimate_days: 1.0
     blocker: "START DAY ONE — gates nm-006, nm-007 and nm-008. Deps needs-mood-001/002 Complete. Domain review: systems-designer (per the S09 Lane-Korrektur — .gd implementation routes to godot-gdscript-specialist; the designer owns formulas and tuning tables, not the implementation). TRAP: use explicit float division (/ 40.0) — integer division on an int-typed mood_smoothing_ticks silently truncates the EMA step to zero. Band boundaries 70/40 are a DISPLAY CONTRACT shared verbatim with Villager Info UI — no second copy in UI code. Grep guard: zero mood references in work/scheduling code (Rule 8, statically checkable)"
@@ -80,7 +80,7 @@ stories:
     name: "Furniture placement base — single-cell support + palette query; FIRST on lane C, it is the bed"
     file: "production/epics/building-system/story-028-furniture-placement-base.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete
     owner: "godot-specialist"
     estimate_days: 1.0
     blocker: "START DAY ONE on lane C — deps building-021/022 + RID all Complete. ⚑ RE-READ AGAINST BV-1 BEFORE STARTING: it inherits TWO blocking ACs it did not have when it was written — (a) a FURNITURE-category completion NEVER bulk_writes to the grid (this is what makes build-validation-002's furniture-transparency guarantee true BY CONSTRUCTION; breaking it silently breaks a shipped, tested, green invariant with no test to catch it), and (b) the registry exposes a placed/removed signal + item enumeration as a duck-typed nil-safe provider. FOLD INTO ITS DoD: re-verify build-validation-006's is_need_functional TRUE branch non-vacuously against a real ItemDefinitionResource once this lands (sign-off section 13 carry-forward)"

@@ -513,6 +513,67 @@ var job_queue: Object = null
 ## exists -- a safe, conservative default, never a crash.
 var population: Object = null
 
+## Bed/furniture dependency (Story villager-ai-018, mocked boundary --
+## Engine Notes: "Bed removal uses the Building System's furniture-revocation
+## event (symmetric to job revocation)"; `building-028`/`016` land the real
+## furniture registry CONCURRENTLY in a different lane, so this story
+## consumes it exclusively through this duck-typed, nil-safe seam, mirroring
+## [member job_queue]'s own established precedent exactly). Exposes four
+## members: `func get_unowned_bed_cells() -> Array[Vector3i]` (mirrors
+## [method ConstructionJobQueue.get_available_jobs]'s own "current claimable
+## snapshot" contract), `func claim_bed(bed_cell: Vector3i, villager_id: int)
+## -> bool` (the SAME atomic-claim PATTERN [method _claim_job] already
+## established -- Story villager-ai-011's own Implementation Notes: "reuse
+## the same atomic-claim primitive for bed ownership contention" -- this
+## class calls it and tries the next candidate on a loss, exactly like job
+## claiming; the ATOMICITY guarantee itself is the provider's own
+## responsibility), `func is_bed_sheltered(bed_cell: Vector3i) -> bool` (the
+## bed_sheltered/bed_unsheltered source-enum split, GDD Core Rule
+## 4/[TR-villager-ai-behavior-071] -- fed by Build Validation's shelter
+## classification on the real provider, story needs-mood-010's own future
+## wiring concern, not this one), and `signal furniture_revoked(villager_id:
+## int, furniture_cell: Vector3i)` (targeted per-owner per
+## `docs/architecture/architecture.md`'s signal table -- every connected
+## villager receives it and self-filters by [member villager_id], see
+## [method _on_furniture_revoked]). Deliberately NOT [method setup]-asserted
+## (mirrors [member nav_graph]/[member job_queue]'s own "nil-safe, not a
+## boot-gate dependency" precedent) -- a villager with this left `null`
+## never claims a bed and always falls back to ground sleep, never crashes.
+var bed_provider: Object = null
+
+## Needs & Mood need-id this story reports against (GDD Core Rule 2: "MVP
+## fills only sleep"; `docs/architecture/architecture.md`'s
+## `start_recovery(villager_id, need: StringName, ...)` boundary treats need
+## ids as opaque wire-format strings, ADR-0006's "cross-system references are
+## opaque ids only" precedent extended here) -- a single local constant
+## rather than a second table, since this story's own scope names no other
+## need.
+const SLEEP_NEED_NAME: StringName = &"sleep"
+
+## Which bed cell this villager PERMANENTLY owns (Story villager-ai-018, GDD
+## Rule 11 -- "claiming a bed IS the move-in moment," ownership never
+## dissolves except via a furniture-revocation event, [method
+## _on_furniture_revoked]). Meaningless while [member _has_owned_bed] is
+## `false` -- read via [method get_owned_bed_cell], never this field
+## directly by an outside consumer (mirrors [member current_cell]'s own
+## "field named like the GDD concept, still read via a getter" precedent).
+var _owned_bed_cell: Vector3i = Vector3i.ZERO
+
+## Whether [member _owned_bed_cell] holds a real, currently-owned bed cell
+## (a `Vector3i` sentinel-free boolean flag, since `Vector3i.ZERO` is itself
+## a legal cell address and cannot double as "no bed").
+var _has_owned_bed: bool = false
+
+## The bed cell this villager is CURRENTLY, PHYSICALLY sleeping in, or `null`
+## whenever not actually asleep in a bed (ground-sleeping, or any
+## non-Sleeping state) -- distinct from [member _owned_bed_cell]'s own "which
+## bed do I own" bookkeeping: a ground-sleeping villager (GDD Rule 12's
+## `ground_bed_unreachable` case) still OWNS a bed but is not sleeping IN it.
+## Set by [method _enter_bed_sleep], cleared by [method _start_ground_sleep],
+## [method _wake_from_sleep], and [method _on_furniture_revoked] -- see each
+## method's own doc comment.
+var _sleeping_in_bed_cell: Variant = null
+
 ## Shared unstuck-rescue telemetry dependency (Story villager-ai-015, GDD
 ## Rule 15/F5's "a per-villager counter and a world total counter"). Unlike
 ## [member needs_provider]/[member job_queue] (mocked boundaries standing in
@@ -807,6 +868,16 @@ func setup() -> void:
 	# CONNECT_DEFERRED), same race-closure reliance as the two connections
 	# directly above.
 	repath_evaluation_requested.connect(_on_repath_evaluation_requested)
+	# Story villager-ai-018: [member bed_provider] is nil-safe/optional (not
+	# asserted above, mirrors [member job_queue]'s own precedent) -- the
+	# furniture-revocation subscription is therefore conditional, the ONE
+	# optional-dependency SIGNAL connection this class wires (every other
+	# optional collaborator is a plain method-call seam with no signal at
+	# all). Default, synchronous connection flags -- never CONNECT_DEFERRED,
+	# consistent with every other signal wiring in this method.
+	if bed_provider != null:
+		@warning_ignore("unsafe_property_access")
+		bed_provider.furniture_revoked.connect(_on_furniture_revoked)
 	request_deciding_pass()
 	_is_set_up = true
 
@@ -837,6 +908,20 @@ func get_pursued_activity() -> PursuedActivity:
 ## an arbitrary cell it is asked to gate.
 func get_claimed_job_cell() -> Variant:
 	return null if _claimed_blueprint_cell == null else _claimed_blueprint_cell.cell
+
+
+## Read-only observability seam (Story villager-ai-018) -- the owned bed
+## cell's address, or `null` if this villager owns no bed (mirrors [method
+## get_claimed_job_cell]'s own "Variant, null-checked by the caller"
+## convention).
+func get_owned_bed_cell() -> Variant:
+	return _owned_bed_cell if _has_owned_bed else null
+
+
+## Read-only observability seam (Story villager-ai-018) -- see [member
+## _has_owned_bed]'s own doc comment.
+func has_owned_bed() -> bool:
+	return _has_owned_bed
 
 
 ## Returns this villager's stable identity/processing-order index (see
@@ -1217,13 +1302,30 @@ func _tick_state() -> void:
 ## by tier 2's own early return above, so this line only ever sees "no job"
 ## in this story's own scope).
 func _tick_deciding() -> void:
+	# Story villager-ai-018: this sticky check now runs FIRST, unconditional
+	# on [method _has_urgent_need]'s current value -- a real Needs & Mood
+	# provider reads `has_urgent_need == false` for the ENTIRE Recovering
+	# span (its own [enum NeedsMood.NeedState] is SATISFIED/URGENT/RECOVERING,
+	# and "urgent" is deliberately narrower than "still being pursued," see
+	# `docs/architecture/architecture.md`'s Core Rule 3 -- has_urgent_need is
+	# the URGENT-state gate, not a "still recovering" query). The former
+	# nested "if _has_urgent_need(): if pursued == NEED: return" shape
+	# (story 006) silently assumed a mocked provider that never distinguished
+	# Recovering from Urgent -- with a REAL provider wired, that nested guard
+	# would never even fire once sleep begins, letting a periodic
+	# `decision_interval` re-check fall through to tier 2 and steal a
+	# sleeping villager into a construction job. Mirrors tier 2's own
+	# pre-existing WORK-stickiness shape (`if _pursued_activity == WORK:
+	# return`, checked BEFORE `_has_available_job` is ever consulted) --
+	# Edge Case 3b's "already pursuing a need is a documented no-op" is now
+	# unconditional, exactly like Rule 4's claim-stickiness already was.
+	if _pursued_activity == PursuedActivity.NEED:
+		return
 	if _has_urgent_need():
-		if _pursued_activity == PursuedActivity.NEED:
-			return
 		if _pursued_activity == PursuedActivity.WORK:
 			_release_job_claim()
 		_pursued_activity = PursuedActivity.NEED
-		_state = State.TRAVELING
+		_commit_to_sleep()
 		return
 	if _pursued_activity == PursuedActivity.WORK:
 		return
@@ -1416,6 +1518,320 @@ func _attempt_claim_and_travel_to_job() -> bool:
 	return false
 
 
+# =============================================================================
+# Story villager-ai-018 -- Sleep & home, bed claim (GDD Rule 11/12/13,
+# Edge Case 1/5/6, [TR-villager-ai-behavior-061]/062/063/084/085)
+# =============================================================================
+
+## Tier-1 NEED commitment's own target-selection entry point (this story
+## fills in what story 006 left as a bare `_state = State.TRAVELING`
+## placeholder, its own doc comment naming "target selection is Story 018's").
+## GDD Rule 12's owned-bed preference (AC23/AC44 -- "an owned bed is ALWAYS
+## preferred, even over a closer unowned one") falls out of this method's own
+## branch ORDER: an owned bed is checked FIRST and, if present, this method
+## never even looks at [member bed_provider]'s unowned candidates at all --
+## there is no ranking step that could ever prefer a closer unowned bed over
+## an owned one, because the unowned branch is structurally unreachable
+## whenever [member _has_owned_bed] is `true`.
+func _commit_to_sleep() -> void:
+	if _has_owned_bed:
+		if nav_graph == null:
+			# Nil-safe fallback (mirrors [method _attempt_claim_and_travel_to_job]'s
+			# own `nav_graph == null` short-circuit): with no shared graph to
+			# even ASK whether the owned bed is reachable, the safe, honest
+			# answer is "cannot reach it" -- ground sleep, never a crash.
+			_start_ground_sleep(NeedsMood.RecoverySource.GROUND_BED_UNREACHABLE)
+			return
+		# AC23: sleeps in its own bed when reachable. AC24 (second half): if
+		# [method start_traveling] finds no path, it calls [method
+		# _abandon_travel] internally -- whose `NEED` branch (below) performs
+		# the `ground_bed_unreachable` fallback this exact case needs, so no
+		# separate reachability pre-check is required here.
+		start_traveling(_owned_bed_cell, State.SLEEPING)
+		return
+	# AC22: claims the nearest unowned reachable bed, permanently.
+	if _attempt_claim_and_travel_to_bed():
+		return
+	# AC24 (first half): no bed owned, and no unowned reachable bed exists
+	# ([member bed_provider] unwired, or every candidate unreachable/lost its
+	# claim race) -- ground sleep at the current cell.
+	_start_ground_sleep(NeedsMood.RecoverySource.GROUND_NO_BED_OWNED)
+
+
+## Rule 4's atomic-claim-and-travel loop (Story villager-ai-011), applied
+## unchanged to bed ownership (this story's own Implementation Notes: "Bed
+## claiming reuses the atomic-claim primitive (Story 011)... AC43 lives in
+## Story 011" -- [method _attempt_claim_and_travel_to_job]'s own doc comment
+## explains the identical shape this mirrors line-for-line: select a
+## candidate ([VillagerBedSelector.select_nearest_reachable_bed], this
+## story's bed-scoped twin of [VillagerJobSelector.select_job]), attempt an
+## atomic claim ([method _claim_bed]), and on a lost race try the NEXT
+## candidate within this SAME Deciding pass -- never a second, deferred pass
+## for a lost claim race specifically. [member bed_provider]/[member
+## nav_graph] absent (either `null`) short-circuits to `false` immediately,
+## mirroring [method _attempt_claim_and_travel_to_job]'s own nil-safe
+## precedent -- a villager with either left unwired simply has no bed
+## available this pass, exactly as if [member bed_provider]'s candidate list
+## were empty.
+##
+## Each iteration re-reads [method _get_unowned_bed_cells] fresh (the
+## provider is the sole source of truth on which beds are still unowned --
+## mirrors [method _attempt_claim_and_travel_to_job]'s own "the queue
+## naturally excludes an already-claimed cell" precedent), filtered by
+## `attempted_cells` (cells THIS pass already tried and lost the claim race
+## for -- strictly grows by one distinct cell per failed iteration, bounding
+## the loop exactly like the job-claim twin).
+##
+## Returns `true` once a claim succeeds and [member _owned_bed_cell]/[member
+## _has_owned_bed] are set and [method start_traveling] has been invoked --
+## regardless of whether that travel call itself immediately succeeds (an
+## immediate pathing failure is [method _abandon_travel]'s own NEED-branch
+## ground-sleep fallback, unchanged by this loop). Returns `false` when no
+## bed could be claimed at all this pass -- [method _commit_to_sleep]'s own
+## caller then falls through to its `ground_no_bed_owned` fallback.
+func _attempt_claim_and_travel_to_bed() -> bool:
+	if nav_graph == null or bed_provider == null:
+		return false
+	var attempted_cells: Array[Vector3i] = []
+	while true:
+		var candidates: Array[Vector3i] = []
+		for cell: Vector3i in _get_unowned_bed_cells():
+			if attempted_cells.has(cell):
+				continue
+			candidates.append(cell)
+		if candidates.is_empty():
+			return false
+		var chosen: Variant = VillagerBedSelector.select_nearest_reachable_bed(
+			candidates, current_cell, nav_graph
+		)
+		if chosen == null:
+			return false
+		if _claim_bed(chosen):
+			_owned_bed_cell = chosen
+			_has_owned_bed = true
+			start_traveling(chosen, State.SLEEPING)
+			return true
+		attempted_cells.append(chosen)
+	# Unreachable -- see [method _attempt_claim_and_travel_to_job]'s own
+	# identical trailing-return comment for why this line exists.
+	return false
+
+
+## [member bed_provider]'s candidate-list read (mocked boundary). Nil-safe,
+## same rationale as [method _has_available_job].
+func _get_unowned_bed_cells() -> Array[Vector3i]:
+	if bed_provider == null:
+		return []
+	@warning_ignore("unsafe_method_access")
+	return bed_provider.get_unowned_bed_cells()
+
+
+## [member bed_provider]'s atomic-claim attempt (mocked boundary, GDD Rule
+## 11/AC22, story 011's shared primitive PATTERN). Nil-safe, same rationale
+## as [method _has_available_job]. A `true` return means [param cell] is now
+## locked to this villager permanently (one bed = one owner, Rule 11); a
+## `false` return means either another villager's same-pass call already won
+## the race, or [param cell] is no longer eligible for any other
+## provider-owned reason -- this method cannot distinguish those cases, by
+## design, exactly like [method _claim_job].
+func _claim_bed(cell: Vector3i) -> bool:
+	if bed_provider == null:
+		return false
+	@warning_ignore("unsafe_method_access")
+	return bed_provider.claim_bed(cell, villager_id)
+
+
+## [member bed_provider]'s shelter-classification read (GDD Core Rule 4 --
+## the `bed_sheltered`/`bed_unsheltered` source-enum split, fed by Build
+## Validation's own shelter classification on the real provider). Nil-safe:
+## an unwired provider answers the conservative, never-inflated default
+## (`false`, unsheltered) -- recovery is never accidentally reported at the
+## FULL ×1.0 rate for a bed this villager cannot actually confirm is
+## sheltered.
+func _is_bed_sheltered(bed_cell: Vector3i) -> bool:
+	if bed_provider == null:
+		return false
+	@warning_ignore("unsafe_method_access")
+	return bed_provider.is_bed_sheltered(bed_cell)
+
+
+## Sleep-recovery entry report (GDD Core Rule 10: "discrete `start_recovery`
+## call... never a per-tick push"). Nil-safe, same rationale as [method
+## _has_urgent_need] -- an unwired [member needs_provider] simply never
+## reports (this villager still sleeps and still wakes on its own, via
+## [method _tick_sleeping]'s own nil-safe [method _is_need_recovering]
+## default; see that method's own doc comment for why that default is safe).
+func _start_sleep_recovery(source_enum: NeedsMood.RecoverySource) -> void:
+	if needs_provider == null:
+		return
+	@warning_ignore("unsafe_method_access")
+	needs_provider.start_recovery(villager_id, SLEEP_NEED_NAME, source_enum)
+
+
+## Sleep-recovery INTERRUPTION report (GDD Edge Case 5, Core Rule 10's
+## "credits zero recovery for the removal tick") -- called ONLY from [method
+## _on_furniture_revoked] when this villager was actually sleeping in the
+## just-revoked bed; natural wake ([method _wake_from_sleep]) never calls
+## this (see that method's own doc comment for why: [method
+## NeedsMood._pass_f2_recovery] already transitions Recovering -> Satisfied
+## on its own once the wake threshold is crossed, with no external
+## `stop_recovery` call required -- that call is reserved for genuine
+## interruption/revocation, per [method NeedsMood.stop_recovery]'s own doc
+## comment). Nil-safe, same rationale as [method _start_sleep_recovery].
+func _stop_sleep_recovery(reason: StringName) -> void:
+	if needs_provider == null:
+		return
+	@warning_ignore("unsafe_method_access")
+	needs_provider.stop_recovery(villager_id, SLEEP_NEED_NAME, reason)
+
+
+## The "still asleep, has the need recovered enough to wake" poll (GDD Rule
+## 13/AC25: "sleeping ends when the need is restored above its wake
+## threshold... re-enters the decision loop" -- Core Rule 3's own "state is
+## truth, the event is a latency hint" discipline: this is a POLL, never a
+## `need_satisfied` signal listener, so the crown story's own poll-not-event
+## variant (needs-mood-010) needs no special casing here at all). Delegates
+## to [member needs_provider]'s own `get_need_state` -- the EXACT, already
+## real, already-implemented `func get_need_state(villager_id: int, need:
+## StringName) -> NeedsMood.NeedState` method every real [NeedsMood] instance
+## exposes (not yet promoted to `architecture.md`'s curated API Boundaries
+## block per that method's own doc comment, but genuinely callable today) --
+## so a REAL [NeedsMood] instance assigned as [member needs_provider] in a
+## future production-wiring story works against this call with ZERO changes
+## needed on the Needs & Mood side. Nil-safe default `true` (still
+## recovering, i.e. "stay asleep"): by construction this is only ever
+## consulted while [member _pursued_activity] == `NEED` and [member _state]
+## == `SLEEPING`, which itself only happens after [method _has_urgent_need]
+## answered `true` at commit time -- meaning [member needs_provider] was
+## non-null then, so a `null` reading here would only ever occur if the
+## dependency were unwired MID-sleep, or for a hand-constructed test fixture
+## that pokes `State.SLEEPING` directly with no provider at all (e.g. the
+## Unstuck Watchdog's own AC32 fixtures, which drive many ticks with a
+## villager parked in `SLEEPING` and require it to stay there). With no
+## information available, this defaults conservatively to "no change" rather
+## than inventing an unearned wake -- mirrors this class's other "unknown
+## defaults never assume progress happened" nil-safety bias (e.g. [method
+## _has_urgent_need]'s own `false` default never assumes an urgent need
+## either).
+func _is_need_recovering() -> bool:
+	if needs_provider == null:
+		return true
+	@warning_ignore("unsafe_method_access")
+	return needs_provider.get_need_state(villager_id, SLEEP_NEED_NAME) == NeedsMood.NeedState.RECOVERING
+
+
+## Bed-sleep entry (Story villager-ai-018, AC22/AC23): called ONLY from
+## [method _complete_travel_arrival] when [param arrival_state] was
+## `SLEEPING` -- i.e. travel just arrived at a bed cell (owned-existing or
+## just-claimed, both funnel through [method start_traveling] before this
+## ever runs). Samples [member bed_provider]'s CURRENT shelter classification
+## at THIS moment (arrival), never a value captured earlier at commit/claim
+## time -- travel can span multiple ticks, and this is this story's own
+## scope's single [method _start_sleep_recovery] report; a LATER shelter
+## change while already Recovering is [NeedsMood]'s own subscription to
+## Build Validation's `shelter_status_changed` (story needs-mood-004's
+## scope, not this one -- Villager AI is never involved in that re-rating).
+func _enter_bed_sleep(bed_cell: Vector3i) -> void:
+	_state = State.SLEEPING
+	_sleeping_in_bed_cell = bed_cell
+	var source: NeedsMood.RecoverySource = (
+		NeedsMood.RecoverySource.BED_SHELTERED
+		if _is_bed_sheltered(bed_cell)
+		else NeedsMood.RecoverySource.BED_UNSHELTERED
+	)
+	_start_sleep_recovery(source)
+
+
+## Ground-sleep entry (Story villager-ai-018, AC24, GDD Rule 12/Edge Case 1's
+## "for a bed — fall back to ground sleep"): sleeps immediately at [member
+## current_cell], no travel involved -- called from [method _commit_to_sleep]
+## (no bed owned and none claimable, or an unwired [member nav_graph]) and
+## from [method _abandon_travel]'s `NEED` branch (an owned bed became
+## unreachable, either at initial [method start_traveling] or via a
+## mid-travel re-path failure, Edge Case 1). [param source_enum] carries the
+## caller's already-determined widened enum -- this method makes no
+## ground/bed-reachability DECISION of its own, it only enters the state and
+## reports it.
+func _start_ground_sleep(source_enum: NeedsMood.RecoverySource) -> void:
+	_state = State.SLEEPING
+	_sleeping_in_bed_cell = null
+	_start_sleep_recovery(source_enum)
+
+
+## Natural wake (Story villager-ai-018, AC25, GDD Rule 13): re-enters
+## Deciding via the SAME [method request_deciding_pass] every other
+## eligibility trigger uses -- no bonus, unbudgeted immediate decide (mirrors
+## [method _perform_watchdog_rescue]'s own identical reasoning). Deliberately
+## does NOT call [method _stop_sleep_recovery] -- see that method's own doc
+## comment for why natural completion needs no interruption report.
+func _wake_from_sleep() -> void:
+	_sleeping_in_bed_cell = null
+	_pursued_activity = PursuedActivity.NONE
+	_clear_travel_state()
+	_state = State.DECIDING
+	request_deciding_pass()
+
+
+## Sleeping-state tick body (Story villager-ai-018; previously a stub --
+## "later needs/sleep story"). A single poll per tick: once the need is no
+## longer [constant NeedsMood.NeedState.RECOVERING] (restored above the wake
+## threshold, [method _is_need_recovering] answers `false`), wake. Runs
+## unconditionally every tick this villager is Sleeping -- never gated by
+## [member scheduler]'s Deciding-pass budget (that budget caps expensive F2
+## pathfind-bearing Deciding passes, GDD Rule 2; this is a cheap O(1) state
+## poll, not a Deciding pass).
+func _tick_sleeping() -> void:
+	if not _is_need_recovering():
+		_wake_from_sleep()
+
+
+## [signal furniture_revoked]-shaped handler (Story villager-ai-018, GDD Edge
+## Case 5/6, [TR-villager-ai-behavior-084]/085) -- connected in [method setup]
+## only when [member bed_provider] is wired (see that method's own doc
+## comment). Every connected villager receives every emission and
+## self-filters by [param revoked_villager_id] (`docs/architecture/
+## architecture.md`'s signal table: "targeted, per-owner" over a shared
+## broadcast signal). A cell that is not this villager's OWNED bed is a
+## no-op -- this handler never reacts to another villager's furniture.
+##
+## AC27 (Edge Case 6, "owned but unoccupied"): ownership dissolves silently
+## -- no wake reaction, no [method _stop_sleep_recovery] call (nothing was
+## being recovered against this bed), matching the GDD's own wording exactly.
+## The villager claims a new bed at its own next urgent-sleep Deciding pass,
+## which needs no special handling here: [member _has_owned_bed] is simply
+## `false` again by the time that pass runs.
+##
+## AC26 (Edge Case 5, "removed while the villager sleeps in it"): detected by
+## [member _sleeping_in_bed_cell] equalling [param furniture_cell] -- NOT by
+## [member _state] alone, since a ground-sleeping villager (owning this SAME
+## bed cell but not physically in it, GDD Rule 12's `ground_bed_unreachable`
+## case) must NOT wake/react here (that would wrongly fire AC26's reaction
+## for AC27's own silent-dissolve case). Wakes immediately, calls [method
+## _stop_sleep_recovery] (credits zero recovery for the removal tick, Core
+## Rule 10), and re-enters Deciding -- the NEXT Deciding pass naturally
+## re-attempts a bed claim or falls back to ground sleep (GDD Edge Case 5's
+## own "typically resuming... or claiming another free bed"), needing no
+## special-cased target-selection here.
+func _on_furniture_revoked(revoked_villager_id: int, furniture_cell: Vector3i) -> void:
+	if revoked_villager_id != villager_id:
+		return
+	if not _has_owned_bed or furniture_cell != _owned_bed_cell:
+		return
+	var was_sleeping_in_this_bed: bool = (
+		_sleeping_in_bed_cell != null and _sleeping_in_bed_cell == furniture_cell
+	)
+	_has_owned_bed = false
+	_owned_bed_cell = Vector3i.ZERO
+	if not was_sleeping_in_this_bed:
+		return
+	_sleeping_in_bed_cell = null
+	_stop_sleep_recovery(&"bed_revoked")
+	_pursued_activity = PursuedActivity.NONE
+	_clear_travel_state()
+	_state = State.DECIDING
+	request_deciding_pass()
+
+
 ## Begins Traveling toward [param target_cell], entering `State.TRAVELING`
 ## and transitioning to [param arrival_state] once [param target_cell] is
 ## reached (Story villager-ai-009; GDD "Traveling" state-table entry:
@@ -1459,6 +1875,15 @@ func start_traveling(target_cell: Vector3i, arrival_state: State) -> bool:
 		_abandon_travel()
 		return false
 	if path.size() == 1:
+		# Story villager-ai-018: [member _travel_target_cell] must be set
+		# BEFORE [method _complete_travel_arrival] fires here too -- that
+		# method's own `SLEEPING` branch ([method _enter_bed_sleep]) reads it
+		# to learn WHICH cell was just arrived at, and this early-return path
+		# (immediate arrival, `target_cell == current_cell` by construction)
+		# never runs the normal multi-cell assignment below that would
+		# otherwise set it. Mirrors the empty-path branch's own identical
+		# "must be set before the callee reads it" precedent above.
+		_travel_target_cell = target_cell
 		_complete_travel_arrival(arrival_state)
 		return true
 	_travel_target_cell = target_cell
@@ -1522,28 +1947,52 @@ func _tick_traveling() -> void:
 ## site transitions to the next state (Working/Sleeping/etc.)"): clears all
 ## travel bookkeeping ([method _clear_travel_state]) and transitions
 ## [member _state] to [param arrival_state] -- the actual per-state
-## behaviour (work-progress accrual, sleep recovery) remains stories
-## 012/018's own stub bodies, untouched here.
+## behaviour (work-progress accrual, sleep recovery) lived as stories
+## 012/018's own stub bodies. Story villager-ai-018 (this revision) adds the
+## ONE branch: arriving into `State.SLEEPING` means arriving at a BED
+## specifically (the only [method start_traveling] caller that ever passes
+## `SLEEPING` is this story's own [method _commit_to_sleep]/[method
+## _abandon_travel] machinery) -- [method _enter_bed_sleep] needs to know
+## WHICH bed cell was just reached, so this method captures [member
+## _travel_target_cell] BEFORE [method _clear_travel_state] runs (that
+## method does not itself touch [member _travel_target_cell], but capturing
+## it first keeps this method's own control flow independent of that detail).
+## Every OTHER [param arrival_state] (Working, Wandering, ...) is completely
+## unaffected -- one added branch, zero changed lines below it.
 func _complete_travel_arrival(arrival_state: State) -> void:
+	var arrived_cell: Vector3i = _travel_target_cell
 	_clear_travel_state()
+	if arrival_state == State.SLEEPING:
+		_enter_bed_sleep(arrived_cell)
+		return
 	_state = arrival_state
 
 
 ## Graceful travel abandonment (Story villager-ai-009, this story's AC19 --
 ## "exits to Deciding and re-selects... never keeps traveling toward a dead
 ## target"). Dispatches GDD Edge Case 1's per-target fallback by [member
-## _pursued_activity] -- the ONLY case this codebase can act on today is
-## `WORK` (releases the held claim via the already-existing [method
-## _release_job_claim], GDD Rule 6's "releases the claim, and tries the
-## next-nearest job"); `NEED`'s ground-sleep fallback and `NONE`'s
-## wander-reselection are Story 018/019's own scope (neither system exists
-## in this codebase yet) -- this story's minimal, safe default for both is
-## simply "abandon and re-decide," which this story's own test proves does
-## NOT erroneously call [method _release_job_claim] for a non-WORK target.
-## Always resets [member _pursued_activity] to `NONE` before re-entering
-## Deciding -- otherwise WORK's own claim-stickiness check ([method
-## _tick_deciding]'s tier 2) would wrongly treat the just-abandoned claim as
-## still held and skip job re-selection entirely.
+## _pursued_activity]:
+## - `WORK`: releases the held claim via the already-existing [method
+##   _release_job_claim], GDD Rule 6's "releases the claim, and tries the
+##   next-nearest job" -- unchanged since story villager-ai-011.
+## - `NEED` (Story villager-ai-018, this revision): GDD Edge Case 1's own
+##   "for a bed — fall back to ground sleep (Rule 12)". By construction this
+##   branch is reached ONLY while traveling toward a bed ([method
+##   _commit_to_sleep] never calls [method start_traveling] under `NEED` for
+##   any other target), and bed CLAIMING always happens before travel starts
+##   (mirrors job-claim-before-travel) -- so [member _has_owned_bed] is
+##   ALWAYS `true` here, meaning the correct widened source enum is always
+##   `ground_bed_unreachable` (AC24's second half), never
+##   `ground_no_bed_owned` (that case is [method _commit_to_sleep]'s own
+##   direct fallback, never routed through this method). Deliberately does
+##   NOT reset [member _pursued_activity] to `NONE` and does NOT re-enter
+##   Deciding -- the villager is still pursuing the SAME need, now via ground
+##   sleep instead of bed travel; forcing a Deciding re-entry here would just
+##   immediately re-commit to the identical ground-sleep outcome one tick
+##   later, a pointless round trip.
+## - `NONE` (wander-reselection, Story villager-ai-019's own future scope):
+##   this story's minimal, safe default remains "abandon and re-decide,"
+##   unchanged.
 func _abandon_travel() -> void:
 	if _pursued_activity == PursuedActivity.WORK:
 		# Story villager-ai-011 (Rule 6/AC9): release BEFORE report -- a real
@@ -1558,6 +2007,15 @@ func _abandon_travel() -> void:
 		_release_job_claim()
 		_report_job_unreachable(_travel_target_cell)
 		_unreachable_retry_after_tick[_travel_target_cell] = _tick_count + config.unreachable_retry_ticks
+		_pursued_activity = PursuedActivity.NONE
+		_clear_travel_state()
+		_state = State.DECIDING
+		request_deciding_pass()
+		return
+	if _pursued_activity == PursuedActivity.NEED:
+		_clear_travel_state()
+		_start_ground_sleep(NeedsMood.RecoverySource.GROUND_BED_UNREACHABLE)
+		return
 	_pursued_activity = PursuedActivity.NONE
 	_clear_travel_state()
 	_state = State.DECIDING
@@ -1648,11 +2106,6 @@ func _abandon_claimed_job() -> void:
 	_pursued_activity = PursuedActivity.NONE
 	_state = State.DECIDING
 	request_deciding_pass()
-
-
-## Sleeping-state tick body -- stub (later needs/sleep story).
-func _tick_sleeping() -> void:
-	pass
 
 
 ## Breather-state tick body -- stub (later life-texture story).

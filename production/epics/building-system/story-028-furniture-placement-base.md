@@ -1,7 +1,7 @@
 # Story 028: Furniture placement base — single-cell support + palette query
 
 > **Epic**: Building System
-> **Status**: Ready
+> **Status: Complete (2026-07-27 — 1241/1241 suite green 0 orphans, parent-verified)
 > **Layer**: Core
 > **Type**: Logic
 > **Estimate**: 1 day

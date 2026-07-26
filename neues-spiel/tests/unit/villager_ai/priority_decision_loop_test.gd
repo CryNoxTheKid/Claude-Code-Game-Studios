@@ -36,13 +36,26 @@ extends GdUnitTestSuite
 
 ## Minimal Needs & Mood-shaped test double (mocked boundary -- this story's
 ## Engine Notes: "Needs & Mood values are mocked at the need-is-urgent
-## boundary"). Implements exactly the one member
-## [VillagerAi._has_urgent_need] depends on.
+## boundary"). Implements [VillagerAi._has_urgent_need]'s own dependency,
+## plus Story villager-ai-018's own `start_recovery`/`stop_recovery`/
+## `get_need_state` seam (no-op/stub bodies -- this file's own ACs are
+## priority-list ordering, not sleep/recovery mechanics, which
+## `sleep_and_home_test.gd` covers instead).
 class MockNeedsProvider:
 	var urgent: bool = false
+	var recovering: bool = false
 
 	func has_urgent_need(_villager_id: int) -> bool:
 		return urgent
+
+	func start_recovery(_villager_id: int, _need: StringName, _source_enum: NeedsMood.RecoverySource) -> void:
+		pass
+
+	func stop_recovery(_villager_id: int, _need: StringName, _reason: StringName) -> void:
+		pass
+
+	func get_need_state(_villager_id: int, _need: StringName) -> NeedsMood.NeedState:
+		return NeedsMood.NeedState.RECOVERING if recovering else NeedsMood.NeedState.SATISFIED
 
 
 ## Minimal Building-System-job-queue-shaped test double (mocked boundary --
@@ -180,7 +193,13 @@ func test_urgent_need_and_available_job_chooses_need() -> void:
 
 	villager_ai._tick_deciding()
 
-	assert_int(villager_ai.get_state()).is_equal(VillagerAi.State.TRAVELING)
+	# Story villager-ai-018: tier 1 (NEED) still wins over tier 2 (WORK) --
+	# this test's own AC1 scope -- but with neither `nav_graph` nor
+	# `bed_provider` wired, real target-selection (story 018's own scope,
+	# a placeholder `State.TRAVELING` before this story landed) now falls
+	# all the way through to the honest `ground_no_bed_owned` fallback:
+	# `State.SLEEPING`, still pursuing `NEED`.
+	assert_int(villager_ai.get_state()).is_equal(VillagerAi.State.SLEEPING)
 	assert_int(villager_ai.get_pursued_activity()).is_equal(VillagerAi.PursuedActivity.NEED)
 
 
@@ -256,8 +275,11 @@ func test_working_villager_need_becomes_urgent_completes_tick_then_releases_clai
 	# The claim released exactly once, for this villager.
 	assert_int(jobs.release_claim_call_count).is_equal(1)
 	assert_int(jobs.last_released_villager_id).is_equal(villager_ai.villager_id)
-	# The need is now pursued.
-	assert_int(villager_ai.get_state()).is_equal(VillagerAi.State.TRAVELING)
+	# The need is now pursued. Story villager-ai-018: with neither
+	# `nav_graph` nor `bed_provider` wired, real target-selection falls
+	# through to the honest `ground_no_bed_owned` fallback (State.SLEEPING),
+	# not the pre-story-018 `State.TRAVELING` placeholder.
+	assert_int(villager_ai.get_state()).is_equal(VillagerAi.State.SLEEPING)
 	assert_int(villager_ai.get_pursued_activity()).is_equal(VillagerAi.PursuedActivity.NEED)
 
 

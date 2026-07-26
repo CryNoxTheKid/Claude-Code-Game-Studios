@@ -1,7 +1,7 @@
 # Story 005: F3 mood smoothing, snap rule, `mean_active` & band events
 
 > **Epic**: Needs & Mood System
-> **Status**: Ready
+> **Status: Complete (2026-07-27 — 1241/1241 suite green 0 orphans, parent-verified)
 > **Layer**: Feature
 > **Type**: Logic
 > **Estimate**: ~1 agent-day

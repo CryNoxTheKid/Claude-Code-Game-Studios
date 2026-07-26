@@ -95,6 +95,22 @@
 ## [member ConstructionTickLoop.time_tick_system] shape but relaxed to a
 ## graceful fallback instead of a hard assert (see [method
 ## _is_selected_item_available]).
+##
+## Story building-028 (this revision, ADR-0016 BV-1 ruling
+## `production/architecture-decisions-m02-preflight-2026-07-26.md`) adds
+## furniture IDENTITY to [method commit]'s creation step: [method
+## _selected_item_is_furniture] resolves whether the currently selected item
+## is a `furniture_fixture` RID entry, and [method commit] passes the
+## resulting [enum BlueprintCell.Category]/[member
+## BlueprintCell.furniture_definition_id] into every [BlueprintCell] it
+## creates for that commit -- the "real material-selection wiring" this
+## class's own doc comment (point 3) and [BlueprintCell]'s own doc comment
+## already named as this story's future job. [method get_available_palette]
+## is this story's other addition (TR-074/AC18) -- a pure read-only query
+## over [member resource_item_database], no new state. [FurnitureTool] (this
+## story) is the real caller that wires [method set_furniture_support_predicate]
+## with the actual support-geometry check; this class still has no support
+## concept of its own beyond the seam.
 class_name CommitPipeline
 extends Node
 
@@ -208,13 +224,26 @@ var _cell_set_resolver: Callable = Callable()
 ## comment), and connects to [signal PlacementPick.build_committed]
 ## (idempotent via [method Signal.is_connected], mirroring
 ## [ToolStateMachine]'s own precedent).
+##
+## The Autoload lookup is additionally guarded by [method is_inside_tree]
+## (ADR-0001): [method get_node_or_null] with an ABSOLUTE path hard-errors
+## ("Can't use get_node() with absolute paths from outside the active scene
+## tree") when called on a freestanding, not-yet-parented node -- exactly
+## the shape every headless test constructs via `auto_free(CommitPipeline.new())`
+## (this codebase's own `reference_injected_module_test.gd`/
+## `loop_payoff_surface_test.gd` precedent asserts `is_inside_tree() == false`
+## for that exact construction). A test that wants RID behavior assigns a
+## test double directly BEFORE calling [method setup] (see
+## `placement_validity_test.gd`'s `_MockItemDatabase`); production always
+## calls this from inside a live, parented scene tree, where the lookup
+## proceeds exactly as before.
 func setup() -> void:
 	assert(placement_pick != null, "CommitPipeline.placement_pick not wired")
 	assert(voxel_world != null, "CommitPipeline.voxel_world not wired")
 	assert(config != null, "CommitPipeline.config not wired")
 	for issue: String in config.validate():
 		push_warning(issue)
-	if resource_item_database == null:
+	if resource_item_database == null and is_inside_tree():
 		resource_item_database = get_node_or_null(^"/root/ResourceItemDatabase")
 	if not placement_pick.build_committed.is_connected(_on_build_committed):
 		placement_pick.build_committed.connect(_on_build_committed)
@@ -272,6 +301,21 @@ func has_blueprint_cell(cell: Vector3i) -> bool:
 	return _blueprint_cells.has(cell)
 
 
+## The tracked [BlueprintCell] at [param cell], or `null` if none is tracked
+## -- Story building-028 addition. [FurnitureTool]'s own furniture-support
+## predicate reads this to recognize a Draft/UnderConstruction/Built FLOOR
+## blueprint cell as valid support (Rule 8's "a blueprint floor cell counts
+## as support for a furniture blueprint," [TR-building-system-050]/AC49) --
+## the SAME combined-view registry [method _is_cell_available] already reads
+## internally, exposed read-only rather than duplicated. A CANCELED entry IS
+## still returned here (mirrors [member _blueprint_cells]' own raw-storage
+## shape) -- the caller decides whether a canceled cell counts as support
+## (it never does, per [method _is_cell_available]'s own "canceled cells
+## free up their address" precedent).
+func get_blueprint_cell_at(cell: Vector3i) -> BlueprintCell:
+	return _blueprint_cells.get(cell)
+
+
 ## The commit pipeline's core entry point (AC4, [TR-building-system-002]/
 ## [TR-building-system-052]): gates on a currently-valid pick (AC38, Edge Case
 ## 4 -- "no valid pick... is a no-op"), clamps [param candidate_cells] to
@@ -304,9 +348,20 @@ func commit(candidate_cells: Array[Vector3i]) -> Array[BlueprintCell]:
 	if not _all_cells_supported(in_bounds_cells):
 		commit_rejected.emit(RejectReason.FURNITURE_UNSUPPORTED, in_bounds_cells)
 		return []
+	# Story building-028: resolve the whole commit's category/furniture id
+	# ONCE (the same selected item applies to every cell of one commit) --
+	# see [method _selected_item_is_furniture]'s own doc comment for why this
+	# is independent of [method _is_selected_item_available]'s own resolution.
+	var is_furniture: bool = _selected_item_is_furniture()
+	var category: BlueprintCell.Category = (
+		BlueprintCell.Category.FURNITURE if is_furniture else BlueprintCell.Category.BLOCK
+	)
+	var furniture_definition_id: StringName = _selected_item_id if is_furniture else &""
 	var created: Array[BlueprintCell] = []
 	for cell: Vector3i in in_bounds_cells:
-		var blueprint := BlueprintCell.new(cell)
+		var blueprint := BlueprintCell.new(
+			cell, BlueprintCell.MicroState.PLANNED, category, null, furniture_definition_id
+		)
 		_blueprint_cells[cell] = blueprint
 		created.append(blueprint)
 	blueprint_cells_created.emit(created)
@@ -338,6 +393,69 @@ func _is_selected_item_available() -> bool:
 		return false
 	@warning_ignore("unsafe_method_access")
 	return resource_item_database.get_by_id(_selected_item_id) != null
+
+
+## Story building-028 addition (GDD Rule 8, [TR-building-system-048]) --
+## whether the CURRENTLY selected item ([member _selected_item_id]) is a
+## `furniture_fixture` entry, consulted independently of [method
+## _is_selected_item_available]'s own availability contract. Deliberately
+## NOT unified with that method: its "no [member resource_item_database]
+## wired" fallback TRUSTS a bare selection at face value for AVAILABILITY --
+## that trust does not extend to "is furniture," so an untethered test with
+## no RID double wired always resolves to [constant BlueprintCell.Category.BLOCK]
+## (every pre-028 test's existing, unchanged expectation). Returns `false`
+## whenever [member resource_item_database] is `null`/not ready/reports no
+## definition for the id, or the definition's [method
+## ItemDefinition.get_category] is not `&"furniture_fixture"`. The `is
+## ItemDefinition` guard (rather than a duck-typed `has_method` check) is
+## deliberate: [_MockItemDatabase]-shaped doubles used by pre-028 tests
+## return a bare `bool`/`null` from `get_by_id`, and `bool is ItemDefinition`
+## resolves to `false` safely (no runtime error) -- exactly the "default to
+## BLOCK" fallback this method's own doc comment promises.
+func _selected_item_is_furniture() -> bool:
+	if resource_item_database == null:
+		return false
+	if String(_selected_item_id) == "":
+		return false
+	@warning_ignore("unsafe_method_access")
+	if not bool(resource_item_database.is_ready()):
+		return false
+	@warning_ignore("unsafe_method_access")
+	var definition: Variant = resource_item_database.get_by_id(_selected_item_id)
+	if not (definition is ItemDefinition):
+		return false
+	return (definition as ItemDefinition).get_category() == &"furniture_fixture"
+
+
+## Story building-028 addition (TR-building-system-074, AC18) -- the palette
+## this MVP data set offers: every tier-0 `building_material` entry UNION
+## every `furniture_fixture` entry (MVP list: `bed` only, Core Rule 8) --
+## furniture is never tier-gated the way materials are (Core Rule 9: "the
+## tier-0 set plus bed," not "the tier-0 set of materials and furniture").
+## Returns an empty array whenever [member resource_item_database] is
+## `null`/not ready -- mirrors every other RID-consuming query in this
+## codebase (never a crash, never a partial read). No Building UI palette
+## exists yet in this codebase to consume this; a future palette story is
+## this method's real caller.
+func get_available_palette() -> Array[StringName]:
+	var ids: Array[StringName] = []
+	if resource_item_database == null:
+		return ids
+	@warning_ignore("unsafe_method_access")
+	if not bool(resource_item_database.is_ready()):
+		return ids
+	@warning_ignore("unsafe_method_access")
+	var tier0_ids: Array = resource_item_database.list_ids_by_tier(0)
+	@warning_ignore("unsafe_method_access")
+	var material_ids: Array = resource_item_database.list_ids_by_category(&"building_material")
+	for id: Variant in tier0_ids:
+		if material_ids.has(id):
+			ids.append(id as StringName)
+	@warning_ignore("unsafe_method_access")
+	var furniture_ids: Array = resource_item_database.list_ids_by_category(&"furniture_fixture")
+	for id: Variant in furniture_ids:
+		ids.append(id as StringName)
+	return ids
 
 
 ## Combined-view per-cell availability check (Edge Cases 2/3,

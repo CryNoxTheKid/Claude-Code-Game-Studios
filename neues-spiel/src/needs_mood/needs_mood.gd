@@ -39,6 +39,21 @@
 ## edge-triggered [signal need_satisfied] notification. F3 mood smoothing
 ## ([method _pass_f3_mood]) remains story 005's untouched no-op stub.
 ##
+## Story needs-mood-005 (this revision) fills in F3 mood smoothing for real:
+## the per-villager EMA step + snap rule ([method _pass_f3_mood]), the
+## `mean_active` aggregate over [constant ACTIVE_NEEDS] only ([method
+## _mean_active_need_value]), the pure mood-band derivation ([enum MoodBand],
+## [method _band_for_mood]) against [member NeedsMoodConfig.mood_band_happy]/
+## [member NeedsMoodConfig.mood_band_content], the edge-triggered [signal
+## mood_band_changed] display notification, and [method get_mood]/[method
+## get_mood_band]/[method set_mood_value] (the latter this story's own
+## initialization/test seam, NOT the GDD's F4 spawn-init feature -- story
+## needs-mood-006's scope, see that method's own doc comment). Per Core Rule
+## 7 and this story's own Control Manifest note, mood is display-only in MVP:
+## no scheduling/work-speed/priority code may read [method get_mood]/[method
+## get_mood_band] (TR-needs-mood-system-040), a claim this story's own test
+## suite verifies directly against `src/villager_ai`'s source.
+##
 ## Tick dispatch is driven EXCLUSIVELY by [member time_tick_system]'s `tick`
 ## signal (GDD: "all decay/recovery/mood math runs on Time & Tick events",
 ## TR-needs-mood-system-051), connected with Godot's plain synchronous
@@ -110,6 +125,16 @@ const RECOVERY_SOURCE_NAMES: Dictionary[RecoverySource, StringName] = {
 	RecoverySource.GROUND_TRAPPED: &"ground_trapped",
 }
 
+## Mood band schema (GDD Core Rule 7, TR-needs-mood-system-039): a pure
+## function of the smoothed mood value (see [method _band_for_mood]) against
+## [member NeedsMoodConfig.mood_band_happy]/[member NeedsMoodConfig.
+## mood_band_content] -- never a second copy of the boundaries, this table
+## IS the display contract shared verbatim with Villager Info UI (ADR-0002).
+## Declared in the GDD's own listed order (Happy, Content, Low); no ordinal
+## comparison between members is ever meaningful, only [method
+## _band_for_mood]'s threshold comparisons are.
+enum MoodBand { HAPPY, CONTENT, LOW }
+
 ## One flat record per (villager_id, need) pair actually tracked -- created
 ## ONLY by [method set_need_value] (never as a side effect of a query, see
 ## [method has_urgent_need]'s own doc comment, NM-6). Keyed by a composite
@@ -144,6 +169,26 @@ class NeedRecord:
 	## start_recovery] (sets it) and [method stop_recovery]/[method
 	## _pass_f2_recovery]'s satisfied-cross branch (both clear it).
 	var recovery_source_name: StringName = &""
+
+
+## Per-villager smoothed-mood state (GDD F3). Created ONLY by [method
+## set_mood_value] (this story's own initialization/test seam -- see that
+## method's own doc comment for why this is NOT the GDD's F4 spawn-init
+## feature) -- mirrors [NeedRecord]'s own "no lazy init" precedent exactly:
+## [method _pass_f3_mood] only ever updates an EXISTING record, it never
+## creates one for a villager nobody has told this module to track yet.
+## Keyed by a flat `Dictionary[int, MoodRecord]` ([member _mood_records])
+## rather than folded into [NeedRecord] -- mood is a per-villager aggregate,
+## not a per-(villager, need) value, so a separate flat table (still a
+## single, non-nested typed Dictionary) keeps the same static-typing
+## discipline [NeedRecord]'s own doc comment argues for.
+class MoodRecord:
+	extends RefCounted
+
+	## The current smoothed mood value, 0-100 (GDD F3). Written by [method
+	## set_mood_value] (initialization/test seam) and [method _pass_f3_mood]
+	## (the per-tick EMA step/snap) -- no other writer.
+	var value: float = 0.0
 
 
 ## Need-enum <-> the external `StringName` need id every public query/report
@@ -189,6 +234,21 @@ signal need_urgent(villager_id: int, need: StringName)
 ## _pass_f1_decay]'s own doc comment makes for [signal need_urgent]).
 signal need_satisfied(villager_id: int, need: StringName)
 
+## Edge-triggered "mood band changed" display notification (GDD Core Rule 7,
+## States and Transitions "Mood bands" row, TR-needs-mood-system-049) --
+## fires exactly once per tick a villager's [enum MoodBand] (derived purely
+## from [method get_mood]'s smoothed value, see [method _band_for_mood])
+## differs from what it was at the START of that tick's [method
+## _pass_f3_mood] step; never coalesced, never a repeat while parked on one
+## side of a boundary (mirrors [signal need_urgent]/[signal need_satisfied]'s
+## own "no repeat is possible by construction" argument, applied here to a
+## continuous derived value instead of a per-need threshold). The sole
+## refresh trigger for Villager Info UI's band display -- steady-state reads
+## come from [method get_mood]/[method get_mood_band] verbatim, never from
+## this signal's payload alone (same latency-hint status as the need
+## signals).
+signal mood_band_changed(villager_id: int, band: MoodBand)
+
 ## Tuning config (ADR-0002). Wired via a scene file's Inspector in
 ## production, or assigned directly in a headless test. Asserted wired by
 ## [method setup] -- never read inside `_ready()`.
@@ -212,6 +272,15 @@ var time_tick_system: Object = null
 ## queries for the same consistency reason even though NM-6 only strictly
 ## requires it of has_urgent_need).
 var _need_records: Dictionary[String, NeedRecord] = {}
+
+## Per-villager smoothed-mood state (GDD F3). See [MoodRecord]'s own doc
+## comment for why this is a SEPARATE flat `Dictionary[int, MoodRecord]`
+## rather than folded into [member _need_records] -- mood is a per-villager
+## aggregate, not a per-(villager, need) value. A record is created ONLY by
+## [method set_mood_value]; [method _pass_f3_mood] updates existing records
+## only, it never lazily creates one (mirrors [member _need_records]'s own
+## "created ONLY by set_need_value" invariant).
+var _mood_records: Dictionary[int, MoodRecord] = {}
 
 ## F2's source->rate table (GDD Core Rule 4; Implementation Notes: "built
 ## once from config at setup() -- five enum keys today, three distinct
@@ -371,6 +440,32 @@ func get_need_state(villager_id: int, need: StringName) -> NeedState:
 	return _need_records[key].state
 
 
+## `docs/architecture/architecture.md` API Boundaries:
+## `get_mood(villager_id: int) -> float` (GDD F3, TR-needs-mood-system-038).
+## Read-only, EMA-smoothed 0-100 value; never creates a record for an
+## untracked villager -- same "unknown answers as if fine, never crashes"
+## bias as [method get_need_value]/[method get_need_state] (100.0, "fully
+## satisfied," matching a fresh spawn's F4 starting point once that story
+## lands).
+func get_mood(villager_id: int) -> float:
+	if not _mood_records.has(villager_id):
+		return 100.0
+	return _mood_records[villager_id].value
+
+
+## The mood-band query this story's own AC list requires alongside
+## [method get_mood] (not yet named in `architecture.md`'s API Boundaries
+## block -- same non-blocking follow-up status [method get_need_state]'s own
+## doc comment notes for its sibling). Pure function of the tracked mood
+## value via [method _band_for_mood]; same unknown-id default bias as
+## [method get_mood] ([constant MoodBand.HAPPY], the "fine" default, never an
+## error).
+func get_mood_band(villager_id: int) -> MoodBand:
+	if not _mood_records.has(villager_id):
+		return MoodBand.HAPPY
+	return _band_for_mood(_mood_records[villager_id].value)
+
+
 ## Initialization/test seam -- the ONE entry point that creates a
 ## (villager_id, need) record (see [member _need_records]'s own doc
 ## comment). Deliberately NOT this story's F4 spawn-initialization feature
@@ -466,6 +561,24 @@ func stop_recovery(villager_id: int, need: StringName, reason: StringName) -> vo
 	record.state = NeedState.SATISFIED if record.value > config.urgency_threshold else NeedState.URGENT
 
 
+## Initialization/test seam -- the ONE entry point that creates a
+## per-villager [MoodRecord] (see [member _mood_records]'s own doc comment).
+## Deliberately NOT this story's own F4 spawn-initialization feature (that
+## remains story needs-mood-006's scope, `mood <- mean_active` tied
+## specifically to villager spawn) -- a future spawn story calls this once
+## per spawned villager with its own computed `mean_active`, exactly like
+## this story's own tests do to arrange a "Given mood = ..." precondition
+## (mirrors [method set_need_value]'s own doc comment precedent exactly).
+## Clamps to the declared 0-100 domain; never emits [signal mood_band_changed]
+## regardless of which band the assigned value lands in -- assigning a value
+## out of band is initialization, never a "cross" (same argument [method
+## set_need_value]'s own doc comment makes for [signal need_urgent]).
+func set_mood_value(villager_id: int, value: float) -> void:
+	if not _mood_records.has(villager_id):
+		_mood_records[villager_id] = MoodRecord.new()
+	_mood_records[villager_id].value = clampf(value, 0.0, 100.0)
+
+
 ## Composite storage key for [member _need_records] (see [NeedRecord]'s own
 ## doc comment for why this is flat rather than nested).
 static func _record_key(villager_id: int, need: StringName) -> String:
@@ -519,6 +632,47 @@ func _rate_for_source(source_name: StringName) -> float:
 		) % source_name
 	)
 	return _source_rate_table.get(source_name, 0.0)
+
+
+## F3's `mean_active` term (GDD Formulas F3, TR-needs-mood-system-055):
+## the unweighted arithmetic mean over [constant ACTIVE_NEEDS] whose record
+## actually exists for `villager_id` -- an inactive schema need (FOOD/COMPANY
+## pre-tier, Core Rule 2) is never in [constant ACTIVE_NEEDS] at all in MVP,
+## so it can never contribute a term OR change the divisor, satisfying AC20
+## by construction rather than a separate exclusion branch. Returns `-1.0`
+## (an otherwise-impossible value in the declared 0-100 domain) when NO
+## active need has a tracked record yet -- the sentinel [method
+## _pass_f3_mood] reads to skip that villager's mood update entirely this
+## tick, rather than dividing by zero or defaulting a term.
+func _mean_active_need_value(villager_id: int) -> float:
+	var sum: float = 0.0
+	var count: int = 0
+	for need_enum: Need in ACTIVE_NEEDS:
+		var need_name: StringName = NEED_NAMES.get(need_enum, &"")
+		var key: String = _record_key(villager_id, need_name)
+		if _need_records.has(key):
+			sum += _need_records[key].value
+			count += 1
+	if count == 0:
+		return -1.0
+	return sum / float(count)
+
+
+## Pure mood-band derivation (GDD Core Rule 7, States and Transitions "Mood
+## bands" row): compares the smoothed value against [member
+## NeedsMoodConfig.mood_band_happy]/[member NeedsMoodConfig.mood_band_content]
+## only -- `>=` both ways, never `>`, so a value landing exactly on a
+## boundary resolves to the HIGHER band (AC19: exactly 70.00 is Happy,
+## exactly 40.00 is Content). [member NeedsMoodConfig.band_display_hysteresis]
+## is deliberately NOT read here -- Implementation Notes: "wired but inert,"
+## Edge Case 10 is a reserve enabled only by a future story if playtests show
+## boundary flapping, never by this one.
+func _band_for_mood(mood: float) -> MoodBand:
+	if mood >= config.mood_band_happy:
+		return MoodBand.HAPPY
+	elif mood >= config.mood_band_content:
+		return MoodBand.CONTENT
+	return MoodBand.LOW
 
 
 ## F1 -- need decay (GDD Formulas: `value <- max(0, value -
@@ -591,11 +745,51 @@ func _pass_f2_recovery() -> void:
 			need_satisfied.emit(record.villager_id, NEED_NAMES.get(record.need, &""))
 
 
-## F3 -- mood smoothing (GDD Formulas). Story 005's scope; a documented
-## no-op here that only records its own name in
-## [member _last_tick_pass_order].
+## F3 -- mood smoothing (GDD Formulas F3, TR-needs-mood-system-038/054/055).
+## Runs once per villager per tick, AFTER this same tick's F1/F2 have already
+## written their values (Control Manifest Guardrail) -- [method
+## _mean_active_need_value] reads [member _need_records] fresh every call, so
+## a need recovering this very tick feeds its POST-recovery value into
+## `mean_active`, never the pre-tick one.
+##
+## Only ever updates a villager that already has a [MoodRecord] (see [member
+## _mood_records]'s own "created ONLY by [method set_mood_value]" doc
+## comment) -- a villager with need data but no mood record yet is silently
+## skipped this tick, same "no lazy init" bias [method _mean_active_need_value]
+## applies via its own `-1.0` sentinel for a villager with no active need data
+## at all.
+##
+## The snap rule (AC15/16, TR-needs-mood-system-054) is an explicit branch
+## BEFORE the EMA step, not a rounding of its result: `abs(mean_active - mood)
+## < 0.05` snaps directly to `mean_active` (defeating the asymptote that would
+## otherwise leave mood parked just under a band boundary forever); everything
+## else takes the EMA step with explicit float division
+## (`/ config.mood_smoothing_ticks`, never integer division -- Engine Notes).
+## A delta of EXACTLY `0.05` takes the EMA branch, never the snap (`<`, not
+## `<=` -- the story's own named edge case).
+##
+## Band crossing (AC18/19) compares [method _band_for_mood] of the PRE-tick
+## value against the POST-tick value -- the same "compare the two endpoints,
+## no separate dedup flag" pattern [method _pass_f1_decay]/[method
+## _pass_f2_recovery] already establish for their own threshold crosses,
+## applied here to a continuous derived value instead of a raw threshold.
+## [signal mood_band_changed] emits at most once per villager per tick.
 func _pass_f3_mood() -> void:
 	_last_tick_pass_order.append(&"f3_mood")
+	for villager_id: int in _mood_records.keys():
+		var mean_active: float = _mean_active_need_value(villager_id)
+		if mean_active < 0.0:
+			continue
+		var record: MoodRecord = _mood_records[villager_id]
+		var previous_mood: float = record.value
+		var previous_band: MoodBand = _band_for_mood(previous_mood)
+		if absf(mean_active - previous_mood) < 0.05:
+			record.value = mean_active
+		else:
+			record.value = previous_mood + (mean_active - previous_mood) / config.mood_smoothing_ticks
+		var new_band: MoodBand = _band_for_mood(record.value)
+		if new_band != previous_band:
+			mood_band_changed.emit(villager_id, new_band)
 
 
 ## The sole tick-dispatch entry point (GDD: "all decay/recovery/mood math

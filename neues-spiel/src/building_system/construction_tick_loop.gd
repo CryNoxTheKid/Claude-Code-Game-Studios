@@ -157,6 +157,38 @@
 ##   (e.g. [CommitPipeline]'s own tracking dictionary) by construction --
 ##   no second registry to keep in sync.
 ##
+## **Story building-028 (this revision, ADR-0016 BV-1 ruling
+## `production/architecture-decisions-m02-preflight-2026-07-26.md`): furniture
+## never enters [VoxelWorldGrid].** Two changes, both scoped to [constant
+## BlueprintCell.Category.FURNITURE] cells only -- every BLOCK-category
+## behavior above is completely unchanged:
+## 1. **Claim-time support gate** (Rule 8/[TR-building-system-050], AC49 --
+##    "construction cannot start until the support cell is Built"): [method
+##    claim_job] refuses (returns `false`, nothing mutated) a FURNITURE-category
+##    claim whose cell directly below reads EMPTY in the raw grid right now.
+##    This is a STRICTER check than [CommitPipeline]/[FurnitureTool]'s own
+##    commit-time support predicate (which also accepts a not-yet-Built
+##    blueprint floor cell, AC49's first half) -- by claim time, only an
+##    actually-Built (grid-resident) support cell is good enough. No new
+##    predicate seam: this class already holds [member voxel_world] and reads
+##    it directly, mirroring [method _on_tick]'s own established "read the
+##    grid directly, no extra collaborator" style.
+## 2. **Completion routing** ([member furniture_registry], BV-1 §5): [method
+##    _on_tick] excludes every FURNITURE-category completing cell from [param
+##    changes] (the [method VoxelWorldGrid.bulk_write] payload) -- a
+##    FURNITURE-category completion literally never reaches that call.
+##    [method _complete_jobs] additionally skips the [method
+##    VoxelWorldGrid.bulk_write] call ENTIRELY when [param changes] ends up
+##    empty (an all-furniture completion batch), and routes each completing
+##    FURNITURE cell to [member furniture_registry]'s own [method
+##    FurnitureRegistry.place] instead. [signal construction_completed] still
+##    names every completed cell regardless of category (BV-1: "construction_
+##    completed still names the cell") -- only the GRID write is furniture-
+##    exempt, not the job-completion bookkeeping/signal. [member
+##    BlueprintCell.state] still flips to [constant
+##    BlueprintCell.MicroState.BUILT] for a completed furniture cell exactly
+##    like a block -- "Built" describes the JOB, not a grid record.
+##
 ## Injected-tier module (ADR-0001): [member voxel_world]/[member config] are
 ## wired via a scene file's Inspector in production (once a future
 ## scene-assembly story attaches this node), or assigned directly in a
@@ -213,6 +245,17 @@ enum JobType {
 ## (mirrors [member time_tick_system]/[VillagerAi]'s own `job_queue: Object`
 ## precedent: a code-assigned collaborator, not an Inspector-wired one).
 var write_tag: BuildingSystemWriteTag = null
+
+## Story building-028 addition (ADR-0016 BV-1 ruling) -- the sole destination
+## a completing [constant BlueprintCell.Category.FURNITURE] job's placement
+## record is routed to, INSTEAD OF [VoxelWorldGrid]. Plain `var`, never
+## `@export` -- `RefCounted` is not an exportable Inspector type (mirrors
+## [member write_tag]'s own precedent exactly). `null` is tolerated: a
+## completing furniture job with no registry wired is silently dropped
+## (never crashes, never falls back to writing the grid) -- production
+## always wires a real [FurnitureRegistry] once a future scene-assembly
+## story exists; no such assembly exists yet in this codebase.
+var furniture_registry: FurnitureRegistry = null
 
 ## Story building-033 addition ([TR-building-system-075]) -- fires exactly
 ## once per [method _on_tick] dispatch that completes at least one job,
@@ -352,6 +395,19 @@ func claim_job(
 		return false
 	if _active_jobs.has(blueprint_cell.cell):
 		return false
+	# Story building-028 (Rule 8/TR-050, AC49) -- a FURNITURE-category cell
+	# cannot begin construction until its support cell (directly below) is
+	# actually Built in the raw grid right now. See class doc comment's
+	# "Story building-028" point 1 for why this is a stricter, direct grid
+	# read rather than a new predicate seam. An out-of-bounds support cell
+	# (e.g. a furniture cell placed at the world floor, y = min_y) is never
+	# solid -- [method VoxelWorldGrid.get_cell] itself returns `null` (not an
+	# empty [CellContents]) for an out-of-bounds address, so bounds must be
+	# checked FIRST to avoid a null-call crash.
+	if blueprint_cell.category == BlueprintCell.Category.FURNITURE:
+		var support_cell: Vector3i = blueprint_cell.cell + Vector3i(0, -1, 0)
+		if not voxel_world.is_in_bounds(support_cell) or voxel_world.get_cell(support_cell).is_empty():
+			return false
 	blueprint_cell.state = BlueprintCell.MicroState.UNDER_CONSTRUCTION
 	_active_jobs[blueprint_cell.cell] = _ActiveJob.new(blueprint_cell, villager_id, job_type)
 	return true
@@ -470,7 +526,12 @@ func _on_tick() -> void:
 				)
 				if not allow_write:
 					continue
-			changes[cell] = job.blueprint_cell.contents
+			# Story building-028 (ADR-0016 BV-1 ruling) -- a FURNITURE-category
+			# completion is EXCLUDED from the bulk_write payload entirely; it
+			# is routed to [member furniture_registry] instead, in [method
+			# _complete_jobs]. Every other category is unaffected.
+			if job.blueprint_cell.category != BlueprintCell.Category.FURNITURE:
+				changes[cell] = job.blueprint_cell.contents
 			completed_jobs.append(job)
 	_complete_jobs(changes, completed_jobs)
 
@@ -491,12 +552,25 @@ func _on_tick() -> void:
 func _complete_jobs(changes: Dictionary[Vector3i, CellContents], completed_jobs: Array[_ActiveJob]) -> void:
 	if completed_jobs.is_empty():
 		return
-	write_tag.begin()
-	voxel_world.bulk_write(changes)
-	write_tag.end()
+	# Story building-028: an all-furniture completion batch resolves
+	# [param changes] to empty -- [method VoxelWorldGrid.bulk_write] is not
+	# even CALLED in that case (not just "called with nothing to write"),
+	# matching BV-1's "never bulk_writes to the grid" literally rather than
+	# only in effect.
+	if not changes.is_empty():
+		write_tag.begin()
+		voxel_world.bulk_write(changes)
+		write_tag.end()
 	var completed_cells: Array[Vector3i] = []
 	for job: _ActiveJob in completed_jobs:
 		job.blueprint_cell.state = BlueprintCell.MicroState.BUILT
 		_active_jobs.erase(job.blueprint_cell.cell)
 		completed_cells.append(job.blueprint_cell.cell)
+		# Story building-028 (ADR-0016 BV-1 ruling) -- route a completing
+		# FURNITURE cell to the furniture registry INSTEAD OF the grid (see
+		# class doc comment's "Story building-028" point 2). A `null`
+		# registry silently drops the record (see [member furniture_registry]'s
+		# own doc comment) -- it never falls back to writing the grid.
+		if job.blueprint_cell.category == BlueprintCell.Category.FURNITURE and furniture_registry != null:
+			furniture_registry.place(job.blueprint_cell.furniture_definition_id, [job.blueprint_cell.cell])
 	construction_completed.emit(completed_cells)
