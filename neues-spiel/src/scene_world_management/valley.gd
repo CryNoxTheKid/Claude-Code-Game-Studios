@@ -139,6 +139,31 @@
 ## re-derives/patches it once real terrain exists, per that class's own
 ## documented "idempotent/re-buildable" contract) -- out of this story's
 ## explicit "no new gameplay features" scope.
+##
+## Story villager-ai-021 (this revision, GDD Rule 14b /
+## [TR-villager-ai-behavior-065]) adds the config-driven STARTING ROSTER
+## capability -- [method spawn_starting_roster] -- built on the new
+## [VillagerRosterSpawner] library (placement + assembly, see that class's
+## own doc comment). [member _villager_ai] (villager_id 0, the pre-existing
+## single hosted instance) is completely UNCHANGED by this story -- still
+## wired unconditionally by [method _wire_villager_population], still the
+## sole hosted villager any pre-existing test/boot path observes. [method
+## spawn_starting_roster] is ADDITIVE and deliberately NEVER called from
+## [method _ready] -- it mirrors this class's own doc comment paragraph
+## above verbatim: exactly the same "a fresh grid has no terrain yet" reason
+## [method VillagerNavGraph.build] is deferred to a future world-generation
+## story applies here too, and more sharply -- [VoxelWorldGrid]'s own
+## chunk residency (ADR-0015) regenerates terrain ASYNCHRONOUSLY, off the
+## main thread, over several POST-boot frames, so calling this synchronously
+## during [method _ready] would deterministically find zero standable cells
+## on every single boot, for a search cost that scales with the bound
+## instead of buying a meaningful placement. [method spawn_starting_roster]
+## is the ready-to-call, fully-tested surface a future world-generation story
+## wires in once real terrain is confirmed resident near the chosen center --
+## this story's own explicit scope boundary ("Population growth / arrivals /
+## recruitment is Township Progression's job") does not cover WHEN world
+## generation itself first runs, only that growth BEYOND the starting roster
+## is out of scope.
 class_name Valley
 extends Node3D
 
@@ -190,7 +215,35 @@ extends Node3D
 ## 001-009). Structural child only -- Story scene-004 addition. See class
 ## doc comment for the non-`@export` scheduler/nav_graph wiring this class
 ## performs on top of the plain structural hosting every other child gets.
+## Story villager-ai-021: completely UNCHANGED by the new starting-roster
+## capability -- still the always-present, unconditionally-wired default
+## (villager_id 0); [method get_villagers] reports it first.
 @onready var _villager_ai: VillagerAi = $VillagerAi
+
+## Tuning config for the whole starting roster (Story villager-ai-021,
+## ADR-0002) -- Resource-typed, Inspector-assigned directly on `Valley.tscn`
+## (Story scene-004's own established "a Resource export resolves fine from
+## a hand-authored `.tscn`" distinction). Deliberately the SAME underlying
+## `.tres` instance [member _villager_ai]'s own `config` field already
+## points at (both wired from the identical ext_resource in `Valley.tscn`) --
+## one shared Resource, read (never per-instance mutated) by every roster
+## member [method spawn_starting_roster] creates.
+@export var villager_ai_config: VillagerAIConfig
+
+## Every [VillagerAi] instance [method spawn_starting_roster] has created so
+## far (Story villager-ai-021) -- additional to, and villager_id-numbered
+## starting after, [member _villager_ai]'s own `0`. Empty until that method
+## is first called (deliberately NOT from [method _ready] -- see that
+## method's own doc comment).
+var _spawned_villagers: Array[VillagerAi] = []
+
+## Shared, population-wide unstuck-rescue telemetry accumulator (Story
+## villager-ai-021, [VillagerUnstuckTelemetry]'s own doc comment: "the
+## roster is its natural owner") -- ONE instance for [member _villager_ai]
+## and every member of [member _spawned_villagers] alike, mirrors [member
+## _villager_nav_graph]/[member _villager_deciding_scheduler]'s own "one
+## shared instance, not duplicated per villager" precedent.
+var _villager_unstuck_telemetry: VillagerUnstuckTelemetry = null
 
 ## Hosted ambient torch/lantern light fixture (M01 condition C4, see class
 ## doc comment). Structural child only, mirrors [member _voxel_world]'s own
@@ -271,8 +324,10 @@ func _process(_delta: float) -> void:
 func _wire_villager_population() -> void:
 	_villager_deciding_scheduler = VillagerDecidingScheduler.new()
 	_villager_nav_graph = VillagerNavGraph.new()
+	_villager_unstuck_telemetry = VillagerUnstuckTelemetry.new()
 	_villager_ai.scheduler = _villager_deciding_scheduler
 	_villager_ai.nav_graph = _villager_nav_graph
+	_villager_ai.unstuck_telemetry = _villager_unstuck_telemetry
 	_villager_nav_graph.subscribe_to_voxel_world(_voxel_world, _villager_ai)
 
 
@@ -320,6 +375,66 @@ func get_construction_tick_loop() -> ConstructionTickLoop:
 ## Returns the hosted Villager AI instance.
 func get_villager_ai() -> VillagerAi:
 	return _villager_ai
+
+
+## Returns every hosted [VillagerAi] instance (Story villager-ai-021) --
+## [member _villager_ai] (the always-present default, villager_id 0) first,
+## then any members [method spawn_starting_roster] has added so far, in the
+## order they were spawned.
+func get_villagers() -> Array[VillagerAi]:
+	var all: Array[VillagerAi] = [_villager_ai]
+	all.append_array(_spawned_villagers)
+	return all
+
+
+## Config-driven starting-roster spawn (Story villager-ai-021, GDD Rule 14b /
+## [TR-villager-ai-behavior-065]) -- reads [member villager_ai_config]'s
+## `starting_villager_count`, selects that many valid standable cells near
+## the world center via [method VillagerRosterSpawner.select_starting_cells],
+## and assembles + hosts one new [VillagerAi] per selected cell via [method
+## VillagerRosterSpawner.assemble_roster] (DI-wired: config/voxel_world/
+## scheduler/nav_graph/unstuck_telemetry, `villager_id` continuing after
+## every villager already hosted, `current_cell`/`_from_cell`/`_to_cell` on
+## its assigned cell). Adds each as a REAL child of this Valley (so its own
+## [method VillagerAi._process] visual-lerp runs every frame in production,
+## mirroring every other hosted module) and calls its `setup()` directly --
+## a sanctioned, on-demand call site distinct from [GameWorld]'s own
+## boot-gate sweep (ADR-0005: that rule governs the ONE-TIME INITIAL sweep
+## only; a villager assembled well after boot, once real terrain actually
+## exists, has no other entry point to reach `setup()` from).
+##
+## Deliberately NEVER called from [method _ready] -- see class doc comment's
+## Story villager-ai-021 paragraph for the full "terrain pages in
+## asynchronously, post-boot" rationale this mirrors from [method
+## VillagerNavGraph.build]'s own pre-existing deferral. Returns however many
+## villagers were actually placed -- fewer than `starting_villager_count` (or
+## even zero) is a valid, deterministic outcome when the world does not yet
+## have enough standable cells near the center within [constant
+## VillagerRosterSpawner.MAX_SEARCH_RADIUS] (never a crash, never a partial/
+## inconsistent villager).
+func spawn_starting_roster() -> Array[VillagerAi]:
+	var center_cell: Vector3i = VillagerRosterSpawner.world_center_cell(_voxel_world.config)
+	var count: int = 1
+	if villager_ai_config != null:
+		count = villager_ai_config.starting_villager_count
+	var cells: Array[Vector3i] = VillagerRosterSpawner.select_starting_cells(
+		_voxel_world, center_cell, count
+	)
+	var next_id: int = 1 + _spawned_villagers.size()
+	var new_villagers: Array[VillagerAi] = VillagerRosterSpawner.assemble_roster(
+		_voxel_world,
+		villager_ai_config,
+		_villager_deciding_scheduler,
+		_villager_nav_graph,
+		_villager_unstuck_telemetry,
+		cells,
+		next_id,
+	)
+	for villager: VillagerAi in new_villagers:
+		add_child(villager)
+		villager.setup()
+		_spawned_villagers.append(villager)
+	return new_villagers
 
 
 ## Returns the hosted ambient torch/lantern light fixture (M01 condition C4).

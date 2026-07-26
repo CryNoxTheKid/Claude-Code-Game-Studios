@@ -122,7 +122,7 @@ stories:
     name: "Starting roster spawn at world generation (Cluster 0) — THE VALLEY BOOTS WITH ZERO VILLAGERS TODAY"
     file: "production/epics/villager-ai-behavior/story-021-starting-roster-spawn.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete
     owner: "ai-programmer"
     estimate_days: 1.0
     blocker: "deps villager-ai-001/002 Complete. Fills the ai lane while villager-ai-026 runs — but must NOT start before 026. Makes the roster plural (the concrete case behind BV-4)"

@@ -1,7 +1,7 @@
 # Story 021: Starting roster spawn at world generation
 
 > **Epic**: Villager AI & Behavior
-> **Status**: Ready
+> **Status: Complete (2026-07-26 — 968/968 suite green, parent-verified; spawn surface tested but not boot-wired: no world generation exists in the boot path — see follow-up)
 > **Layer**: Core
 > **Type**: Integration
 > **Estimate**: ~1 agent-day
