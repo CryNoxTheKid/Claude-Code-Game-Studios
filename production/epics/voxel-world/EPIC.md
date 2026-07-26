@@ -5,7 +5,9 @@
 > **Architecture Module**: Voxel World / Grid Data (the `Vector3i`-addressed cell grid; raw read/write primitives; change-signal emission; procedural terrain; chunked mesher + paged residency storage tier)
 > **Manifest Version**: 2026-07-23
 > **Status**: Ready
-> **Stories**: 19 stories created (019 = vox-018 MISS remediation, filed 2026-07-25)
+> **Stories**: 21 stories created (019 = vox-018 MISS remediation, filed 2026-07-25; **020/021 = TD
+> Addendum D rulings D7/D2, filed 2026-07-26** — both PROVISIONAL pending user ratification of
+> `production/architecture-decisions-m02-preflight-2026-07-26.md`)
 
 ## Stories
 
@@ -29,7 +31,9 @@
 | 016 | ADR-0015 C1 — async cap + bounded gen cost (TECH DEBT 3) | Config/Data | Ready | ADR-0015 |
 | 017 | ADR-0015 C4 — completion-driven drain (TECH DEBT 3) | Integration | Ready | ADR-0015 |
 | 018 | Live Valley view-window wiring + 60-FPS-with-culling measurement (criterion #12) | Integration | Complete | ADR-0014 |
-| 019 | Mesher chunk-build read-loop optimization + budget re-tune + re-measure (vox-018 MISS remediation #1) | Logic | Not Started | ADR-0014 |
+| 019 | Mesher chunk-build read-loop optimization + budget re-tune + re-measure (vox-018 MISS remediation #1) | Logic | Complete | ADR-0014 |
+| 020 | Mesh invalidation — dirty-marking + budgeted rebuild drain + `chunk_became_resident` (TD D7) | Integration | Ready | ADR-0014 / ADR-0015 |
+| 021 | Boot-scoped mesh radius + `view_radius_chunks` 24 → 12 retune (TD D2) | Integration | Ready | ADR-0014 / ADR-0005 |
 
 ## Overview
 
@@ -99,6 +103,33 @@ format and residency, not the full save/load flow.
   residency tuning."
 - Performance gate: 60 FPS on the production window with culling RE-ENABLED
   (headroom expected — slice held 60 FPS at 2× faces on `CULL_DISABLED`).
+
+## Milestone 02 Notes — two stories added 2026-07-26 (TD Addendum D)
+
+Both stories are downstream actions of `production/architecture-decisions-m02-preflight-2026-07-26.md`
+**Addendum D** (technical-director, **PROVISIONAL pending user ratification**). Both are scheduled into
+**Sprint 9**, on the `godot-gdscript-specialist` lane, and **must be serialized in this order** — they edit
+the same file (`voxel_world_mesh_streamer.gd`):
+
+- **`vox-020` (D7) — mesh invalidation.** Corrects a **false premise** that had propagated into
+  `sprint-09.md` D7 and `scene-005`'s Guardrail: the mesher *does* subscribe to `cell_changed` /
+  `cells_changed_batch` (`voxel_world_mesher.gd:163`), so the streamer subscribing to nothing is correct
+  layering, not a bug. The two **real** defects: the rebuild is unbudgeted and synchronous inside the signal
+  handler (~69 ms for a 9-chunk edit at 7.7 ms/chunk), and residency page-in emits no signal, so an
+  early-meshed chunk never re-meshes. Fixed by dirty-marking + a rebuild phase **drained first** inside the
+  **existing** `mesh_build_budget_ms` (no new knob — a separate budget would permit 7.7 + 7.7 ms in one
+  16.6 ms frame and regress vox-019's p95 of 16.947 ms) + a new `chunk_became_resident` grid signal.
+  Sequences **before `scene-005`**, parallel-safe with `building-023`.
+- **`vox-021` (D2) — boot/steady-state radius.** `view_radius_chunks` **24 → 12** (`.tres`) plus a new
+  `boot_mesh_radius_chunks = 8` consumed only by `build_initial_window`; growth to full via the existing
+  budgeted `update_view_window`. Boot ceiling **3.0 s total / ≤ 2.5 s mesh phase** (technical-director,
+  replacing the producer's provisional 5 s). ⚑ **Flagged to the user:** the visible extent halves,
+  384 → 192 world units — a look-and-feel call with two named alternatives (accept longer fill-in, or fund
+  greedy meshing — ADR-0014 §2's reserve — sooner). Sequences **after `vox-020`, before `scene-005`**.
+
+Pending ADR amendments (technical-director-owned, not blockers on either story): **ADR-0014** gains the
+dirty-set/budgeted-drain contract (§2), the rebuild-phase ordering + shared-window rule and the
+boot-scoped initial radius (§3); **ADR-0015** gains the `chunk_became_resident` residency signal.
 
 ## Definition of Done
 

@@ -87,9 +87,14 @@ generation compute**, parallelised — sub-second wall clock.
 
 **The real boot cost is the MESH, not the data.** `build_initial_window()` is unbounded by design and measured
 at **~7.7 ms/chunk** post-vox-019 (7,395.9 ms for 961 chunks). An unclipped 49×49 window projects to
-**~18.5 s**. That is the number this story has to confront, and it is why AC-BOOT-BUDGET below is a
-measure-and-lever AC rather than an assumption. Note also that `TR-voxel-world-026`'s parenthetical
-"~2.6 s initial view-window mesh build" is a **stale ADR-0014 prototype figure** — file the correction.
+**~18.5 s**. ⚑ **AMENDED 2026-07-26 (TD Addendum D / D2): that number is no longer this story's to
+confront.** `vox-021` sequences before this story and lands `view_radius_chunks` 24 → 12 plus
+`boot_mesh_radius_chunks = 8`, putting the boot window at 17×17 = 289 chunks ≈ **~2.2 s**, against a
+technical-director ceiling of **3.0 s total / 2.5 s mesh phase**. AC-BOOT-BUDGET below therefore measures
+and reports against a ruled ceiling on an already-retuned configuration; it is no longer a
+measure-and-discover-the-radius-lever AC. Note also that `TR-voxel-world-026`'s parenthetical
+"~2.6 s initial view-window mesh build" is a **stale ADR-0014 prototype figure** — file the correction
+(~2.2 s at the ruled boot radius; the 18.5 s figure applied to the superseded radius 24).
 
 **Control Manifest Rules (this layer — boot sequencing):**
 - **Required**: genesis runs inside `GameWorld`'s WIRING phase, strictly before `BootState.ACTIVE`
@@ -107,9 +112,19 @@ measure-and-lever AC rather than an assumption. Note also that `TR-voxel-world-0
   `SceneTree.paused` / `Engine.time_scale`; reaching into any private member of another module
   (`CameraInput._target` in particular).
 - **Guardrail**: the initial mesh window is built **after** genesis completes and before ACTIVE — a chunk
-  meshed while its data is not yet resident is a **permanent hole** (`VoxelWorldMeshStreamer` subscribes to
-  nothing and has no invalidation path — verified: zero occurrences of `cells_changed_batch` in
-  `voxel_world_mesh_streamer.gd`).
+  meshed while its data is not yet resident renders empty until something re-meshes it.
+  ⚑ **CORRECTED 2026-07-26 (TD Addendum D / D7).** The earlier wording here — *"`VoxelWorldMeshStreamer`
+  subscribes to nothing and has no invalidation path"* — was **wrong**. The zero-`cells_changed_batch`
+  finding is true of that *file*; the invalidation path lives one layer down in
+  **`VoxelWorldMesher.setup()` (`voxel_world_mesher.gd:163-164`)**, which connects **both** `cell_changed`
+  and `cells_changed_batch` and rebuilds every tracked touched chunk (seam neighbours included). The
+  streamer subscribing to nothing is **correct layering** — the mesher owns chunk *content*, the streamer
+  owns chunk *membership*. The real hazard is a different one: **residency page-in emits no signal**, so a
+  chunk meshed before its async page-in lands never re-meshes (TD Defect 2). **`vox-020` closes that**
+  (`chunk_became_resident` + a dirty set drained through a budgeted rebuild phase). This ordering rule
+  still stands for the boot case — it is cheaper to mesh once, correctly, than to rely on invalidation at
+  boot — but it is now a *sequencing preference backed by a working invalidation path*, not the only thing
+  standing between the player and a permanent hole.
 
 ---
 
@@ -157,8 +172,13 @@ measure-and-lever AC rather than an assumption. Note also that `TR-voxel-world-0
       additive (camera-input epic file — name it in the commit body); **never** write a private field.
 - [ ] **AC-MESH-WINDOW-AFTER-GENESIS**: `_build_initial_voxel_mesh_window()` still runs exactly once, still
       strictly before ACTIVE, and now strictly **after** genesis — proven by an ordering assertion, not by
-      reading the code. Rationale in-file: the streamer has no invalidation path, so a chunk meshed before its
-      data lands is a permanent hole. [TR-voxel-world-026]
+      reading the code. Rationale in-file (**corrected 2026-07-26, TD Addendum D / D7**): an invalidation
+      path **does** exist (`VoxelWorldMesher.setup()` connects `cell_changed` + `cells_changed_batch`), and
+      `vox-020` additionally closes the residency-page-in hole via `chunk_became_resident` — so a chunk
+      meshed early is **not** a permanent hole. The ordering is kept because meshing once over resident
+      data is cheaper and more predictable than meshing empty and re-meshing through a budgeted drain, and
+      because `boot_mesh_radius_chunks` (vox-021) makes the boot window small enough that this is
+      unambiguously the right trade. [TR-voxel-world-026]
 - [ ] **AC-ROSTER-AFTER-WORLD**: `Valley.spawn_starting_roster()` (villager-ai-021's ready-and-uncalled
       surface) is called **exactly once**, from the boot sequence, after genesis and before ACTIVE. With
       `starting_villager_count > 1` in a test config it returns that many villagers, each on a distinct
@@ -177,19 +197,24 @@ measure-and-lever AC rather than an assumption. Note also that `TR-voxel-world-0
       any `_process`/`_physics_process` call graph — grep-guarded by test. Boot-time draining is bounded by a
       config-driven wall-clock ceiling and terminates deterministically when it is hit. [TR-voxel-world-053,
       ADR-0015 Decision §6]
-- [ ] **AC-BOOT-BUDGET (Advisory, measured, time-boxed)**: a windowed run at the **shipped 2000×2000 config**
-      records boot-to-ACTIVE wall clock, split into its phases (residency page-in / nav-graph build / initial
-      mesh window / roster spawn), into a dated evidence doc under `production/qa/evidence/`, on the
-      `vox-018`/`vox-019` tool precedent (hardware, engine build and launch command stated verbatim; **VSync
-      OFF** — S8 proved VSync floors frame-time measurement at 16.67 ms). **Producer-set provisional ceiling:
-      5 s** (this codebase has no boot loading overlay, so boot time is a frozen window — the real ceiling is a
-      technical-director boot-budget decision that does not exist yet; see Open Decisions). **If the ceiling is
-      missed: apply ONE named lever, re-measure once, then escalate to technical-director.** Named levers, in
-      order: (1) a **boot-scoped initial mesh radius** smaller than the steady-state `view_radius_chunks`
-      (additive `VoxelWorldConfig` field — a shape decision that belongs to the technical-director, not to this
-      story); (2) reduce `view_radius_chunks` itself; (3) reduce `VillagerAIConfig.nav_region_size` (a pure
-      `.tres` data change — 200×200×17 ≈ 680k predicate evaluations at the current default). Record which lever
-      was applied and the before/after numbers. Do **not** manufacture the number by shrinking the world extent.
+- [ ] **AC-BOOT-BUDGET (Advisory, measured, time-boxed)** — **RE-POINTED 2026-07-26 (TD Addendum D / D2)**:
+      a windowed run at the **shipped 2000×2000 config** records boot-to-ACTIVE wall clock, split into its
+      phases (residency page-in / nav-graph build / initial mesh window / roster spawn), into a dated evidence
+      doc under `production/qa/evidence/`, on the `vox-018`/`vox-019` tool precedent (hardware, engine build
+      and launch command stated verbatim; **VSync OFF** — S8 proved VSync floors frame-time measurement at
+      16.67 ms). **Ceiling: technical-director-set, total boot-to-ACTIVE ≤ 3.0 s, of which the initial mesh
+      phase ≤ 2.5 s.** This **replaces the producer's provisional 5 s**; rationale: this codebase has no boot
+      loading overlay, so boot is a frozen window, and ~3 s is the threshold above which a frozen window reads
+      as a hang. **The radius shape is no longer this story's decision or its lever — `vox-021` owns it** and
+      lands `view_radius_chunks` 24 → 12 plus `boot_mesh_radius_chunks = 8` **before** this story runs,
+      projecting the mesh phase at ~2.2 s (PASS with headroom). **If the ceiling is still missed here: apply
+      ONE remaining named lever, re-measure once, then escalate to technical-director.** Remaining levers, in
+      order: (1) reduce `VillagerAIConfig.nav_region_size` (a pure `.tres` data change — 200×200×17 ≈ 680k
+      predicate evaluations at the current default); (2) tighten the boot drain's config-driven wall-clock
+      ceiling. **Radius levers are spent — do not re-tune `view_radius_chunks` or `boot_mesh_radius_chunks`
+      from this story; a miss that traces to the mesh phase is a `vox-021` re-measure and a TD escalation.**
+      Record which lever was applied and the before/after numbers. Do **not** manufacture the number by
+      shrinking the world extent.
 
 ---
 
@@ -232,12 +257,16 @@ ADR-0014 (initial mesh window), ADR-0001/0002 (DI + config):*
 
 *Handled elsewhere, or surfaced as missing — do not implement here:*
 
-- **Mesh invalidation on cell change — MISSING STORY, surfaced not fabricated.** `VoxelWorldMeshStreamer`
-  subscribes to no signal and rebuilds nothing: a chunk already meshed is never re-meshed when its cells
-  change, and a chunk meshed while its data was not yet resident stays a permanent hole. This story's
-  genesis-before-mesh ordering avoids the boot case; it does **not** fix the general case (a placed block
-  appearing, or the leading edge of a moving camera outrunning async page-in). **No story in any epic covers
-  this — it needs a decision and a new story from the technical-director. It is not invented here.**
+- **Mesh invalidation on cell change — NOW OWNED BY `vox-020`** (was: "missing story"). ⚑ **CORRECTED
+  2026-07-26 (TD Addendum D / D7):** the premise that *"`VoxelWorldMeshStreamer` subscribes to no signal
+  and therefore a placed block never appears"* is **FALSE** — `VoxelWorldMesher.setup()` connects
+  `cell_changed` and `cells_changed_batch` and rebuilds tracked touched chunks (seam neighbours included).
+  What is genuinely broken is (a) that rebuild is **unbudgeted and synchronous inside the handler**
+  (~69 ms for a 9-chunk edit at 7.7 ms/chunk) and (b) **residency page-in emits no signal**, so an
+  early-meshed chunk never re-meshes. **`vox-020` fixes both** (dirty set + budgeted rebuild drain first
+  inside the existing `mesh_build_budget_ms`; new `chunk_became_resident` signal) and **sequences before
+  this story**. This story's genesis-before-mesh ordering remains the correct boot-phase behaviour; it is
+  no longer the *only* thing preventing a hole.
 - A boot-time **loading overlay** Control (`TR-scene-world-management-032`). Still absent; running genesis
   during WIRING before ACTIVE remains the best available proxy, exactly as `game_world.gd`'s existing honest
   note says. A later scene-world-management story slots an overlay in front of this same call site without
@@ -306,7 +335,13 @@ ADR-0014 (initial mesh window), ADR-0001/0002 (DI + config):*
   front of), scene-001/002/004 (World Root, boot gate, GameWorld assembly seam), spine-002/003 (BootState +
   config pattern), villager-ai-007 (`VillagerNavGraph.build`), **villager-ai-021 (`spawn_starting_roster`, landed
   2026-07-26 — this story is its named caller)**, cam-001/002 (`CameraInput`).
-- **Blocked on**: nothing. Every surface it calls is already landed and tested.
+- **Blocked on** (⚑ **AMENDED 2026-07-26, TD Addendum D**): **`vox-020`** (mesh invalidation — dirty set +
+  budgeted rebuild drain + `chunk_became_resident`) and **`vox-021`** (boot-scoped mesh radius +
+  `view_radius_chunks` 24 → 12). **This story now sequences AFTER both.** Why: `vox-020` corrects the false
+  premise this story's Guardrail and Out-of-Scope section were written on and closes Open Decision #4;
+  `vox-021` pre-applies what was this story's named lever (1) and sets the boot ceiling AC-BOOT-BUDGET is
+  now measured against, so measuring boot before it lands would measure a configuration that is already
+  superseded. Every other surface it calls was already landed and tested.
 - **Unlocks**:
   - `villager-ai-021`'s roster surface stops being dead code — the Valley boots **populated**
   - `building-023` (ghost preview): the pick DDA has terrain to hit, so a ghost can render and its Visual/Feel
@@ -314,12 +349,23 @@ ADR-0014 (initial mesh window), ADR-0001/0002 (DI + config):*
   - **any human playtest of the build** (M02 risk R11's real precondition)
   - the ambient hosts C4 could not wire (chimney smoke, interior clutter, foliage) — unblocked, not done
   - `build-validation` and `needs-mood` integration work that wants a real world instead of a hand-built fixture
-- **Open decisions this story surfaces (producer → user / technical-director)**:
-  1. **No boot-time budget exists as a project decision.** The 5 s ceiling in AC-BOOT-BUDGET is
-     producer-provisional. Owner: technical-director.
-  2. **Boot-scoped mesh radius** — whether the initial window should use a smaller radius than the steady-state
-     `view_radius_chunks`. A shape decision, deliberately not made here.
-  3. **`TR-voxel-world-026`'s "~2.6 s initial view-window mesh build" is stale** (ADR-0014 prototype figure;
-     measured is ~7.7 ms/chunk → ~7.4 s at 961 chunks, ~18.5 s projected at a full 49×49 window). File the
-     registry/GDD correction.
-  4. **Mesh invalidation on cell change has no story anywhere** (see Out of Scope). Needs an owner.
+- **Open decisions this story surfaces (producer → user / technical-director)** — ⚑ **three of four CLOSED
+  2026-07-26 by TD Addendum D (PROVISIONAL pending user ratification)**:
+  1. ~~**No boot-time budget exists as a project decision.**~~ **CLOSED (D2 §5)** — technical-director set
+     **3.0 s total boot-to-ACTIVE, ≤ 2.5 s for the initial mesh phase**, replacing the producer's
+     provisional 5 s. AC-BOOT-BUDGET is re-pointed at it.
+  2. ~~**Boot-scoped mesh radius**~~ **CLOSED (D2 §§1–3) and RE-HOMED to `vox-021`** — `view_radius_chunks`
+     24 → 12 (a `.tres` change) **plus** a new `boot_mesh_radius_chunks: int = 8` consumed only by
+     `build_initial_window`, with growth to full via the existing budgeted `update_view_window`. The shape
+     decision was made by the technical-director, and it is implemented by `vox-021`, not here.
+     ⚑ **One consequence is flagged to the user as a look-and-feel call, not a technical one: the visible
+     extent halves, 384 → 192 world units.** Two named alternatives (accept longer visible fill-in at a
+     larger radius, or fund greedy meshing — ADR-0014 §2's reserve — sooner) are recorded in `vox-021`'s
+     own Open Decisions.
+  3. **STILL OPEN (doc task): `TR-voxel-world-026`'s "~2.6 s initial view-window mesh build" is stale**
+     (ADR-0014 prototype figure). Correct it to **~2.2 s at `boot_mesh_radius_chunks = 8`**, and note that
+     the 18.5 s figure applied to the now-superseded radius 24. File the registry/GDD correction.
+  4. ~~**Mesh invalidation on cell change has no story anywhere.**~~ **CLOSED by `vox-020`** — and the
+     premise behind it was **false**: the invalidation path exists in `VoxelWorldMesher.setup()`
+     (`voxel_world_mesher.gd:163`). `vox-020` fixes the two real defects (unbudgeted synchronous rebuild
+     inside the handler; residency page-in emitting no signal) and sequences before this story.

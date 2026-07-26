@@ -38,7 +38,8 @@ stories would need AC edits.** This is the same posture S8 carried against the C
 **What changed:** one Must story added, `scene-005`
 (`production/epics/scene-world-management/story-005-world-genesis-boot-sequence.md`, 2.0 d anchor,
 **godot-specialist**, **sequenced FIRST on that lane, ahead of `building-023`**). S09 is now **15 stories**
-(12 Must + 2 Should + 1 Nice).
+(12 Must + 2 Should + 1 Nice). *(Superseded by the second amendment above: **17 stories**, and `scene-005`
+is now gated by `vox-020`/`vox-021`.)*
 
 **Why it was missing:** the production Valley boots an **EMPTY** `VoxelWorldGrid`.
 `VoxelWorldGrid.generate_terrain()` is implemented and tested (vox-006) but called **nowhere in the boot
@@ -72,10 +73,113 @@ re-measure once, then escalate to technical-director.
 lane's ~4.0, inside 8 available. The 2-day buffer's two named consumers are unchanged; `scene-005`'s
 boot-budget unknown is absorbed by that lane's own ~4 days of headroom, not by the buffer.
 
-**Newly surfaced missing story (NOT fabricated):** `VoxelWorldMeshStreamer` subscribes to no signal and has
+**Newly surfaced missing story (NOT fabricated):** ~~`VoxelWorldMeshStreamer` subscribes to no signal and has
 **no mesh-invalidation path** — a meshed chunk is never re-meshed when its cells change (verified: zero
-`cells_changed_batch` occurrences in that file). `scene-005`'s genesis-before-mesh ordering covers the boot
-case only. No story in any epic covers the general case. See D7 below.
+`cells_changed_batch` occurrences in that file).~~ ⚑ **SUPERSEDED 2026-07-26 — the premise was FALSE.** The
+grep was true of that file; the invalidation path lives in `VoxelWorldMesher.setup()`
+(`voxel_world_mesher.gd:163`). The real defects are the unbudgeted in-handler rebuild and the silent
+residency page-in. **Closed by `vox-020`** — see the second amendment block above and D7 below.
+
+## ⚑ Amendment 2026-07-26 (second) — `vox-020` + `vox-021` added (TD Addendum D closes D7 and D2)
+
+**What changed:** two Must stories added to the **`godot-gdscript-specialist` lane**, both from
+`production/architecture-decisions-m02-preflight-2026-07-26.md` **Addendum D** (also **PROVISIONAL pending
+user ratification**). S09 is now **17 stories** (14 Must + 2 Should + 1 Nice).
+
+| Story | File | Est. | Sequence |
+|---|---|---|---|
+| **`vox-020`** — mesh invalidation: dirty-marking + budgeted rebuild drain + `chunk_became_resident` | `production/epics/voxel-world/story-020-mesh-invalidation-dirty-set-and-budgeted-rebuild.md` | 1.5 | **BEFORE `scene-005`**; parallel-safe with `building-023` |
+| **`vox-021`** — boot-scoped mesh radius + `view_radius_chunks` 24 → 12 | `production/epics/voxel-world/story-021-boot-scoped-mesh-radius-and-view-radius-retune.md` | 1.0 | **AFTER `vox-020`** (same file), **BEFORE `scene-005`** |
+
+**Why they exist, and what moved:**
+
+- **D7 is CLOSED, and its premise was FALSE.** This plan's own D7 entry (and `scene-005`'s Guardrail)
+  asserted that *"`VoxelWorldMeshStreamer` subscribes to no signal, so a block the player places is written
+  to the grid and never appears."* The zero-`cells_changed_batch` grep was true of that **file**; the
+  invalidation path lives one layer down in **`VoxelWorldMesher.setup()` (`voxel_world_mesher.gd:163-164`)**,
+  which connects both `cell_changed` and `cells_changed_batch` and rebuilds tracked touched chunks, seam
+  neighbours included. **The streamer subscribing to nothing is correct layering** (mesher owns *content*,
+  streamer owns *membership*). The two **real** defects `vox-020` fixes: (1) that rebuild is **unbudgeted
+  and synchronous inside the signal handler** — ~69 ms for a 9-chunk edit at vox-019's measured 7.7 ms/chunk;
+  (2) **residency page-in emits no signal**, so a chunk meshed before its async page-in lands never
+  re-meshes — the actual permanent-hole class. **No new budget knob**: a separate rebuild budget would let
+  the progress guarantee integrate one chunk per phase — 7.7 + 7.7 = 15.4 ms in a 16.6 ms frame — regressing
+  vox-019's measured p95 of **16.947 ms**. The rebuild phase drains **first**, inside the existing
+  `mesh_build_budget_ms`.
+- **D2 is CLOSED with a bigger answer than the question asked.** `view_radius_chunks = 24` is unaffordable
+  **at boot AND in steady state**: shrinking only the boot radius trades an 18.5 s freeze for ~35 s of
+  visible pop-in, because `update_view_window` grows the window back to full at ~1 chunk/frame. So both
+  knobs move: 24 → 12 in `.tres`, plus a new `boot_mesh_radius_chunks = 8` consumed only by
+  `build_initial_window`. **Boot ceiling is now a technical-director decision: 3.0 s total / ≤ 2.5 s mesh
+  phase**, replacing the producer's provisional 5 s. Projected mesh phase ~2.2 s.
+- **`scene-005` was corrected, not redesigned.** Its Guardrail (built on the false premise) is reworded, its
+  AC-MESH-WINDOW-AFTER-GENESIS rationale is restated as a cost preference rather than a hole-prevention
+  necessity, AC-BOOT-BUDGET is re-pointed at the 3.0 s ceiling with the radius lever marked **spent** (owned
+  by `vox-021`), **Open Decisions #1, #2 and #4 are CLOSED** (#3, the stale `TR-voxel-world-026` figure,
+  stays open as a doc task), and it now **sequences after `vox-020`/`vox-021`**.
+- ⚑ **One user decision falls out of this and is flagged, not absorbed: the visible extent halves,
+  384 → 192 world units.** That is a look-and-feel property of a colony builder, not a technical detail.
+  Two named alternatives are recorded in `vox-021`'s Open Decisions: **(a) accept longer visible fill-in**
+  at a larger radius, or **(b) fund greedy meshing sooner** (ADR-0014 §2's named optimisation reserve — it
+  attacks the 7.7 ms/chunk cost that forces the radius decision at all). Radius 12 is the right default to
+  ship now because it is reversible in a `.tres` and is the only value affordable in both phases;
+  `vox-021`'s AC-EXTENT-EVIDENCE captures a settlement-distance screenshot so the call is made on a picture.
+
+### Capacity impact — and the honest over-commitment read
+
+**Lane model (per-lane wall-clock, as S5–S8 used):**
+
+| Lane | Must sequence | Must lane-days |
+|---|---|---|
+| `godot-gdscript-specialist` **(now the longest lane AND still the binding chain)** | ~~`bv-001` ✓~~ → **`vox-020` → `vox-021`** → `bv-002 → 003 → 004` → *(Should)* `005` | 4.0 → **6.5** |
+| `godot-specialist` | `scene-005` → `building-023` → `building-001` → *(Nice)* `building-011` | 4.0 (unchanged, but **now gated**) |
+| `systems-designer` | `nm-001 → 002 → 003` | 4.0 (unchanged, fully independent) |
+| `ai-programmer` | ~~`villager-ai-026` ✓~~ → ~~`villager-ai-021` ✓~~ → *(Should)* `bv-010` | 1.5 (both Must **Complete**) |
+
+**Is Sprint 9 now over-committed? Honest answer: the Must set is not; the Must + Should + Nice set is.**
+
+- **By the lane model:** running `vox-020 → vox-021` **first** on the gdscript lane clears the gate on
+  `scene-005` at ~day 2.5, the build-validation chain finishes ~day 6.0, and the godot-specialist lane
+  finishes ~day 6.5. That is **6.5 of 8 available lane-days** — it fits, but **headroom collapses from
+  ~4.0 days to ~1.5**. Adding both Shoulds and the Nice pushes the sprint to ~7.5–8.5 lane-days, i.e. **at
+  or past the line**.
+- **By story count — the only metric that has ever predicted anything here:** 17 stories is **above the
+  measured 8–13/session band**. But **three are already Complete** (`villager-ai-026`, `build-validation-001`,
+  `villager-ai-021`), so **14 remain** — at the top of the band, not beyond it.
+- **The new structural fact, and the one that actually matters:** the gdscript lane now carries **both** the
+  sprint's binding serial chain **and** a cross-lane gate on the godot-specialist lane. Before this
+  amendment, a gdscript slip cost only build-validation. Now it also delays `scene-005`, `building-023` and
+  `building-001` — i.e. **every loop-facing, human-visible deliverable in the sprint**. That is the real
+  cost of these two stories, and it is not visible in the day totals.
+- **The buffer situation changed, favourably on one side and unfavourably on the other.** The 2-day buffer's
+  **primary named consumer — `villager-ai-026`'s behavior-preservation proof — is DISCHARGED** (the story
+  landed Complete), so that reservation is released. Against that, two new named unknowns arrive:
+  `vox-021`'s **boot measurement** (a MISS costs a lever + a re-measure + a TD escalation) and `vox-020`'s
+  **budget/ordering assertions** against a 7.7 ms/chunk cost measured on one machine. **Re-point the freed
+  buffer at those two**; `build-validation-010`'s 60 s CI ceiling remains the other named consumer. Net: the
+  buffer is no better off than it was, but it is still pre-committed to named risks rather than held vague.
+
+### Recommended trim, if one is needed
+
+**Trim now (do it — it costs nothing):**
+1. **Drop `building-011` (Nice, plan-only undo/redo) from S09 outright.** It was always opportunistic, it is
+   Cluster 0 and never on the cut lever, and its lane is now the gated one. Move it to S10.
+
+**Trim on signal (decide at mid-sprint, when `vox-021` lands or does not):**
+2. **Demote `build-validation-005` (Should) to the opener of S10** — *not* `build-validation-010`. Reasoning:
+   `bv-005` is **already** positioned as an S10 dependency (`bv-006`, the payoff-chain unblocker and the
+   declared head of S10, needs both `004` and `005`), so deferring it crosses one sprint boundary and costs
+   nothing else. `bv-010`'s entire value is **early** detection of a divergence between two *shipped*
+   implementations (R3) — deferring it is the one trim that actively increases milestone risk. **Cut the
+   Should whose value is positional, keep the Should whose value is temporal.**
+
+**Do not trim:** `vox-020`/`vox-021` themselves (they gate `scene-005`), any Must, or the `/team-qa sprint`
+sign-off (criterion #14 — the habit starts here regardless of scope).
+
+**Sequencing instruction that replaces the previous "sequence `villager-ai-026` first":** with `026`,
+`bv-001` and `villager-ai-021` already Complete, **the day-one instruction is now `vox-020` on the gdscript
+lane**, because it is what gates the godot-specialist lane's entire four-story sequence. `nm-001` opens the
+systems-designer lane in parallel as before.
 
 ## Sprint Goal
 
@@ -154,6 +258,8 @@ Critical path = the build-validation chain **plus its cross-lane opener** (see C
 | needs-mood-001 | **Config resource, DI scaffold, need schema & BLOCKING ladder invariant** — ships CD Ruling 1's values | `production/epics/needs-mood-system/story-001-config-scaffold-and-ladder-invariant.md` | systems-designer | 1.0 | None in-epic; M01 Foundation spine ✓ (`ConfigResource`, `GameWorld` boot gate, `TimeTickSystem` Autoload) | Typed `@export` config, `.tres`; **the ladder invariant `ground_penalty < unsheltered_bed_multiplier < 1.0` halts boot loudly when violated (AC29) — proven by test, not asserted in prose**; fixed need schema (MVP: `sleep`); **ships CD Ruling 1's values unmodified: `decay_per_tick[sleep]=0.07`, `base_recovery_per_tick[sleep]=0.5`, `mood_smoothing_ticks=40`** (PROVISIONAL — if the ruling is overturned this is a config-only re-run); headless-mockable, zero Autoload registration; passing test |
 | needs-mood-002 | **F1 decay, per-need state machine & edge-triggered urgent signal** — carries the TD-canonized `has_urgent_need` seam | `production/epics/needs-mood-system/story-002-decay-state-machine-and-urgent-signal.md` | systems-designer | 1.5 | needs-mood-001 (in-sprint). **TD-owned doc precondition (NM-6): `architecture.md` must document `has_urgent_need(villager_id) -> bool` BEFORE this story starts** | F1 per-tick decay; queryable per-need state machine (**state is truth, edge events are latency hints**); edge-triggered urgent/satisfied signals fire once per transition; **`has_urgent_need(villager_id: int) -> bool` implemented as a REQUIRED pure query** (NM-6) — **no signal emission, no state mutation, no lazy-init as a side effect of being asked**; nil-safety stays on the consumer side (`VillagerAi._has_urgent_need`'s existing guard — do NOT add a null branch here); passing unit test |
 | needs-mood-003 | **Recovery-report API, source→rate table & F2 recovery — THE THREE-RUNG LADDER** (the mechanical meaning of "the building IS the game") | `production/epics/needs-mood-system/story-003-recovery-report-api-and-source-rate-table.md` | systems-designer | 1.5 | needs-mood-001, 002 (in-sprint) | **Canonical three-arg form per NM-5: `start_recovery(villager_id: int, need: StringName, source_enum: RecoverySource) -> void`** and symmetrically `stop_recovery(villager_id, need, reason)`; F2 resolves through a **source→rate TABLE LOOKUP** with a test proving a brand-new source id works **with no code change** (AC10 — no hardcoded two-source branch); **three rungs, per TD NM-3: `bed_sheltered` ×1.0 > `unsheltered_bed_multiplier` (0.7) > `ground_penalty` (0.4)** — Core Rule 4 is authoritative, the GDD's F2 variable table is stale. **The two-multiplier form is NEVER to be implemented** — it makes the BLOCKING ladder invariant unenforceable and silently deletes the "the missing roof visibly costs" mechanic. Passing unit test |
+| vox-020 | **Mesh invalidation — dirty-marking + budgeted rebuild drain + `chunk_became_resident` (ADDED 2026-07-26, TD Addendum D / D7; FIRST on the gdscript lane — it gates `scene-005` and therefore the whole godot-specialist lane)** | `production/epics/voxel-world/story-020-mesh-invalidation-dirty-set-and-budgeted-rebuild.md` | godot-gdscript-specialist | 1.5 | **Blocked on nothing** (vox-007/015/019 + residency tier all landed). Created by the PROVISIONAL D7 ruling | The mesher's two change handlers **mark dirty instead of rebuilding in-handler** (`_dirty_chunks`, `get_dirty_chunk_keys()`, `clear_dirty()`) — zero `build_chunk()` calls during signal dispatch, asserted; new `VoxelWorldGrid.chunk_became_resident(chunk_key)` emitted from `_integrate_one_finished_read` + `_try_serve_from_in_flight_write` **after** the `_chunks` assignment, feeding the **same** dirty set (no second mechanism); a **rebuild phase drained FIRST** in `_sync_window`, before build-new and before unload, through the **existing** `_drain_budgeted` inside the **EXISTING `mesh_build_budget_ms` — NO NEW KNOB** (a separate budget would permit 7.7 + 7.7 ms in one 16.6 ms frame and **regress vox-019's measured p95 of 16.947 ms**); `unload_chunk()` erases the key and **no cross-unload bookkeeping is built**; untracked chunks record nothing; `_chunk_keys_touched_by()`'s seam-neighbour behaviour **unchanged** and now regression-tested; **streamer subscribes to nothing** (grep-guarded — correct layering, not a bug); `build_initial_window` passes UNBOUNDED to the rebuild phase too. **9 ACs.** Evidence: `tests/integration/voxel_world/mesh_invalidation_budget_test.gd`. Parallel-safe with `building-023` |
+| vox-021 | **Boot-scoped mesh radius + `view_radius_chunks` 24 → 12 retune (ADDED 2026-07-26, TD Addendum D / D2)** | `production/epics/voxel-world/story-021-boot-scoped-mesh-radius-and-view-radius-retune.md` | godot-gdscript-specialist | 1.0 | **`vox-020` (in-sprint, HARD sequencing — same file, `voxel_world_mesh_streamer.gd`; serialize them)**. Created by the PROVISIONAL D2 ruling | `view_radius_chunks` **24 → 12** as a pure `.tres` change with rationale (at 7.7 ms/chunk radius 24 = 2401 chunks = 18.5 s and a window `update_view_window` can never maintain); new `boot_mesh_radius_chunks: int = 8` **consumed only by `build_initial_window`**, threaded as a radius parameter into the **existing** `_collect_window` — **no new state, no timer, no camera trigger, no second code path** (grep-guarded single consumer), validated against new MIN/MAX + a **non-BLOCKING clamp+warn** when it exceeds `view_radius_chunks`; **growth to full via the existing budgeted `update_view_window`** (289 → 625 ≈ 5.6 s of gradual fill while the player is already interactive); `visibility_range_end` stays **derived** (12 × 16 = 192 u); ADR-0005 holds — `build_initial_window` still inside WIRING, once, before ACTIVE; **boot ceiling 3.0 s total / ≤ 2.5 s mesh phase**, measured **windowed, real GPU, VSync OFF, phase-split** to `production/qa/evidence/` (projected ~2.2 s). ⚑ **USER DECISION FLAGGED: visible extent halves 384 → 192 u** — look-and-feel, two named alternatives (accept longer fill-in / fund greedy meshing sooner) |
 | scene-005 | **World genesis in the boot sequence — terrain, roster and nav graph before ACTIVE (ADDED 2026-07-26; FIRST on the godot-specialist lane) — THE VALLEY BOOTS AN EMPTY GRID TODAY** | `production/epics/scene-world-management/story-005-world-genesis-boot-sequence.md` | godot-specialist | 2.0 | **Blocked on nothing** — every surface it calls is landed (vox-006/010–019, villager-ai-007/021, scene-001/002/004, spine-002/003, cam-001/002) | Genesis runs in WIRING, after the `setup()` sweep and strictly BEFORE the initial mesh window and before ACTIVE; **no production `src/` path calls `generate_terrain()`** (grep-guarded) — genesis is `update_residency()` page-in of the boot window per ADR-0015, so cost scales with the window, not the 2000×2000 extent; deterministic by `terrain_seed` (same seed → identical world, different seed → different); grid reports `GENERATED`; zero per-cell `cell_changed` at boot; **ONE config-derived start-focus cell** shared by residency anchor / mesh-window centre / camera start target / roster centre (today the camera starts at cell 0,0,0 while the roster spawns at 1000,8,1000); `build_initial_window()` still once, now strictly after genesis (the streamer has no invalidation path — a chunk meshed early is a permanent hole); **`spawn_starting_roster()` called exactly once after the world exists** (villager-ai-021's ready surface, dead code until now) with plurality proven at `starting_villager_count > 1`; `VillagerNavGraph.build()` over a config-driven bounded region with point count > 0; **no synchronous per-frame I/O or generation** — `drain_pending_async_reads`/`wait_for_async_residency_idle` grep-absent from every `_process` call graph, boot drain bounded by a config ceiling; **AC-BOOT-BUDGET (Advisory)**: windowed VSync-OFF phase-split boot wall clock recorded to `production/qa/evidence/`, 5 s producer-provisional ceiling, one named lever then escalate to TD |
 | building-023 | **Ghost preview rendering + drag re-rasterization + degradation + state tint (Cluster 0) — THE PLAYER CURRENTLY DRAWS BLIND** (run AFTER `scene-005` — no pick, no ghost, no screenshot over an empty grid) | `production/epics/building-system/story-023-ghost-preview-rendering.md` | godot-specialist | 1.0 | building-020 ✓ (pick anchor), 022 ✓ (validity bool), 019 ✓ (tool SM) — all Complete S5/S6 | Pooled `MeshInstance3D` ghost preview over the resolved cell set for all four drawing verbs; re-rasterizes during drag; graceful degradation above the cell cap; state tint (valid/invalid); **no writes to `VoxelWorldGrid`** (grep-guarded as a non-writer, same guard the four tools carry); Visual/Feel evidence screenshot under `production/qa/evidence/`. **R11: no external playtest is meaningful until this lands.** |
 | building-001 | **Build/Editor Mode state machine (Cluster 0)** — the mode the tool palette and the whole Building UI live inside; **R10's named unblocker** | `production/epics/building-system/story-001-build-editor-mode.md` | godot-specialist | 1.0 | Camera & Input action signals ✓, tool state machine ✓ (Complete) | Build Mode master gate as a state machine; all placement tools gate through it; mode entry/exit deterministic and testable headlessly; passing unit test. **Unlocks `building-ui-001`/`002` (Cluster D) independently of Cluster A — this is M02 risk R10's stated mitigation and the reason it is Must, not Should.** |
@@ -209,10 +315,14 @@ important sequencing fact.
 **Owner lanes (serialization mitigation):**
 - **ai-programmer:** `villager-ai-026` **(FIRST — gates the binding lane)** → `villager-ai-021` →
   *(Should)* `build-validation-010` (starts only after bv-004 lands).
-- **godot-gdscript-specialist:** `build-validation-001 → 002 → 003 → 004` → *(Should)* `005`.
+- **godot-gdscript-specialist:** ⚑ **AMENDED 2026-07-26 (second):** ~~`build-validation-001`~~ ✓ Complete →
+  **`vox-020` → `vox-021` (FIRST — they gate `scene-005` and therefore the entire godot-specialist lane)** →
+  `build-validation-002 → 003 → 004` → *(Should)* `005`. ~6.5 Must lane-days — **now the longest lane, and
+  it carries both the binding serial chain and a cross-lane gate.**
 - **systems-designer:** `needs-mood-001 → 002 → 003` (independent lane, no cross-lane dependency).
-- **godot-specialist:** **`scene-005` (FIRST, amendment 2026-07-26)** → `building-023 → building-001` →
-  *(Nice)* `building-011`. `scene-005` is sequenced first because the other three are all evaluated against
+- **godot-specialist:** **`scene-005` (FIRST, amendment 2026-07-26 — but now GATED: it cannot start until
+  `vox-020` and `vox-021` land on the gdscript lane, ~day 2.5)** → `building-023 → building-001` →
+  *(Nice)* `building-011` **(recommended cut — see the second amendment's trim section)**. `scene-005` is sequenced first because the other three are all evaluated against
   a world that does not exist today; `building-023` in particular cannot produce its evidence screenshot
   before it. ~4.0 Must lane-days.
 
@@ -424,7 +534,9 @@ was widened to cover it) **but crosses GDD ownership** — `design/gdd/building-
 table and both `base_demolition_ticks` mirrors are 2× stale and are not `needs-mood-009`'s to
 edit. Confirm the sweep's cross-GDD authority or split it.
 
-### D7 — Mesh invalidation on cell change has no story anywhere (found while authoring `scene-005`)
+### D7 — ✅ **CLOSED 2026-07-26 by TD Addendum D → story `vox-020`.** *The escalated premise below was FALSE and is retained for the audit trail.* The mesher — not the streamer — owns invalidation and already subscribes (`voxel_world_mesher.gd:163`); the real defects are the unbudgeted in-handler rebuild and the silent residency page-in. **D2's boot-radius half is likewise closed → story `vox-021`.** Original text follows.
+
+### D7 (original) — Mesh invalidation on cell change has no story anywhere (found while authoring `scene-005`)
 
 `VoxelWorldMeshStreamer` connects to **no** signal and rebuilds **nothing**: `_sync_window` builds only
 chunks *not already tracked*. Consequences: (i) a chunk meshed while its data was not yet resident stays a
@@ -481,9 +593,14 @@ S09 blocker; it bears directly on whether the shipped build looks correct to a h
   story was fabricated. Two Cluster 0 items were deliberately **not** scheduled and one is blocked;
   three items are recorded under Missing Stories rather than invented. Run `/scope-check sprint-9`
   before implementation.
-- **Velocity:** 11 Must + 2 Should + 1 Nice = **14 stories**, at the top of the S6/S7/S8 band
-  (13/12/13). Max Must lane ~4.0 lane-days inside 8 available; 2-day buffer pre-committed to
-  `villager-ai-026`'s behavior-preservation proof and `build-validation-010`'s CI ceiling.
+- **Velocity:** ~~11 Must + 2 Should + 1 Nice = **14 stories**~~ → **AMENDED 2026-07-26 (second):
+  14 Must + 2 Should + 1 Nice = 17 stories**, of which **3 are already Complete** (`villager-ai-026`,
+  `build-validation-001`, `villager-ai-021`) → **14 remaining**, at the top of the measured 8–13/session
+  band. Max Must lane **~6.5** lane-days (gdscript) inside 8 available — headroom down from ~4.0 to ~1.5.
+  The 2-day buffer's primary consumer (`villager-ai-026`'s proof) is **discharged**; re-point the freed
+  reservation at `vox-021`'s boot measurement and `vox-020`'s budget/ordering assertions, alongside
+  `build-validation-010`'s CI ceiling. **Recommended trim: drop `building-011` (Nice) now; demote
+  `build-validation-005` (Should) to S10's opener on signal — never `build-validation-010`.**
 - **We will know this sprint was scoped right if:** `villager-ai-026` lands on day one with zero
   test edits; `build-validation-004` renders a Room/Sealed verdict against the real movement graph;
   `needs-mood-003`'s ladder is table-driven and a novel source id works with no code change; and a

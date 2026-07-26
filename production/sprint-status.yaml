@@ -182,7 +182,7 @@ stories:
     name: "Plan-only undo/redo (Cluster 0, milestone criterion #12) — undo must NEVER mutate a Built cell"
     file: "production/epics/building-system/story-011-plan-only-undo-redo.md"
     priority: nice-to-have
-    status: backlog
+    status: deferred-to-s10
     owner: "godot-specialist"
     estimate_days: 1.0
     blocker: "deps building-002 + building-032 (undo/redo stack core) both Complete S7. Pull only after building-023 + building-001 land with lane headroom"
