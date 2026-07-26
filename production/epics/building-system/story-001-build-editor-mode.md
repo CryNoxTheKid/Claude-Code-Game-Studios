@@ -1,7 +1,7 @@
 # Story 001: Build/Editor Mode state machine
 
 > **Epic**: Building System
-> **Status**: Ready
+> **Status: Complete (2026-07-26 — 1198/1198 suite green 0 orphans, parent-verified)
 > **Layer**: Core
 > **Type**: Logic
 > **Estimate**: 1 day

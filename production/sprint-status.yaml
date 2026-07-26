@@ -146,7 +146,7 @@ stories:
     name: "Build/Editor Mode state machine (Cluster 0) — R10's named unblocker for the 18-story Building UI epic"
     file: "production/epics/building-system/story-001-build-editor-mode.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete
     owner: "godot-specialist"
     estimate_days: 1.0
     blocker: "deps Camera & Input action signals + tool state machine, all Complete. Must (not Should) because R10's mitigation names it — demoting it re-couples all 18 building-ui stories to Cluster A"
