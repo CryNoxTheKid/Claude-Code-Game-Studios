@@ -10,10 +10,12 @@ the **presentation-experience** micro-epic which houses the two M01 CD-protected
 experience items (exception to the layer order — Art-Bible-driven, not a full
 Presentation-layer pass).
 
-**Feature layer opened 2026-07-26** (`/create-epics layer: feature`, first half):
-**build-validation-navigability** is created and storied as a gate on Sprint 09
-planning (M02 risk R2). Still outstanding for M02: the **needs-mood-system**
-Feature epic and the Presentation-layer UI epics (Building UI, Villager Info UI).
+**Feature layer opened 2026-07-26** (`/create-epics layer: feature`): both
+Feature epics — **build-validation-navigability** and **needs-mood-system** — are
+created and storied as a gate on Sprint 09 planning (M02 risk R2). Together they
+are Milestone 02's **Cluster A (PROTECTED)**, the payoff mechanic. Still
+outstanding for M02: the Presentation-layer UI epics (**building-ui**,
+**villager-info-ui**), which hard-depend on Cluster A.
 
 | Epic | Layer | System / Scope | GDD | Stories | Status |
 |------|-------|----------------|-----|---------|--------|
@@ -25,6 +27,7 @@ Feature epic and the Presentation-layer UI epics (Building UI, Villager Info UI)
 | resource-item-database | Foundation | Item/material definitions + boot gate + immutable queries | design/gdd/resource-item-database.md | 9 stories | Ready |
 | building-system | Core | Project lifecycle, tools, change orders, undo, demolition | design/gdd/building-system.md | 33 stories (Block A foundation 019–033 + Block B slice 001–018) | Ready |
 | villager-ai-behavior | Core | FSM, AStar3D, occupancy, threading, anti-stuck | design/gdd/villager-ai-behavior.md | 25 stories | Ready |
+| needs-mood-system | Feature | Need decay/state machine, 3-rung recovery ladder (the Building→Needs seam), mood EMA, why-string; **M02 Cluster A — PROTECTED** | design/gdd/needs-mood-system.md | 12 stories (10 M02-blocking + 1 Advisory + 1 VS-tier) | Ready |
 | build-validation-navigability | Feature | Room/enclosure detection, own BFS reachability trace, shelter classification, four-signal contract + AC36 property corpus (**M02 Cluster A head — PROTECTED**; created 2026-07-26) | design/gdd/build-validation-navigability.md | 10 stories | Ready |
 | presentation-experience | Presentation | Ambient-life wave 1 + loop-payoff communication scaffolding (the two M01 CD-protected items) | N/A — Art Bible §6.5/§5.6 (GDD-less, foundation-spine precedent) | 2 stories | Ready |
 
