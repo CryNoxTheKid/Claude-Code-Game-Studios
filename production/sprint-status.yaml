@@ -116,7 +116,7 @@ stories:
     name: "Multi-cell furniture placement (footprint) — the bed is 2 cells"
     file: "production/epics/building-system/story-016-multi-cell-furniture-placement.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete
     owner: "godot-specialist"
     estimate_days: 1.0
     blocker: "Its OWN header depends only on building-002 (Complete). Sequenced after building-028 per the epic's stated direction (028's Unlocks names 016) but NOT serially blocked by it — a 028 slip does not stall 016. footprint authored on ItemDefinitionResource, exposed via the getter-only ItemDefinition, typed Array[Vector3i]. A commit is valid IFF EVERY offset cell independently satisfies support + availability. All footprint cells are ONE entity sharing ONE occupant id — never N entities. NO partial placement"

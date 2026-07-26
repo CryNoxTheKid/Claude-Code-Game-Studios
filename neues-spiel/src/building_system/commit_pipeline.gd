@@ -111,6 +111,20 @@
 ## story) is the real caller that wires [method set_furniture_support_predicate]
 ## with the actual support-geometry check; this class still has no support
 ## concept of its own beyond the seam.
+##
+## Story building-016 (this revision, GDD Core Rule 8/F5 multi-cell
+## footprint, [TR-building-system-124]/[TR-building-system-127]) generalizes
+## [method commit] from a single furniture cell to an arbitrary fixed
+## footprint: [method get_selected_item_footprint] resolves the currently
+## selected item's `width_cells x depth_cells` span (RID's own schema) for
+## [FurnitureTool.resolve_cell_set] to expand into the actual cell set BEFORE
+## [method commit] ever runs; [method commit] itself gains a furniture-only
+## ALL-OR-NOTHING bounds rule (Edge Case 19/AC75 -- stricter than every other
+## tool's partial bounds-clamp, Edge Case 1) and groups every cell of a
+## multi-cell commit into one shared [FurnitureFootprintGroup] so
+## [ConstructionTickLoop] can route the whole footprint's completion to
+## [FurnitureRegistry] as exactly ONE entity (AC76), regardless of per-cell
+## claim/completion order or timing.
 class_name CommitPipeline
 extends Node
 
@@ -140,6 +154,7 @@ enum RejectReason {
 	CELL_COUNT_EXCEEDS_CAP,   ## AC39 [TR-building-system-049]
 	CELL_OCCUPIED,            ## AC10/AC11/AC14 [TR-building-system-084]/[TR-building-system-085]
 	FURNITURE_UNSUPPORTED,    ## Rule 8 [TR-building-system-050]
+	FOOTPRINT_OUT_OF_BOUNDS,  ## Story building-016, Edge Case 19, AC75 [TR-building-system-124]
 }
 
 ## Injected-tier dependency (ADR-0001) -- the sole source of [signal
@@ -331,11 +346,36 @@ func commit(candidate_cells: Array[Vector3i]) -> Array[BlueprintCell]:
 	assert(is_set_up(), "CommitPipeline.commit called before setup()")
 	if not placement_pick.get_current_pick().hit:
 		return []
-	var in_bounds_cells: Array[Vector3i] = candidate_cells.filter(
-		func(cell: Vector3i) -> bool: return voxel_world.is_in_bounds(cell)
-	)
-	if in_bounds_cells.is_empty():
-		return []
+	# Story building-028: resolve the whole commit's category/furniture id
+	# ONCE (the same selected item applies to every cell of one commit) --
+	# see [method _selected_item_is_furniture]'s own doc comment for why this
+	# is independent of [method _is_selected_item_available]'s own resolution.
+	# Story building-016 moves this resolution BEFORE the bounds clamp: a
+	# multi-cell furniture footprint needs to know it IS furniture in order
+	# to apply its own stricter, ALL-OR-NOTHING bounds rule below (Edge Case
+	# 19, AC75) instead of every other tool's partial bounds-clamp (Edge
+	# Case 1).
+	var is_furniture: bool = _selected_item_is_furniture()
+	var in_bounds_cells: Array[Vector3i]
+	if is_furniture:
+		# A multi-cell footprint is all-or-nothing INCLUDING bounds (Story
+		# building-016, Edge Case 19/AC75: "one cell out of bounds ->
+		# rejected") -- unlike every other tool's partial bounds-clamp (Edge
+		# Case 1), a single out-of-bounds footprint cell invalidates the
+		# WHOLE commit rather than silently dropping just that cell, so a bed
+		# can never be planted with one of its two cells missing because it
+		# fell outside the world.
+		for cell: Vector3i in candidate_cells:
+			if not voxel_world.is_in_bounds(cell):
+				commit_rejected.emit(RejectReason.FOOTPRINT_OUT_OF_BOUNDS, candidate_cells)
+				return []
+		in_bounds_cells = candidate_cells
+	else:
+		in_bounds_cells = candidate_cells.filter(
+			func(cell: Vector3i) -> bool: return voxel_world.is_in_bounds(cell)
+		)
+		if in_bounds_cells.is_empty():
+			return []
 	if not _is_selected_item_available():
 		commit_rejected.emit(RejectReason.NO_MATERIAL_SELECTED, in_bounds_cells)
 		return []
@@ -348,11 +388,6 @@ func commit(candidate_cells: Array[Vector3i]) -> Array[BlueprintCell]:
 	if not _all_cells_supported(in_bounds_cells):
 		commit_rejected.emit(RejectReason.FURNITURE_UNSUPPORTED, in_bounds_cells)
 		return []
-	# Story building-028: resolve the whole commit's category/furniture id
-	# ONCE (the same selected item applies to every cell of one commit) --
-	# see [method _selected_item_is_furniture]'s own doc comment for why this
-	# is independent of [method _is_selected_item_available]'s own resolution.
-	var is_furniture: bool = _selected_item_is_furniture()
 	var category: BlueprintCell.Category = (
 		BlueprintCell.Category.FURNITURE if is_furniture else BlueprintCell.Category.BLOCK
 	)
@@ -364,6 +399,20 @@ func commit(candidate_cells: Array[Vector3i]) -> Array[BlueprintCell]:
 		)
 		_blueprint_cells[cell] = blueprint
 		created.append(blueprint)
+	# Story building-016 (GDD Core Rule 8/F5, [TR-building-system-124]/
+	# [TR-building-system-127]): a multi-cell furniture footprint's cells are
+	# ALL written/read as ONE furniture entity, never N separate entities --
+	# every cell created by THIS commit shares the SAME
+	# [FurnitureFootprintGroup] instance (see that class's own doc comment
+	# for why [ConstructionTickLoop] needs it). A single-cell furniture item
+	# (footprint size 1) leaves every [member BlueprintCell.footprint_group]
+	# `null` -- the exact pre-016 behavior Story building-028 already shipped
+	# and tested, completely unchanged.
+	if is_furniture and created.size() > 1:
+		var group := FurnitureFootprintGroup.new()
+		group.cells = created.duplicate()
+		for blueprint_cell: BlueprintCell in created:
+			blueprint_cell.footprint_group = group
 	blueprint_cells_created.emit(created)
 	return created
 
@@ -413,18 +462,55 @@ func _is_selected_item_available() -> bool:
 ## resolves to `false` safely (no runtime error) -- exactly the "default to
 ## BLOCK" fallback this method's own doc comment promises.
 func _selected_item_is_furniture() -> bool:
+	var definition: ItemDefinition = _get_selected_item_definition()
+	if definition == null:
+		return false
+	return definition.get_category() == &"furniture_fixture"
+
+
+## Story building-016 addition -- shared resolution helper extracted from
+## [method _selected_item_is_furniture] (behavior UNCHANGED, same guard
+## order: unwired database, empty selection, not-ready, unknown/non-
+## [ItemDefinition] id all resolve to `null` rather than a crash) so [method
+## get_selected_item_footprint] does not duplicate the exact same lookup.
+## Returns the currently selected item's [ItemDefinition], or `null` when it
+## cannot be resolved for any reason.
+func _get_selected_item_definition() -> ItemDefinition:
 	if resource_item_database == null:
-		return false
+		return null
 	if String(_selected_item_id) == "":
-		return false
+		return null
 	@warning_ignore("unsafe_method_access")
 	if not bool(resource_item_database.is_ready()):
-		return false
+		return null
 	@warning_ignore("unsafe_method_access")
 	var definition: Variant = resource_item_database.get_by_id(_selected_item_id)
 	if not (definition is ItemDefinition):
-		return false
-	return (definition as ItemDefinition).get_category() == &"furniture_fixture"
+		return null
+	return definition as ItemDefinition
+
+
+## Story building-016 addition (GDD Core Rule 8/F5, [TR-building-system-124]/
+## [TR-building-system-082]) -- the currently selected item's multi-cell
+## footprint DIMENSIONS (RID's own `width_cells x depth_cells` schema,
+## [method ItemDefinition.get_footprint]), resolved through the SAME lazily-
+## wired [member resource_item_database] [method _get_selected_item_definition]
+## already reads. Returns `Vector2i(1, 1)` (a single cell, degenerate)
+## whenever no definition can be resolved -- unwired database, unready,
+## unknown id, or (in practice) a non-furniture selection, since RID's own
+## schema never authors a footprint other than `(1, 1)` on a non-
+## `furniture_fixture` entry -- exactly mirroring [method
+## _selected_item_is_furniture]'s own "default to the pre-multi-cell
+## behavior" fallback. [FurnitureTool] (Story building-016) is this method's
+## real caller, at [method FurnitureTool.resolve_cell_set] time -- BEFORE
+## [method commit] ever runs, so the full footprint cell set is what [method
+## commit] receives as its own [param candidate_cells], never a partial
+## anchor-only set it would have to re-derive itself.
+func get_selected_item_footprint() -> Vector2i:
+	var definition: ItemDefinition = _get_selected_item_definition()
+	if definition == null:
+		return Vector2i(1, 1)
+	return definition.get_footprint()
 
 
 ## Story building-028 addition (TR-building-system-074, AC18) -- the palette

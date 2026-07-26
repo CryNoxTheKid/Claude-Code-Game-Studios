@@ -1,7 +1,7 @@
 # Story 016: Multi-cell furniture placement (footprint)
 
 > **Epic**: Building System
-> **Status**: Ready
+> **Status: Complete (2026-07-27 — 1264/1264 suite green 0 orphans, parent-verified)
 > **Layer**: Core
 > **Type**: Logic
 > **Estimate**: 1 day

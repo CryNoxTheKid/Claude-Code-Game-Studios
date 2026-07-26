@@ -129,6 +129,18 @@ var is_unreachable: bool = false
 ## "latest write wins, no history kept" precedent.
 var claimed_by_villager_id: int = -1
 
+## Story building-016 addition (GDD Core Rule 8/F5, [TR-building-system-124]/
+## [TR-building-system-127]) -- the shared [FurnitureFootprintGroup] this
+## cell belongs to, or `null`. `null` for every [constant Category.BLOCK]
+## cell and for a single-cell (1x1) furniture item -- only a multi-cell
+## furniture commit (footprint size > 1) ever populates this ([method
+## CommitPipeline.commit] is the sole writer, after constructing every
+## sibling [BlueprintCell] of the same commit). See
+## [FurnitureFootprintGroup]'s own doc comment for why [ConstructionTickLoop]
+## needs this reference to route a multi-cell footprint's completion as
+## exactly ONE furniture entity.
+var footprint_group: FurnitureFootprintGroup = null
+
 
 func _init(
 	p_cell: Vector3i,

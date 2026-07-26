@@ -189,6 +189,19 @@
 ##    BlueprintCell.MicroState.BUILT] for a completed furniture cell exactly
 ##    like a block -- "Built" describes the JOB, not a grid record.
 ##
+## **Story building-016 (this revision, GDD Core Rule 8/F5 multi-cell
+## footprint, [TR-building-system-124]/[TR-building-system-127]) extends
+## point 2 above**: a multi-cell furniture footprint's cells are still each
+## their own independent job (claimed/credited/completed exactly like a
+## block cell, Core Rule 12's per-cell parallelism unchanged), but [method
+## _complete_jobs] now routes an ENTIRE footprint to [member
+## furniture_registry] as exactly ONE [method FurnitureRegistry.place] call,
+## consulting [member BlueprintCell.footprint_group] (`null` for a
+## single-cell item -- routes immediately, pre-016 behavior unchanged) to
+## discover every sibling cell and fire on whichever one completes LAST,
+## regardless of claim/completion order or timing across ticks. See
+## [FurnitureFootprintGroup]'s own doc comment for the full mechanism.
+##
 ## Injected-tier module (ADR-0001): [member voxel_world]/[member config] are
 ## wired via a scene file's Inspector in production (once a future
 ## scene-assembly story attaches this node), or assigned directly in a
@@ -561,16 +574,50 @@ func _complete_jobs(changes: Dictionary[Vector3i, CellContents], completed_jobs:
 		write_tag.begin()
 		voxel_world.bulk_write(changes)
 		write_tag.end()
+	# First pass: flip EVERY completing cell to BUILT and retire its active
+	# job before any furniture-footprint completeness check runs below
+	# (Story building-016). A multi-cell footprint's siblings can complete in
+	# the SAME dispatch -- checking group completeness must see every
+	# sibling's freshly-flipped state, never a stale UNDER_CONSTRUCTION read
+	# that would depend on [param completed_jobs]' iteration order.
 	var completed_cells: Array[Vector3i] = []
 	for job: _ActiveJob in completed_jobs:
 		job.blueprint_cell.state = BlueprintCell.MicroState.BUILT
 		_active_jobs.erase(job.blueprint_cell.cell)
 		completed_cells.append(job.blueprint_cell.cell)
+	# Second pass: route furniture completions. A single-cell item
+	# ([member BlueprintCell.footprint_group] `null`) routes immediately --
+	# Story building-028's exact pre-016 behavior, unchanged. A multi-cell
+	# footprint (Story building-016) routes exactly ONCE, on whichever
+	# sibling happens to be the LAST to reach BUILT (order-independent by
+	# construction -- see [FurnitureFootprintGroup]'s own doc comment);
+	# [member FurnitureFootprintGroup.is_registered] guards against a double
+	# [method FurnitureRegistry.place] call when two or more siblings
+	# complete in this SAME dispatch.
+	for job: _ActiveJob in completed_jobs:
+		if job.blueprint_cell.category != BlueprintCell.Category.FURNITURE or furniture_registry == null:
+			continue
 		# Story building-028 (ADR-0016 BV-1 ruling) -- route a completing
 		# FURNITURE cell to the furniture registry INSTEAD OF the grid (see
 		# class doc comment's "Story building-028" point 2). A `null`
-		# registry silently drops the record (see [member furniture_registry]'s
-		# own doc comment) -- it never falls back to writing the grid.
-		if job.blueprint_cell.category == BlueprintCell.Category.FURNITURE and furniture_registry != null:
+		# registry is skipped above -- it never falls back to writing the
+		# grid.
+		var group: FurnitureFootprintGroup = job.blueprint_cell.footprint_group
+		if group == null:
 			furniture_registry.place(job.blueprint_cell.furniture_definition_id, [job.blueprint_cell.cell])
+			continue
+		if group.is_registered:
+			continue
+		var all_siblings_built: bool = true
+		for sibling: BlueprintCell in group.cells:
+			if sibling.state != BlueprintCell.MicroState.BUILT:
+				all_siblings_built = false
+				break
+		if not all_siblings_built:
+			continue
+		group.is_registered = true
+		var footprint_cells: Array[Vector3i] = []
+		for sibling: BlueprintCell in group.cells:
+			footprint_cells.append(sibling.cell)
+		furniture_registry.place(job.blueprint_cell.furniture_definition_id, footprint_cells)
 	construction_completed.emit(completed_cells)
