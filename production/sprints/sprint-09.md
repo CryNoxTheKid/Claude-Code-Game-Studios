@@ -623,3 +623,23 @@ vor dem Ablehnen geprueft, dass keine Design-Entscheidung mehr offen ist
 die letzte Zahl geklaert). Lane korrigiert auf
 `godot-gdscript-specialist`; die Domaenen-Zuordnung im Plan bleibt
 `systems-designer` als fachlicher Owner fuer Review.
+
+
+---
+
+## Sprint Result — CLOSED 2026-07-26
+
+**17/17 scheduled stories complete** (building-011 was deliberately moved to S10 mid-sprint on the producer's trim recommendation). Suite grew 953 -> 1198, green with 0 orphans on every story commit.
+
+**The sprint's real theme turned out to be: the game became startable.** Three gaps between "the systems work" and "you can play it" were found and closed, none of which any green test suite had ever revealed:
+- **No world existed at boot.** generate_terrain had been implemented since vox-006 and called nowhere. scene-005 landed the genesis phase; boot measured 2.59s against a 3.0s ceiling.
+- **Fresh terrain could stay invisible.** vox-020 found the grid never signalled when a chunk became resident, so a chunk meshed before its page-in landed kept a null mesh forever; it also moved rebuilds out of the signal handler into a shared budgeted drain.
+- **The player drew blind.** building-023 landed the ghost preview — and while doing so exposed a real bug in already-shipped code: multi-frame drags resolved their release cell one cell too high.
+
+**Payoff chain**: build-validation 001-006 complete (candidate cells -> regions -> outside-connection trace -> ROOM/SEALED verdict -> analysis pass lifecycle -> shelter classification), and needs-mood 001-003 complete (config + BLOCKING ladder invariant -> decay + urgent signal -> the three-rung recovery ladder). Criterion #5's two halves now exist; their live pairing is needs-mood-010's job.
+
+**Cross-check**: bv-010's corpus found ZERO disagreements between Build Validation's reachability trace and the villager nav graph across 9,600 verdicts.
+
+Findings recorded for future work: the recurring fixture trap (sealing a gap with a solid block creates a legal step-up and reopens the escape — found independently twice); the nav-graph build cost 6.7s at the shipped region size until scene-005 measured it; the corpus ships at 1/10 sample density against a hard CI ceiling (escalated to TD, not absorbed).
+
+Carried to S10: building-011 (plan-only undo), presentation-003 (villager bodies — specced by the TD, story not yet authored), needs-mood 004-011, build-validation 007-009, the Cluster D UI epics.
