@@ -130,10 +130,15 @@ agent-days), not calendar predictions. This project's measured cadence is
 dependencies story 010 needs real, not throughput.
 
 **Needs-decision / flags**:
-- **009** (real-time-rate pass): carries an **open decision** — preserve real-time
-  pacing (halve the rates) vs. preserve the tick anchors (accept a 2× faster
-  settlement heartbeat). Either choice cascades; see the story's Open Decision
-  block. This is a taste/scope call, not a mechanical edit.
+- **009** (real-time-rate pass): **decision RESOLVED** — CD Ruling 1
+  (`production/creative-decisions-m02-preflight-2026-07-26.md`, **provisional
+  pending user ratification**): **Option B unmodified**, ship 0.07 / 0.5 / 40, tick
+  anchors CONFIRMED and feel targets RESTATED (~4:45 heartbeat, ~3 min gap). Scope
+  **shrank** to a pure documentation pass (no `.tres`, no AC anchor, no test edits)
+  and **widened** in one direction: its doc AC is now a **repo-wide `at 1x`
+  annotation sweep** across `design/`, not needs-mood-only. Carries a named kill
+  criterion (decay 0.07 → 0.05 on a nagging report; explicitly *not* on a dead-air
+  report, which is a Cluster D content finding).
 - **010** (live pair): the only story that requires `villager-ai-018`, the
   furniture chain, and `build-validation-navigability` to be REAL. Sequence it
   last within the epic and coordinate the three externals.
@@ -148,6 +153,32 @@ dependencies story 010 needs real, not throughput.
 Recorded 2026-07-26 against the landed spine. Each is a GDD/registry statement
 that no longer matches shipped code. **Story 009 is the sanctioned place to
 resolve #1 and #2**; the rest are doc-hygiene items for the GDD owner.
+
+> **Ruling status (2026-07-26, both PROVISIONAL pending user ratification):**
+> **#2** — resolved by **CD Ruling 1** (Option B unmodified; story 009's doc AC
+> widened to a repo-wide `at 1x` sweep).
+> **#3** — resolved by **TD NM-3**: Core Rule 4 is authoritative, the F2 variable
+> table (GDD line ~266) is stale. Three rungs via source→rate table lookup; the
+> two-multiplier form is **never** to be implemented — it would make the BLOCKING
+> ladder invariant unenforceable and silently delete the "missing roof visibly
+> costs" mechanic. **Story 003 already specifies three rungs correctly — no story
+> change; the GDD line is the fix.**
+> **#4** — resolved by **TD NM-6**: `has_urgent_need(villager_id) -> bool` is
+> **canonized** as a required pure query, in addition to the documented surface.
+> `architecture.md` must document it **before story 002 starts** (TD-owned,
+> blocking); GDD + a new TR follow; `CONTRACTS.md` only when the module lands.
+> **#5** — resolved by **TD NM-5**: canonical is the **three-arg**
+> `start_recovery(villager_id, need, source_enum)` (and `stop_recovery(villager_id,
+> need, reason)`); `architecture.md` is already correct. **Correction to the text
+> below and to story 003's signature note: `CONTRACTS.md` contains NO
+> `start_recovery` reference at all** — the documents actually carrying the
+> signature are `architecture.md:373`, GDD line 159 / Core Rule 10, and
+> `tr-registry.yaml` TR-042 + line 2222; the latter three elide `villager_id` and
+> are the doc-fix targets.
+> **#7** — resolved by **TD NM-7**: annotated in `CONTRACTS.md` §1 rather than
+> deleted (`TR-needs-mood-system-025 (live-pair integration test — DI is its
+> enabler per ADR-0001 Context, not itself a DI requirement)`). **This is the one
+> `CONTRACTS.md` edit the TD made.** No story impact.
 
 1. **GDD burst rule says `max_ticks_per_frame = 10`; the landed default is 12**
    (`neues-spiel/src/time_tick_system/time_tick_config.gd`, Sprint 8 re-tune per

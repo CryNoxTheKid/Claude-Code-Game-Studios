@@ -99,9 +99,25 @@ ambiguity. No untraced requirements.
 - No item in this epic is on the cut lever. Cutting any part requires escalation
   per the milestone's Cut-Lever Policy.
 
-## Known Conflicts With Landed Code (report-only — resolve before the affected story)
+## Known Conflicts With Landed Code — RESOLUTION STATUS (2026-07-26)
 
-Recorded here so no story silently invents a resolution. Each names an owner.
+> **All five conflicts are now ruled on.** Rulings 1/2/4 are technical-director
+> (`production/architecture-decisions-m02-preflight-2026-07-26.md`, items BV-1 /
+> BV-2 / BV-4); conflict 5 is creative-director
+> (`production/creative-decisions-m02-preflight-2026-07-26.md`, Ruling 2).
+> **Both documents are PROVISIONAL, pending user ratification** — binding on story
+> authoring once ratified, and the planning assumption until then. Conflict 3 was
+> always report-only.
+
+| # | Status | Resolution | Lands in |
+|---|--------|-----------|----------|
+| 1 | **RESOLVED (BV-1)** | Furniture is **not voxel data** — it never enters `VoxelWorldGrid`. `CellContents` unchanged; a Building-System-owned furniture registry (`building-028`) holds item identity + cells; `ConstructionTickLoop` must exclude `Category.FURNITURE` from `bulk_write` (**blocking AC on `building-028`**). Rule 1 transparency is then satisfied **by construction**, with no branch in Build Validation. | **002 drops the `building-028` dependency entirely** (proof-by-construction test). **006 keeps it for per-item enumeration only** and is developed against a mocked, nil-safe provider. |
+| 2 | **RESOLVED (BV-2)** | Single structural trigger = `VoxelWorldGrid.cells_changed_batch`. **Never** `construction_completed` — that signal can name cells whose deferred write has not landed (ADR-0015 load-before-write), so a pass triggered by it would analyse stale data. `cells_changed_batch` is a strict superset (demolition, undo, dig) and page-in is silent. | **005**; adds an AC covering a deferred/paged write. `building-009` no longer owes this module a signal. |
+| 3 | Report-only, unchanged | Batching is per-TICK (4.0/s), coarser than per-frame, so AC19's guarantee holds a fortiori — but write the AC19 test against tick dispatches. Owner: producer. | 005 |
+| 4 | **RESOLVED (BV-4)** | **Extract a pure static twin.** New `villager-ai-026` extracts `VillagerWalkabilityRules` (static only; the two constants declared there, re-exported as aliases on `VillagerAi`; `VillagerAi`'s methods become one-line delegations). Build Validation calls it **statically**, injects nothing, holds no villager reference. | **001** (smaller DI surface), **002**. **`villager-ai-026` MUST land before story 001.** |
+| 5 | **RESOLVED (CD Ruling 2)** | `payoff_signaled` stays **byte-identical**; an additive **optional typed `PayoffDetail` sidecar** carries `celebrate` / `group_id` / `subjects` / `cells`, written **before** the emit. `subject = pass_group_id` for celebrations; shelter is **one** type with the flag in the detail. TD still owns the final implementation form. | **009**; embeds the CD's six assertable minimums as ACs. |
+
+### Original conflict text (retained for traceability)
 
 1. **Furniture occupancy has no representation in the voxel layer.** GDD Rule 1 /
    `TR-022` requires furniture cells to evaluate **as if empty** (never floor,
@@ -173,19 +189,29 @@ This epic is complete when:
 
 **Type totals**: 6 Logic, 4 Integration.
 
-**Dependency order**: 001 → 002 → 003 → 004 → 005 → **006** → 007 → 008 → 009,
-with 010 unblocked after 004 and runnable in parallel with 005–009.
+**Dependency order**: **`villager-ai-026`** → 001 → 002 → 003 → 004 → 005 →
+**006** → 007 → 008 → 009, with 010 unblocked after 004 and runnable in parallel
+with 005–009.
 
-**Needs-decision / flags**:
-- **001**: the walkability-provider DI shape (Known Conflict 4) must be decided
-  before this story starts — technical-director.
-- **002 / 006**: blocked on the furniture-occupancy source (Known Conflict 1) —
-  hard-depends on `building-028`. **006 is the payoff-chain unblocker for the
-  needs-mood epic; protect its position in the sequence.**
-- **005**: removal trigger and per-tick-vs-per-frame wording (Known Conflicts 2
-  and 3).
-- **009**: the payoff-surface signal shape (Known Conflict 5) — technical-director
-  + creative-director.
+**Needs-decision / flags** (updated 2026-07-26 against the pre-flight rulings):
+- **`villager-ai-026` is a new hard prerequisite for 001** — the
+  `VillagerWalkabilityRules` extraction (BV-4). Schedule it first.
+- **001**: DI shape RESOLVED (BV-4) — call the static twin, inject nothing. The DI
+  surface is smaller than originally planned.
+- **002**: **no longer blocked on `building-028`** (BV-1) — furniture transparency
+  is proven by construction. It can start as soon as 001 does.
+- **006**: still needs `building-028` for **per-item enumeration only**, and may be
+  developed against a mocked nil-safe provider (BV-1). **Still the payoff-chain
+  unblocker for the needs-mood epic; protect its position in the sequence.**
+- **005**: trigger RESOLVED (BV-2) — one subscription, simpler than planned; carries
+  a new deferred/paged-write AC. Known Conflict 3 (per-tick wording) remains
+  report-only.
+- **009**: signal shape RESOLVED (CD Ruling 2). **Remaining input**: TD concurrence
+  on the implementation form.
+- **`building-028` inherits two blocking ACs from BV-1** (not owned by this epic):
+  FURNITURE-category completion never `bulk_write`s to the grid; the registry
+  exposes a placed/removed signal + item enumeration as a duck-typed, nil-safe
+  provider.
 - **010**: M02 risk R3, technical-director-owned. Time-box it; if the 60 s ceiling
   is missed, **reduce sampled pairs per seed before reducing seed count**, then
   escalate.

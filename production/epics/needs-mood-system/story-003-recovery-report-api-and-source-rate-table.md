@@ -54,7 +54,7 @@
 - The table is `Dictionary[StringName, float]` built once from config at `setup()` — five enum keys today, three distinct values. Adding a rung is a config edit plus a key; AC10 is the test that proves it.
 - `start_recovery` stores the **reported source per (villager, need)**; each recovery tick re-reads that stored source rather than the one captured at start (story 004 makes it change mid-recovery).
 - The satisfied cross is the only value-based exit. Do not clamp back to `satisfied_threshold` — the GDD explicitly keeps the overshoot. The only ceiling is the 0–100 domain clamp (AC33).
-- Signature note: the GDD writes `start_recovery(need, source_enum)`; `docs/architecture/architecture.md` and `neues-spiel/CONTRACTS.md` write the villager-id form. **Implement the villager-id form** — this system is per-villager and the GDD text elides the subject.
+- Signature note: the GDD writes `start_recovery(need, source_enum)`; `docs/architecture/architecture.md` and `neues-spiel/architecture.md:373 (NOT CONTRACTS.md — TD ruling NM-5: that file carries no start_recovery reference)` write the villager-id form. **Implement the villager-id form** — this system is per-villager and the GDD text elides the subject.
 - Intra-tick ordering: reports mutate state immediately (synchronous), and the F-pass reads that state. Never queue a report for "next tick"; never apply a partial increment on the stop tick.
 - Zero outward calls: this module receives ids and enums as opaque values. It never resolves a bed id against the item database, and never asks Building System whether a bed still exists — the reporter tells it.
 

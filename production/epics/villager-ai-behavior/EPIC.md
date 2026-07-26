@@ -5,7 +5,7 @@
 > **Architecture Module**: Villager AI & Behavior (per-villager state machine; walkability predicates — canonical ground truth; job-claim consumption; F1–F4 movement/selection formulas)
 > **Manifest Version**: 2026-07-23
 > **Status**: Ready
-> **Stories**: 25 stories created (see Stories table below)
+> **Stories**: 26 stories created (see Stories table below)
 
 ## Overview
 
@@ -112,10 +112,17 @@ This epic is complete when:
 | 023 | Scene-transition simulation continuity | Integration | Ready | ADR-0013/0008 |
 | 024 | Villager AI save/load serialization (VS-tier) | Integration | Ready | ADR-0012 |
 | 025 | Performance stress validation (30-villager, Advisory) | Integration | Ready | ADR-0008/0007 |
+| 026 | Extract `VillagerWalkabilityRules` static twin (behavior-preserving) | Logic | Ready | ADR-0007 |
 
-**Type totals**: 13 Logic, 11 Integration, 1 Config/Data.
+**Type totals**: 14 Logic, 11 Integration, 1 Config/Data.
 
 **Needs-decision / flags**:
+- **026** (walkability static extraction): created by TD ruling **BV-4** in
+  `production/architecture-decisions-m02-preflight-2026-07-26.md` (**provisional —
+  pending user ratification**). Cross-epic sequencing: it **must land before
+  `build-validation-navigability` story 001**, whose DI shape depends on it.
+  Mechanical, behavior-preserving; its correctness proof is that the existing
+  suite stays green with **zero** test edits.
 - **022** (max_deciding_per_tick re-tune): cross-epic coordination — one config change with the time-tick-system base-tick-rate story, shared rationale.
 - **024** (save/load): Vertical-Slice-tier; **out of scope for Milestone 01** — testable now against a mocked serializer, but sequence into VS.
 - **025** (perf stress): Advisory/Performance, milestone-gated — not part of the Logic gate, not an MVP-Done blocker.

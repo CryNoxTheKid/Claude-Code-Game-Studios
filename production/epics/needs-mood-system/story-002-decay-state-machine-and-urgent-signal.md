@@ -20,6 +20,21 @@
 **Engine**: Godot 4.7-stable | **Risk**: LOW
 **Engine Notes**: Pure GDScript value math — no engine surface. Godot signal connections are synchronous by default; an emitted `need_urgent` reaches a connected Villager AI inside the same call stack, which is why the event can be a pure optimization over polling. Float comparisons are cross-tick **crossings** (`<=`/`>=` between the previous and current value), never equality checks.
 
+**DOC PREREQUISITE — BLOCKING, and NOT this story's edit** (TD ruling **NM-6**,
+`production/architecture-decisions-m02-preflight-2026-07-26.md` — **PROVISIONAL,
+pending user ratification**): `has_urgent_need(villager_id: int) -> bool` currently
+appears in **no** document under `docs/` or `design/` — only in landed code
+(`neues-spiel/src/villager_ai/villager_ai.gd:474`, duck-typed `needs_provider`,
+nil-safe `_has_urgent_need()` at line 1303, exercised by
+`tests/unit/villager_ai/priority_decision_loop_test.gd`). The ruling requires it be
+added to **`docs/architecture/architecture.md`** — Needs & Mood's "Exposes" row and
+the API Boundaries signature block, alongside `start_recovery`/`stop_recovery` —
+**before this story starts**. Owner: technical-director. Two follow-ups are *not*
+blocking: the GDD query-API section + a TR of its own (GDD owner; the registry has
+no TR covering it today), and `CONTRACTS.md` **when the module lands**, not now
+(adding a signature block for an unimplemented module would break that file's own
+charter — the TD deliberately made no `CONTRACTS.md` edit).
+
 **Control Manifest Rules (this layer)**:
 - Required (Feature): tick-driven via Time & Tick's signal, never raw delta; consumers poll authoritative state and never trust an event alone.
 - Required (Foundation): every threshold read from the config resource; never write a config field at runtime.
@@ -42,6 +57,9 @@
 - [ ] **AC12**: Given no recovery-activity report from Villager AI, When a need sits below `urgency_threshold` for many ticks, Then it never enters Recovering — recovery cannot self-trigger from value alone. [TR-needs-mood-system-048]
 - [ ] A **queryable** per-need state (`Satisfied` / `Urgent` / `Recovering` + current value) is exposed and is the documented source of truth; `Satisfied → Urgent` on the downward cross, and Urgent keeps decaying until a recovery report arrives. [TR-needs-mood-system-032] [TR-needs-mood-system-048]
 - [ ] The module exposes the landed Villager AI seam verbatim: `has_urgent_need(villager_id: int) -> bool`, plus `get_need_value(villager_id, need) -> float` and the per-need state query — an unknown villager id answers "no urgent need" without erroring. [TR-needs-mood-system-032]
+- [ ] **NM-6 (canonized)**: `has_urgent_need(villager_id: int) -> bool` returns the **queryable Urgent state** and is a **required** part of this module's public query API — *in addition to* the GDD's documented query surface, not a replacement for it. It answers from state, never from a cached event.
+- [ ] **NM-6 — it must be a PURE query**: no signal emission, no state mutation, and **no lazy-initialisation of a villager's need record as a side effect of being asked**. It is polled from the FSM's decision point every tick (ADR-0008). Asserted, not assumed.
+- [ ] **NM-6 — nil-safety stays on the consumer side**: do **not** add a null-provider branch here. `VillagerAi._has_urgent_need()`'s existing guard is the correct and already-tested location.
 
 ---
 
@@ -80,6 +98,7 @@
 - **AC7**: Given `value = 100.0` at defaults, When ticks are dispatched one at a time, Then the single `need_urgent` emission is observed on tick **1072** exactly (boundary: nothing on 1071, nothing again on 1073).
 - **AC12**: Given `value = 10.0` and no recovery report, When 100 ticks fire, Then the state never reads `Recovering` and the value keeps decaying to the 0 clamp.
 - **Seam**: Given a villager whose sleep need is Urgent, When `has_urgent_need(id)` is called, Then true; Given a Satisfied villager, Then false; Given an unknown id, Then false with no error.
+- **Seam purity (NM-6)**: Given any villager id — known, unknown, or never spawned — When `has_urgent_need(id)` is called N times, Then zero signals are emitted, no need record is created or mutated, and the module's full state is byte-identical before and after.
 - Edge cases: a need whose decay would carry it from above the threshold to below in a single tick still emits exactly once; two needs on one villager cross independently.
 
 ---

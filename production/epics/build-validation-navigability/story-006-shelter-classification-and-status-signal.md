@@ -25,10 +25,39 @@
 - Forbidden: emitting `shelter_status_changed` on a non-transition (level-triggered re-emission belongs to the Warning/Info tiers only); embedding recovery multipliers in this module beyond the config knob's advisory check (story 001).
 - Guardrail: exactly one emission per transition, for ALL furniture types.
 
-**Blocked on** (Epic Known Conflict 1): there is no furniture entity in the
-landed code — `CellContents` has no furniture concept and `BlueprintCell.contents`
-is a documented placeholder. This story **hard-depends on `building-028`**
-(furniture placement, Cluster A) for the item-id → cell mapping it classifies.
+**NARROWED — `building-028` is still needed, but only for per-item enumeration,
+and this story may be developed against a mock** (was Epic Known Conflict 1).
+Technical-director ruling **BV-1**,
+`production/architecture-decisions-m02-preflight-2026-07-26.md` — **PROVISIONAL,
+pending user ratification** (away-mode ruling; treat as the planning assumption
+until ratified).
+
+**Ruling: furniture is not voxel data — it lives in a Building-System-owned
+furniture registry keyed by placed-item identity** (item id, occupied cells from
+`ItemDefinition.get_footprint()`, definition id). The seam Build Validation
+injects is **that registry**, not a cell predicate: a duck-typed, **nil-safe**
+`Object` dependency (landed precedent: `VillagerAi.needs_provider` / `job_queue` /
+`population`) exposing an enumeration of placed furniture records plus a
+placed/removed signal. A `null` provider means "no furniture exists" — correct and
+non-crashing, and exactly true until `building-028` lands.
+
+**What this story still needs from `building-028`**: **per-item enumeration only**
+(the item-id → cells mapping it classifies) and the placed/removed signal that is
+this module's second trigger (BV-2). Everything else — transparency to the
+structural analysis — is satisfied by construction in story 002 and needs no
+furniture code at all.
+
+**Development sequencing**: build and test this story **against the mocked
+provider**, then un-mock when `building-028` lands. It is no longer a hard
+schedule blocker on Cluster A's critical path; the blocker moved onto
+`building-028`'s own AC list (its blocking AC: a completing FURNITURE-category job
+never `bulk_write`s to the grid, with a regression test asserting
+`voxel_world.get_cell()` is empty at that cell).
+
+**"Need-functional" is Build Validation's own data-driven config knob**, not a new
+`ItemDefinitionResource` field: a typed `@export` list of need-functional
+categories/ids (ADR-0002) resolved through `ResourceItemDatabase.get_by_id(...)`.
+**Do not hardcode `&"bed"`.**
 
 **This story is the payoff-chain unblocker.** `shelter_status_changed` is the
 single output the needs-mood epic consumes (milestone criteria #3/#5). Land it
@@ -50,6 +79,9 @@ on.
 - [ ] **AC16**: **GIVEN** a shelter-status change, **WHEN** it occurs, **THEN** exactly one `shelter_status_changed` signal is emitted per transition — Needs and UI subscribe to the same emission (assert emission count = 1, not consumer count). [TR-036]
 - [ ] The sleep recovery ladder consumes the flag: **sheltered bed = 1.0 · unsheltered bed = `unsheltered_bed_multiplier` (0.7) · ground = `ground_penalty` (0.4)** — the rate values remain owned by the Needs & Mood source→rate table; this system supplies only the classification. [TR-030]
 - [ ] Per-item shelter flags are part of the transient snapshot (story 005) so transitions are edge-detected; a re-analysis that leaves a flag unchanged emits nothing.
+- [ ] Items are enumerated **only** through the injected, duck-typed furniture-registry provider (BV-1). A `null` provider yields zero items, zero emissions, and no error — the whole story is exercisable headless against a mock, with no `building-028` code present.
+- [ ] "Need-functional" furniture is resolved from a typed config list of categories/ids via `ResourceItemDatabase.get_by_id(...)` — **no hardcoded `&"bed"`**, and no new field on `ItemDefinitionResource` (BV-1 §6).
+- [ ] Furniture occupancy is never read from `CellContents` — grep-asserted. Under BV-1 furniture is never in the grid, so a `CellContents`-derived furniture check would be reading a value that structurally cannot exist.
 
 ---
 
@@ -98,6 +130,6 @@ on.
 
 ## Dependencies
 
-- Depends on: 004 (Room/Sealed verdict), 005 (pass + snapshot edge detection). **External**: `building-028` furniture placement (Epic Known Conflict 1).
+- Depends on: 004 (Room/Sealed verdict), 005 (pass + snapshot edge detection). **External, soft**: `building-028` for **per-item enumeration + placed/removed signal only** — develop and test against the mocked, nil-safe provider and un-mock later (BV-1). Not a hard start blocker.
 - Unlocks: 008, 009; **unblocks the needs-mood epic's recovery-ladder stories and milestone criterion #5**
 
