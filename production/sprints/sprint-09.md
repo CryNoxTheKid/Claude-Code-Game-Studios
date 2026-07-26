@@ -33,6 +33,50 @@ their position. CD Ruling 1 reversal changes `needs-mood-001`'s shipped config d
 config-only re-run, cheap). **None of the S09 Must set is invalidated by an overturn; three
 stories would need AC edits.** This is the same posture S8 carried against the CD scope ruling.
 
+## ⚑ Amendment 2026-07-26 — `scene-005` added (World genesis in the boot sequence)
+
+**What changed:** one Must story added, `scene-005`
+(`production/epics/scene-world-management/story-005-world-genesis-boot-sequence.md`, 2.0 d anchor,
+**godot-specialist**, **sequenced FIRST on that lane, ahead of `building-023`**). S09 is now **15 stories**
+(12 Must + 2 Should + 1 Nice).
+
+**Why it was missing:** the production Valley boots an **EMPTY** `VoxelWorldGrid`.
+`VoxelWorldGrid.generate_terrain()` is implemented and tested (vox-006) but called **nowhere in the boot
+chain** — `valley.gd`'s own class doc says so and defers **three** things to "a future world-generation
+story": terrain, `VillagerNavGraph.build()`, and (since 2026-07-26) `Valley.spawn_starting_roster()`.
+Three landed stories hit it independently: **villager-ai-021** shipped `spawn_starting_roster()` as a
+ready-and-uncalled surface because a boot-time standable-cell search finds nothing in an empty grid; the
+**M01 C4 evidence run** could not wire chimney smoke / interior clutter / foliage for want of a world to
+host them; **vox-018** measured a real world only because its own tool hand-built terrain. Grep over
+`production/epics/` confirms no epic covered it (`generate_terrain` appears only in vox-006, bv-010
+fixtures, and villager-ai-021 noting its absence). Filed to **scene-world-management** because the
+deliverable is a **boot-phase ordering change** in `game_world.gd`/`valley.gd` under **ADR-0005** — this
+epic's own governing ADR and own files — driving already-landed voxel-world/villager-ai surfaces; it
+authors no generation algorithm.
+
+**Why it sequences ahead of `building-023`:** `building-023`'s pick DDA finds no cell in an empty grid, so
+no ghost renders and its **Visual/Feel evidence screenshot is not producible** until the world exists. R11
+("no external playtest is meaningful until `building-023` lands") is in fact gated on `scene-005` first.
+
+**Large-world shape — decided, not hand-waved:** production genesis is the **ADR-0015 residency page-in of
+the boot window**, never a full-extent `generate_terrain()`. Measured (vox-018 evidence): ~63 µs/column
+linear to 900×900 (52.2 s) and then **no completion in >200 s at 1000×1000** — a `Dictionary` rehash cliff.
+The shipped config is 2000×2000, well past it. Per-chunk regen-from-seed is measured at 0.166 ms avg
+(vox-016), so the ≤2,401-chunk boot window is ~0.4 s of parallelised compute. **The real boot cost is the
+mesh** (~7.7 ms/chunk post-vox-019 → ~18.5 s projected at a full 49×49 window), so AC-BOOT-BUDGET is
+measure-and-lever: 5 s **producer-provisional** ceiling, named lever = a boot-scoped initial mesh radius,
+re-measure once, then escalate to technical-director.
+
+**Capacity impact: none to the critical path.** The godot-specialist lane goes 2.0 → 4.0 Must lane-days
+(`scene-005` → `building-023` → `building-001`), matching but not exceeding the binding build-validation
+lane's ~4.0, inside 8 available. The 2-day buffer's two named consumers are unchanged; `scene-005`'s
+boot-budget unknown is absorbed by that lane's own ~4 days of headroom, not by the buffer.
+
+**Newly surfaced missing story (NOT fabricated):** `VoxelWorldMeshStreamer` subscribes to no signal and has
+**no mesh-invalidation path** — a meshed chunk is never re-meshed when its cells change (verified: zero
+`cells_changed_batch` occurrences in that file). `scene-005`'s genesis-before-mesh ordering covers the boot
+case only. No story in any epic covers the general case. See D7 below.
+
 ## Sprint Goal
 
 Open the protected payoff spine and make the game presentable to a human. Land the TD-mandated
@@ -110,7 +154,8 @@ Critical path = the build-validation chain **plus its cross-lane opener** (see C
 | needs-mood-001 | **Config resource, DI scaffold, need schema & BLOCKING ladder invariant** — ships CD Ruling 1's values | `production/epics/needs-mood-system/story-001-config-scaffold-and-ladder-invariant.md` | systems-designer | 1.0 | None in-epic; M01 Foundation spine ✓ (`ConfigResource`, `GameWorld` boot gate, `TimeTickSystem` Autoload) | Typed `@export` config, `.tres`; **the ladder invariant `ground_penalty < unsheltered_bed_multiplier < 1.0` halts boot loudly when violated (AC29) — proven by test, not asserted in prose**; fixed need schema (MVP: `sleep`); **ships CD Ruling 1's values unmodified: `decay_per_tick[sleep]=0.07`, `base_recovery_per_tick[sleep]=0.5`, `mood_smoothing_ticks=40`** (PROVISIONAL — if the ruling is overturned this is a config-only re-run); headless-mockable, zero Autoload registration; passing test |
 | needs-mood-002 | **F1 decay, per-need state machine & edge-triggered urgent signal** — carries the TD-canonized `has_urgent_need` seam | `production/epics/needs-mood-system/story-002-decay-state-machine-and-urgent-signal.md` | systems-designer | 1.5 | needs-mood-001 (in-sprint). **TD-owned doc precondition (NM-6): `architecture.md` must document `has_urgent_need(villager_id) -> bool` BEFORE this story starts** | F1 per-tick decay; queryable per-need state machine (**state is truth, edge events are latency hints**); edge-triggered urgent/satisfied signals fire once per transition; **`has_urgent_need(villager_id: int) -> bool` implemented as a REQUIRED pure query** (NM-6) — **no signal emission, no state mutation, no lazy-init as a side effect of being asked**; nil-safety stays on the consumer side (`VillagerAi._has_urgent_need`'s existing guard — do NOT add a null branch here); passing unit test |
 | needs-mood-003 | **Recovery-report API, source→rate table & F2 recovery — THE THREE-RUNG LADDER** (the mechanical meaning of "the building IS the game") | `production/epics/needs-mood-system/story-003-recovery-report-api-and-source-rate-table.md` | systems-designer | 1.5 | needs-mood-001, 002 (in-sprint) | **Canonical three-arg form per NM-5: `start_recovery(villager_id: int, need: StringName, source_enum: RecoverySource) -> void`** and symmetrically `stop_recovery(villager_id, need, reason)`; F2 resolves through a **source→rate TABLE LOOKUP** with a test proving a brand-new source id works **with no code change** (AC10 — no hardcoded two-source branch); **three rungs, per TD NM-3: `bed_sheltered` ×1.0 > `unsheltered_bed_multiplier` (0.7) > `ground_penalty` (0.4)** — Core Rule 4 is authoritative, the GDD's F2 variable table is stale. **The two-multiplier form is NEVER to be implemented** — it makes the BLOCKING ladder invariant unenforceable and silently deletes the "the missing roof visibly costs" mechanic. Passing unit test |
-| building-023 | **Ghost preview rendering + drag re-rasterization + degradation + state tint (Cluster 0) — THE PLAYER CURRENTLY DRAWS BLIND** | `production/epics/building-system/story-023-ghost-preview-rendering.md` | godot-specialist | 1.0 | building-020 ✓ (pick anchor), 022 ✓ (validity bool), 019 ✓ (tool SM) — all Complete S5/S6 | Pooled `MeshInstance3D` ghost preview over the resolved cell set for all four drawing verbs; re-rasterizes during drag; graceful degradation above the cell cap; state tint (valid/invalid); **no writes to `VoxelWorldGrid`** (grep-guarded as a non-writer, same guard the four tools carry); Visual/Feel evidence screenshot under `production/qa/evidence/`. **R11: no external playtest is meaningful until this lands.** |
+| scene-005 | **World genesis in the boot sequence — terrain, roster and nav graph before ACTIVE (ADDED 2026-07-26; FIRST on the godot-specialist lane) — THE VALLEY BOOTS AN EMPTY GRID TODAY** | `production/epics/scene-world-management/story-005-world-genesis-boot-sequence.md` | godot-specialist | 2.0 | **Blocked on nothing** — every surface it calls is landed (vox-006/010–019, villager-ai-007/021, scene-001/002/004, spine-002/003, cam-001/002) | Genesis runs in WIRING, after the `setup()` sweep and strictly BEFORE the initial mesh window and before ACTIVE; **no production `src/` path calls `generate_terrain()`** (grep-guarded) — genesis is `update_residency()` page-in of the boot window per ADR-0015, so cost scales with the window, not the 2000×2000 extent; deterministic by `terrain_seed` (same seed → identical world, different seed → different); grid reports `GENERATED`; zero per-cell `cell_changed` at boot; **ONE config-derived start-focus cell** shared by residency anchor / mesh-window centre / camera start target / roster centre (today the camera starts at cell 0,0,0 while the roster spawns at 1000,8,1000); `build_initial_window()` still once, now strictly after genesis (the streamer has no invalidation path — a chunk meshed early is a permanent hole); **`spawn_starting_roster()` called exactly once after the world exists** (villager-ai-021's ready surface, dead code until now) with plurality proven at `starting_villager_count > 1`; `VillagerNavGraph.build()` over a config-driven bounded region with point count > 0; **no synchronous per-frame I/O or generation** — `drain_pending_async_reads`/`wait_for_async_residency_idle` grep-absent from every `_process` call graph, boot drain bounded by a config ceiling; **AC-BOOT-BUDGET (Advisory)**: windowed VSync-OFF phase-split boot wall clock recorded to `production/qa/evidence/`, 5 s producer-provisional ceiling, one named lever then escalate to TD |
+| building-023 | **Ghost preview rendering + drag re-rasterization + degradation + state tint (Cluster 0) — THE PLAYER CURRENTLY DRAWS BLIND** (run AFTER `scene-005` — no pick, no ghost, no screenshot over an empty grid) | `production/epics/building-system/story-023-ghost-preview-rendering.md` | godot-specialist | 1.0 | building-020 ✓ (pick anchor), 022 ✓ (validity bool), 019 ✓ (tool SM) — all Complete S5/S6 | Pooled `MeshInstance3D` ghost preview over the resolved cell set for all four drawing verbs; re-rasterizes during drag; graceful degradation above the cell cap; state tint (valid/invalid); **no writes to `VoxelWorldGrid`** (grep-guarded as a non-writer, same guard the four tools carry); Visual/Feel evidence screenshot under `production/qa/evidence/`. **R11: no external playtest is meaningful until this lands.** |
 | building-001 | **Build/Editor Mode state machine (Cluster 0)** — the mode the tool palette and the whole Building UI live inside; **R10's named unblocker** | `production/epics/building-system/story-001-build-editor-mode.md` | godot-specialist | 1.0 | Camera & Input action signals ✓, tool state machine ✓ (Complete) | Build Mode master gate as a state machine; all placement tools gate through it; mode entry/exit deterministic and testable headlessly; passing unit test. **Unlocks `building-ui-001`/`002` (Cluster D) independently of Cluster A — this is M02 risk R10's stated mitigation and the reason it is Must, not Should.** |
 | villager-ai-021 | **Starting roster spawn at world generation (Cluster 0) — THE VALLEY BOOTS WITH ZERO VILLAGERS TODAY** | `production/epics/villager-ai-behavior/story-021-starting-roster-spawn.md` | ai-programmer | 1.0 | villager-ai-001 ✓ (config/scaffold), 002 ✓ (`is_standable` for valid placement) — both Complete | Deterministic starting roster spawned at world generation on valid standable cells; roster size data-driven (`.tres`), never hardcoded; **makes the roster plural** — every downstream playtest, telemetry run and UI story is evaluated against a populated Valley instead of a hand-spawned one; passing integration test. **Note: this is also what makes BV-4's "which villager do I inject?" objection concrete — 026 lands first for exactly this reason.** |
 
@@ -166,8 +211,10 @@ important sequencing fact.
   *(Should)* `build-validation-010` (starts only after bv-004 lands).
 - **godot-gdscript-specialist:** `build-validation-001 → 002 → 003 → 004` → *(Should)* `005`.
 - **systems-designer:** `needs-mood-001 → 002 → 003` (independent lane, no cross-lane dependency).
-- **godot-specialist:** `building-023 → building-001` → *(Nice)* `building-011` (three independent
-  leaves; order chosen so the player-facing ghost preview lands first).
+- **godot-specialist:** **`scene-005` (FIRST, amendment 2026-07-26)** → `building-023 → building-001` →
+  *(Nice)* `building-011`. `scene-005` is sequenced first because the other three are all evaluated against
+  a world that does not exist today; `building-023` in particular cannot produce its evidence screenshot
+  before it. ~4.0 Must lane-days.
 
 ## Carryover from Previous Sprint
 
@@ -377,8 +424,25 @@ was widened to cover it) **but crosses GDD ownership** — `design/gdd/building-
 table and both `base_demolition_ticks` mirrors are 2× stale and are not `needs-mood-009`'s to
 edit. Confirm the sweep's cross-GDD authority or split it.
 
+### D7 — Mesh invalidation on cell change has no story anywhere (found while authoring `scene-005`)
+
+`VoxelWorldMeshStreamer` connects to **no** signal and rebuilds **nothing**: `_sync_window` builds only
+chunks *not already tracked*. Consequences: (i) a chunk meshed while its data was not yet resident stays a
+**permanent hole**; (ii) a chunk whose cells change — **including a block the player just built** — is not
+re-meshed until it leaves and re-enters the view window. `scene-005`'s genesis-before-mesh ordering closes
+the boot case only; the leading edge of a moving camera outrunning async page-in, and the player-placed
+block, are both untouched. **Verified: no story in any of the 14 epics covers this.** Needs a
+technical-director decision on shape (subscribe the streamer to `cells_changed_batch` and mark chunks dirty
+vs. a data-window radius wider than the mesh-window radius) and a new story. **Not fabricated here.** No
+S09 blocker; it bears directly on whether the shipped build looks correct to a human playtester.
+
 ## Notes
 
+- **Amendment 2026-07-26 (`scene-005`)**: see the Amendment block at the top. Story count 14 → **15**;
+  godot-specialist lane 2.0 → 4.0 Must lane-days; critical path and buffer commitments unchanged.
+  Also file two doc corrections it surfaces: `TR-voxel-world-026`'s "~2.6 s initial view-window mesh build"
+  is a stale ADR-0014 prototype figure (measured ~7.7 ms/chunk → ~7.4 s at 961 chunks), and
+  `TR-voxel-world-029`'s Uninitialized→Generated transition is unreachable on the residency path today.
 - **Dependencies-satisfied check:** every S09 committed story was verified against its **own story
   file's `## Dependencies` section** (not against the milestone's summary tables). `villager-ai-026`
   → 002 ✓/003 ✓; `bv-001` → **`villager-ai-026` (in-sprint, hard)**; `bv-002` → 001 (in-sprint),

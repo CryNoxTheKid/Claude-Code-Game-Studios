@@ -100,6 +100,15 @@ stories:
     estimate_days: 1.5
     blocker: "depends on needs-mood-001 + 002 (in-sprint). Three-arg start_recovery(villager_id, need, source_enum) per NM-5; THREE rungs via table lookup per NM-3 — the two-multiplier form is NEVER to be implemented"
     completed: ""
+  - id: "scene-005"
+    name: "World genesis in the boot sequence — terrain, roster and nav graph before ACTIVE (THE VALLEY BOOTS AN EMPTY GRID TODAY)"
+    file: "production/epics/scene-world-management/story-005-world-genesis-boot-sequence.md"
+    priority: must-have
+    status: ready-for-dev
+    owner: "godot-specialist"
+    estimate_days: 2.0
+    blocker: "AMENDMENT 2026-07-26 — SEQUENCE FIRST on the godot-specialist lane, AHEAD of building-023. Blocked on nothing (every surface it calls is landed). Closes the gap three landed stories independently hit: valley.gd defers terrain + VillagerNavGraph.build + spawn_starting_roster to 'a future world-generation story' and this is it; villager-ai-021's roster surface is dead code until this lands; building-023's pick DDA has nothing to hit in an empty grid, so its evidence screenshot is impossible before this. Large-world shape RESOLVED: production genesis is ADR-0015 residency page-in of the boot window, NEVER a full-extent generate_terrain() (measured 52.2s at 900x900, no completion >200s at 1000x1000 — Dictionary rehash cliff, vox-018 evidence). AC-BOOT-BUDGET is measure-and-lever: 5s producer-provisional ceiling, named lever = boot-scoped mesh radius, then escalate to technical-director"
+    completed: ""
   - id: "building-023"
     name: "Ghost preview rendering + drag re-rasterization + degradation + state tint (Cluster 0) — THE PLAYER CURRENTLY DRAWS BLIND"
     file: "production/epics/building-system/story-023-ghost-preview-rendering.md"
@@ -107,7 +116,7 @@ stories:
     status: ready-for-dev
     owner: "godot-specialist"
     estimate_days: 1.0
-    blocker: "deps building-020/022/019 all Complete (S5/S6). R11: no external playtest is meaningful until this lands. Non-writer grep guard applies"
+    blocker: "deps building-020/022/019 all Complete (S5/S6). R11: no external playtest is meaningful until this lands. Non-writer grep guard applies. SEQUENCING AMENDMENT 2026-07-26: run AFTER scene-005 — the pick DDA finds no cell in an empty grid, so no ghost renders and no Visual/Feel evidence screenshot is possible until the world exists"
     completed: ""
   - id: "building-001"
     name: "Build/Editor Mode state machine (Cluster 0) — R10's named unblocker for the 18-story Building UI epic"
