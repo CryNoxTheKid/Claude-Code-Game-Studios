@@ -1,8 +1,8 @@
 # Villager AI & Behavior
 
-> **Status**: Approved (2026-07-10 — full review NEEDS REVISION -> revised -> re-review APPROVED; see design/gdd/reviews/villager-ai-behavior-review-log.md); Slice-revised 2026-07-23 (character scale, anti-stuck safety net, worker attribution — see prototypes/last-seal-vertical-slice/REPORT.md)
+> **Status**: Approved (2026-07-10 — full review NEEDS REVISION -> revised -> re-review APPROVED; see design/gdd/reviews/villager-ai-behavior-review-log.md); Slice-revised 2026-07-23 (character scale, anti-stuck safety net, worker attribution — see prototypes/last-seal-vertical-slice/REPORT.md); Patched 2026-07-26 (Rule 15/F5 self-sealed watchdog scope carve-out — see production/qa/evidence/m01-closure-evidence-20260726.md)
 > **Author**: user + Claude Code Game Studios agents
-> **Last Updated**: 2026-07-23
+> **Last Updated**: 2026-07-26
 > **Last Verified**: 2026-07-09
 > **Implements Pillar**: Pillar 2 — A settlement that feels alive (primary); Pillar 1 — The building IS the game (villagers construct and inhabit what the player builds)
 
@@ -270,8 +270,9 @@ validated as an interim safety net during the vertical slice, commit
 net stands in for)*
 
 15. **Unstuck watchdog**: a villager in **Traveling** or **Working**
-    that has zero legal step from its current cell, or whose current
-    cell fails the standability check (Rule 8), for
+    that has zero legal step from its current cell, or **a villager in
+    ANY state** whose current cell fails the standability check (Rule
+    8) — the **self-sealed** sub-condition — for
     `unstuck_watchdog_threshold_ticks` consecutive ticks (default 12) is
     teleported to the nearest standable, unoccupied cell (F5). Any job
     claim it holds releases back to the queue exactly as Rule 6's
@@ -280,10 +281,17 @@ net stands in for)*
     event fires, incrementing a per-villager counter and a world total
     counter, exposed to the F3 debug console now and reserved for
     future production analytics (see Dependencies). **Idle, Wandering,
-    Sleeping, and Breather villagers are never rescued by the
-    watchdog** — Edge Case 2's original stay-put/distress-cue behavior
-    is unchanged for those states; the watchdog's scope is strictly
-    Traveling/Working. [TR-villager-ai-behavior-099]
+    Sleeping, and Breather villagers are never rescued by the watchdog
+    for the zero-legal-step sub-condition** — Edge Case 2's original
+    stay-put/distress-cue behavior is unchanged for those states, and
+    that sub-condition's scope stays strictly Traveling/Working; the
+    self-sealed sub-condition above is the sole exception, rescue-
+    eligible in every state, because a self-sealed villager cannot
+    rescue itself and its own state transition (e.g. Working's
+    unconditional "Cell Built" exit, State Table) would otherwise race
+    the stuck counter past threshold before it can ever fire *(M01
+    closure fix, 2026-07-26 — see
+    production/qa/evidence/m01-closure-evidence-20260726.md)*. [TR-villager-ai-behavior-099]
 15b. **Rescue target selection** is a bounded search (F5), never an
     unbounded teleport-anywhere: the nearest standable, unoccupied cell
     within `unstuck_rescue_search_radius`, found by an expanding-ring
@@ -501,10 +509,15 @@ one tick", which broke at `move_speed` < 2.0)*. [TR-villager-ai-behavior-034]
 
 `rescue_fires = (stuck_tick_count >= unstuck_watchdog_threshold_ticks)`
 
-where `stuck_tick_count` increments by 1 each tick a Traveling/Working
-villager has zero legal step from `current_cell` OR `current_cell` fails
-the standability check (Rule 8), and resets to 0 the instant a legal
-step or standable cell becomes available again.
+where `stuck_tick_count` increments by 1 each tick either (a) a
+Traveling/Working villager has zero legal step from `current_cell`, or
+(b) `current_cell` fails the standability check (Rule 8) — the
+**self-sealed** sub-condition, evaluated in EVERY state, not only
+Traveling/Working *(carve-out added by the M01 closure fix, 2026-07-26 —
+a self-sealed villager cannot rescue itself, and its own state
+transition would otherwise race the counter past threshold before it
+can ever fire)* — and resets to 0 the instant a legal step or standable
+cell becomes available again.
 
 `rescue_target = nearest(cell)` such that `cell` is standable (Rule 8)
 and unoccupied (no other villager's `current_cell`), found by an
@@ -515,7 +528,7 @@ if none is found the radius doubles, up to `unstuck_rescue_max_radius`
 
 | Variable | Type | Range | Description |
 |----------|------|-------|--------------|
-| `stuck_tick_count` | int | 0 – unbounded (resets on relief) | Consecutive ticks a Traveling/Working villager has had no legal step or a non-standable current cell |
+| `stuck_tick_count` | int | 0 – unbounded (resets on relief) | Consecutive ticks of: a Traveling/Working villager with no legal step, OR (any state) a self-sealed non-standable current cell |
 | `unstuck_watchdog_threshold_ticks` | int | 6–30, default 12 | Ticks of continuous stuckness before rescue fires |
 | `rescue_target` | cell coordinate | any standable, unoccupied cell within the search radius | Teleport destination |
 | `unstuck_rescue_search_radius` | int (Chebyshev cells) | 3–12, default 6 `[assumption]` | Initial BFS ring radius searched for a rescue cell |
@@ -681,16 +694,24 @@ ticks later (F5) the watchdog teleports it out.
 
 **Added by the 2026-07-23 slice revision (anti-stuck safety net)**
 
-13. **Traveling/Working villager stuck for `unstuck_watchdog_threshold_ticks`.**
+13. **Traveling/Working villager stuck for `unstuck_watchdog_threshold_ticks`;
+    self-sealed villager in ANY state.**
     A villager in Traveling or Working with zero legal step from its
-    current cell, or on a non-standable cell, for `unstuck_watchdog_threshold_ticks`
-    consecutive ticks is teleported to the nearest standable, unoccupied
-    cell (F5). Any held job claim releases back to the queue exactly as
-    Rule 6's unreachable-job flow; the villager re-enters Deciding at the
-    new cell; a `villager_unstuck` event fires, incrementing per-villager
-    and world total counters for F3 debug/telemetry. This is the sole
-    exception to Edge Case 2's "never teleport" rule — scoped strictly to
-    Traveling/Working (Rule 15). [TR-villager-ai-behavior-104]
+    current cell, OR a villager in **any state** whose own current cell
+    has become non-standable (the self-sealed sub-condition — a
+    completed self-seal build, Rule 16b, is the primary case), for
+    `unstuck_watchdog_threshold_ticks` consecutive ticks is teleported to
+    the nearest standable, unoccupied cell (F5). Any held job claim
+    releases back to the queue exactly as Rule 6's unreachable-job flow;
+    the villager re-enters Deciding at the new cell; a `villager_unstuck`
+    event fires, incrementing per-villager and world total counters for
+    F3 debug/telemetry. This is the sole exception to Edge Case 2's
+    "never teleport" rule — the zero-legal-step sub-condition stays
+    scoped strictly to Traveling/Working; the self-sealed sub-condition
+    is rescue-eligible in every state, because a self-sealed villager
+    cannot rescue itself and its own state transition would otherwise
+    race the stuck counter past threshold before it can ever fire
+    (Rule 15). [TR-villager-ai-behavior-104]
 14. **Watchdog rescue search finds no standable, unoccupied cell within
     `unstuck_rescue_search_radius`.** The search radius doubles, up to
     `unstuck_rescue_max_radius` (Rule 15b). If still no cell is found,
@@ -932,7 +953,7 @@ VS/Full-Vision milestones — not part of the Logic gate, re-tiered
 2026-07-10.)* [TR-villager-ai-behavior-096]
 
 **Added by the 2026-07-23 slice revision (anti-stuck safety net)**
-51. **GIVEN** a Traveling or Working villager with zero legal steps (or a non-standable current cell) for `unstuck_watchdog_threshold_ticks` consecutive ticks, **WHEN** the threshold is reached, **THEN** it is teleported to a standable, unoccupied cell, any held job claim releases back to the queue, and a `villager_unstuck` event fires with incremented per-villager and total counters (F5, Edge Case 13). [TR-villager-ai-behavior-104]
+51. **GIVEN** a Traveling or Working villager with zero legal steps from its current cell, OR a villager in **any state** whose own current cell has become non-standable (self-sealed), for `unstuck_watchdog_threshold_ticks` consecutive ticks, **WHEN** the threshold is reached, **THEN** it is teleported to a standable, unoccupied cell, any held job claim releases back to the queue, and a `villager_unstuck` event fires with incremented per-villager and total counters (F5, Edge Case 13). [TR-villager-ai-behavior-104]
 52. **GIVEN** a villager holding a claimed job at the moment the watchdog rescues it, **WHEN** the teleport occurs, **THEN** the claim releases back to the queue exactly as Rule 6's unreachable-job flow — no double-release, no orphaned claim; **GIVEN** a villager with no held claim (e.g. Traveling to a bed), **THEN** no claim-release side effect occurs and bed ownership is unaffected (F5). [TR-villager-ai-behavior-104]
 53. **GIVEN** the watchdog's search finds no standable, unoccupied cell within `unstuck_rescue_search_radius`, **WHEN** the search completes, **THEN** the radius doubles (up to `unstuck_rescue_max_radius`) before a rescue defers to the next tick, and a `villager_unstuck_search_failed` event fires exactly once for the stuck episode, not once per tick (Edge Case 14). [TR-villager-ai-behavior-105]
 54. **GIVEN** a build-job completion that would leave its builder with zero legal steps, **WHEN** the write is evaluated, **THEN** it is refused, the claim releases back to the queue, and `abandon_count` for that (job, villager) pair increments by 1 (F6, Edge Case 15). [TR-villager-ai-behavior-106]
