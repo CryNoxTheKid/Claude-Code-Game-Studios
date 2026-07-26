@@ -47,7 +47,7 @@
   `GameWorld`'s Booting path (see §3) — verified: the sole `module.setup()`
   call site in `src/` is `GameWorld._setup_injected_tier()`.
 
-**Governing ADR**: ADR-0001. **TR-IDs**: TR-building-ui-038, TR-villager-info-ui-023, TR-villager-ai-behavior-016, TR-resource-item-database-007, TR-needs-mood-system-025.
+**Governing ADR**: ADR-0001. **TR-IDs**: TR-building-ui-038, TR-villager-info-ui-023, TR-villager-ai-behavior-016, TR-resource-item-database-007, TR-needs-mood-system-025 (live-pair integration test — DI is its *enabler* per ADR-0001's Context, not itself a DI requirement; corrected 2026-07-26, see `production/architecture-decisions-m02-preflight-2026-07-26.md` NM-7).
 
 ---
 
