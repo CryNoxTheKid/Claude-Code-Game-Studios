@@ -449,6 +449,54 @@
 ## stand on a cell [VillagerWalkabilityRules.is_standable] confirms, except
 ## villager 0 in the exact AC3 degenerate case just named (already logged,
 ## not re-failed here).
+##
+## Story scene-008 ("Hosting the gates that make work honest") closes BOTH
+## deviations Story scene-007's own class doc comment named above but did not
+## fix: [BuildValidation] ("Open Decision 3, resolved (a)") and
+## [VillagerOnSiteGate]/[VillagerSealPreventionGate] ("Also found while
+## reading, also explicitly NOT pulled into this story" -- a different
+## epic's own gap). All three were fully built and fully tested, and all
+## three were constructed NOWHERE in `src/` -- found this time by a capture
+## tool (`tools/payoff_loop_demo.gd`) that drove the real shipped chain and
+## photographed the result: a villager's walls rose while it stood visibly
+## away from the house, because both gates default PERMISSIVELY when unwired
+## ([ConstructionTickLoop] credited a claimed job on a timer, regardless of
+## whether the claiming villager had physically arrived), and no bed in the
+## shipped game could ever read sheltered ([method
+## FurnitureBedProvider.is_bed_sheltered] structurally returned `false` for
+## every bed, since its own [member FurnitureBedProvider.build_validation]
+## dependency was `null`).
+##
+## [BuildValidation] is hosted exactly like every other injected-tier `Node`
+## above ([member _build_validation], `config` Inspector-wired on
+## `Valley.tscn` from `build_validation_config.tres`, `voxel_world`
+## code-assigned in [method _wire_hosted_modules], `furniture_registry`
+## code-assigned in [method _wire_build_project_lifecycle] once that
+## collaborator exists, `setup()` reached ONLY via [method
+## get_injected_tier_modules]) -- and its real instance now replaces the
+## `null` [method _wire_build_project_lifecycle] used to pass into [method
+## FurnitureBedProvider._init]. [VillagerOnSiteGate]/
+## [VillagerSealPreventionGate] are `RefCounted` collaborators constructed in
+## [method _wire_build_project_lifecycle], mirroring every other
+## population-wide shared `RefCounted` this class already constructs there
+## (`_construction_job_queue` etc.) -- both wire themselves into [member
+## _construction_job_queue]'s own occupancy/seal-prevention predicate seams
+## from their own `_init`, exactly as each class's own doc comment already
+## documents. Every hosted [VillagerAi] -- [member _villager_ai] (in [method
+## _wire_villager_population]) and every [method spawn_starting_roster]
+## member -- is registered with BOTH gates, mirroring [method
+## _wire_villager_population]'s own established "the SAME shared instance
+## every hosted villager is assigned" precedent for `job_queue`/
+## `bed_provider`. **Scope discipline, explicit**: this story changes NO
+## rule inside [BuildValidation] or either gate -- all three are built and
+## tested; this story only makes the running game construct and wire them.
+## [method _assert_build_validation_gates_boot_invariant] (AC5) extends this
+## class's own established "fail loudly, not silently" boot-invariant block
+## (mirrors [method _assert_lighting_boot_invariant]/[method
+## _assert_villager_placement_invariant]) to cover all three: each is
+## asserted non-null (constructed) and [member
+## FurnitureBedProvider.build_validation] is asserted non-null (wired, not
+## the `null` Story scene-007 recorded).
 class_name Valley
 extends Node3D
 
@@ -522,6 +570,17 @@ extends Node3D
 ## capability -- still the always-present, unconditionally-wired default
 ## (villager_id 0); [method get_villagers] reports it first.
 @onready var _villager_ai: VillagerAi = $VillagerAi
+
+## Hosted Build Validation & Navigability instance (Story scene-008; ADR-0001
+## injected-tier module; `build-validation` epic, stories 001-008). Structural
+## child only -- `config` is Inspector-wired on `Valley.tscn` from the
+## already-existing `build_validation_config.tres`; `voxel_world`
+## (Node-typed cross-reference) is code-assigned in [method
+## _wire_hosted_modules]; `furniture_registry` (duck-typed, plain `var`) is
+## code-assigned in [method _wire_build_project_lifecycle], once that
+## collaborator is constructed. See class doc comment's own Story scene-008
+## paragraph for the full rationale.
+@onready var _build_validation: BuildValidation = $BuildValidation
 
 ## Hosted Needs & Mood System instance (ADR-0001 injected-tier module;
 ## `needs-mood-system` epic, stories 001-008; Story needs-mood-010 -- THE
@@ -674,6 +733,15 @@ var _plan_only_undo_gate: PlanOnlyUndoGate = null
 var _furniture_registry: FurnitureRegistry = null
 var _furniture_bed_provider: FurnitureBedProvider = null
 
+## Story scene-008's own population-wide shared `RefCounted` collaborators --
+## constructed in [method _wire_build_project_lifecycle] alongside the ones
+## above, mirroring their exact "identity supplied at construction, wires
+## itself into [member _construction_job_queue]'s own predicate seam from its
+## own `_init`" shape. Every hosted [VillagerAi] is registered with both (see
+## [method _wire_villager_population]/[method spawn_starting_roster]).
+var _villager_onsite_gate: VillagerOnSiteGate = null
+var _villager_seal_prevention_gate: VillagerSealPreventionGate = null
+
 ## Every project id [method _on_blueprint_cells_created] has already
 ## registered into [member _construction_job_queue] -- this class's own
 ## guard against double-registering the SAME [BuildProject] instance on a
@@ -752,6 +820,7 @@ func _ready() -> void:
 	_wire_build_project_lifecycle()
 	_wire_villager_population()
 	_assert_lighting_boot_invariant()
+	_assert_build_validation_gates_boot_invariant()
 
 
 ## Code-assigned DI for the Node-typed cross-references between hosted
@@ -771,6 +840,7 @@ func _wire_hosted_modules() -> void:
 	_commit_pipeline.voxel_world = _voxel_world
 	_construction_tick_loop.voxel_world = _voxel_world
 	_villager_ai.voxel_world = _voxel_world
+	_build_validation.voxel_world = _voxel_world
 	_torch_flicker.light = _ambient_torch_light
 	_villager_roster_provider = _ValleyRosterProvider.new(self)
 	_villager_body_presenter.roster_provider = _villager_roster_provider
@@ -895,9 +965,26 @@ func _wire_build_project_lifecycle() -> void:
 	)
 	_furniture_registry = FurnitureRegistry.new()
 	_construction_tick_loop.furniture_registry = _furniture_registry
-	# Open Decision 3, resolved (a) -- see class doc comment for the named
-	# `BuildValidation`-hosting deviation this `null` records.
-	_furniture_bed_provider = FurnitureBedProvider.new(_furniture_registry, null)
+	# Story scene-008 -- BuildValidation's own duck-typed furniture_registry
+	# cross-reference, assigned before BuildValidation.setup() ever runs (that
+	# call is reached only via [method get_injected_tier_modules], strictly
+	# after this whole _ready() pass completes).
+	_build_validation.furniture_registry = _furniture_registry
+	# Story scene-008 closes "Open Decision 3, resolved (a)" (see class doc
+	# comment): BuildValidation is now hosted, so its real instance replaces
+	# the `null` this class used to pass here -- is_bed_sheltered() now
+	# answers for real instead of structurally reading false.
+	_furniture_bed_provider = FurnitureBedProvider.new(_furniture_registry, _build_validation)
+	# Story scene-008 closes the OTHER deviation this class doc comment named
+	# ("Also found while reading, also explicitly NOT pulled into this
+	# story"): VillagerOnSiteGate/VillagerSealPreventionGate wire themselves
+	# into _construction_job_queue's own occupancy/seal-prevention predicate
+	# seams from their own _init (see each class's own doc comment) -- neither
+	# was constructed anywhere in `src/` before this story, so both predicates
+	# defaulted permissively and every claimed job credited on a timer
+	# regardless of whether its claiming villager had actually arrived.
+	_villager_onsite_gate = VillagerOnSiteGate.new(_construction_job_queue)
+	_villager_seal_prevention_gate = VillagerSealPreventionGate.new(_construction_job_queue, villager_ai_config)
 	_commit_pipeline.blueprint_cells_created.connect(_on_blueprint_cells_created)
 
 
@@ -977,6 +1064,13 @@ func _wire_villager_population() -> void:
 	# comment's own Story scene-007 paragraphs.
 	_villager_ai.job_queue = _construction_job_queue
 	_villager_ai.bed_provider = _furniture_bed_provider
+	# Story scene-008: register the always-present default villager with both
+	# gates (see class doc comment) -- the SAME "the SAME shared instance
+	# every hosted villager is assigned" precedent this method already
+	# establishes for job_queue/bed_provider, extended to registration-style
+	# collaborators.
+	_villager_onsite_gate.register_villager(_villager_ai)
+	_villager_seal_prevention_gate.register_villager(_villager_ai)
 	_villager_nav_graph.subscribe_to_voxel_world(_voxel_world, _villager_ai)
 
 
@@ -1199,6 +1293,12 @@ func spawn_starting_roster() -> Array[VillagerAi]:
 		# 0 and class doc comment's own Story scene-007 paragraphs.
 		villager.job_queue = _construction_job_queue
 		villager.bed_provider = _furniture_bed_provider
+		# Story scene-008: the SAME shared gates every hosted villager is
+		# registered with -- see [method _wire_villager_population]'s own
+		# identical registration for villager_id 0 and class doc comment's
+		# own Story scene-008 paragraph.
+		_villager_onsite_gate.register_villager(villager)
+		_villager_seal_prevention_gate.register_villager(villager)
 		# Story scene-006 (AC-SEED-EVERY-ROSTER-MEMBER): seed this villager's
 		# needs through the landed [method NeedsMood.initialize_villager]
 		# surface, right where its provider is assigned -- already legal here
@@ -1242,6 +1342,31 @@ func _assert_villager_placement_invariant() -> void:
 			"Valley: villager_id %d stands on a non-standable cell %s after spawn_starting_roster" %
 			[villager.get_villager_id(), villager.get_current_cell()]
 		)
+
+
+## Boot invariant (Story scene-008, AC5) -- extends this class's own
+## established "fail loudly, not silently" boot-invariant block (mirrors
+## [method _assert_lighting_boot_invariant]/[method
+## _assert_villager_placement_invariant]) to cover the three classes this
+## story hosts for the first time: [BuildValidation] and
+## [VillagerOnSiteGate]/[VillagerSealPreventionGate] must each be
+## constructed (non-null) exactly once per [method _ready] pass, and [member
+## FurnitureBedProvider.build_validation] must be wired to a real instance,
+## never the `null` Story scene-007 recorded. Called from [method _ready],
+## after [method _wire_build_project_lifecycle]/[method
+## _wire_villager_population] have both run.
+func _assert_build_validation_gates_boot_invariant() -> void:
+	assert(_build_validation != null, "Valley must host exactly one BuildValidation instance")
+	assert(_villager_onsite_gate != null, "Valley must construct exactly one VillagerOnSiteGate")
+	assert(
+		_villager_seal_prevention_gate != null,
+		"Valley must construct exactly one VillagerSealPreventionGate"
+	)
+	assert(
+		_furniture_bed_provider.build_validation != null,
+		"Valley: FurnitureBedProvider.build_validation must not be null -- BuildValidation must" +
+		" be wired here, never passed null (Story scene-007's own recorded deviation)"
+	)
 
 
 ## Returns the hosted ambient torch/lantern light fixture (M01 condition C4).
@@ -1352,6 +1477,25 @@ func get_furniture_bed_provider() -> FurnitureBedProvider:
 	return _furniture_bed_provider
 
 
+## Returns the hosted [BuildValidation] instance (Story scene-008).
+func get_build_validation() -> BuildValidation:
+	return _build_validation
+
+
+## Returns the constructed [VillagerOnSiteGate] collaborator (Story
+## scene-008) -- the SAME instance every hosted [VillagerAi] is registered
+## with.
+func get_villager_onsite_gate() -> VillagerOnSiteGate:
+	return _villager_onsite_gate
+
+
+## Returns the constructed [VillagerSealPreventionGate] collaborator (Story
+## scene-008) -- the SAME instance every hosted [VillagerAi] is registered
+## with.
+func get_villager_seal_prevention_gate() -> VillagerSealPreventionGate:
+	return _villager_seal_prevention_gate
+
+
 ## The GameWorld assembly seam (Story scene-004): every hosted tier module
 ## this Valley owns, in the load-bearing DI order [method
 ## GameWorld._setup_injected_tier] will call `setup()` in (Voxel World grid,
@@ -1376,7 +1520,12 @@ func get_furniture_bed_provider() -> FurnitureBedProvider:
 ## comment's hosting-vs-DI distinction) -- it only reports the list. Story
 ## presentation-004 adds a TWENTY-SECOND, [WorldLighting] (21 -> 22) --
 ## updated consciously, not incidentally, mirroring every prior story's own
-## "flag this file" precedent (see e.g. cam-013's own paragraph above).
+## "flag this file" precedent (see e.g. cam-013's own paragraph above). Story
+## scene-008 adds a TWENTY-THIRD, [BuildValidation] (22 -> 23) -- updated
+## consciously, not incidentally, per this story's own dev-story instructions
+## to flag this file (`VillagerOnSiteGate`/`VillagerSealPreventionGate` are
+## `RefCounted` collaborators, not scene children, and do not affect this
+## list -- they mirror `_construction_job_queue`'s own established shape).
 func get_injected_tier_modules() -> Array[Node]:
 	return [
 		_voxel_world,
@@ -1395,6 +1544,7 @@ func get_injected_tier_modules() -> Array[Node]:
 		_ghost_preview,
 		_undo_redo_stack,
 		_construction_tick_loop,
+		_build_validation,
 		_needs_mood,
 		_villager_ai,
 		_torch_flicker,

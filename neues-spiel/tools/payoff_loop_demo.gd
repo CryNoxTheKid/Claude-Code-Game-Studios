@@ -242,13 +242,13 @@ func _run_demo() -> void:
 	await _shoot_through_game_camera("03-released")
 
 	# ---- Tick the REAL construction loop / villager AI until it finishes ----
-	# Honest, named deviation this tool's own reading of valley.gd surfaced
-	# (not invented here — see the FINAL REPORT block below): VillagerOnSiteGate/
-	# VillagerSealPreventionGate are constructed nowhere in src/, so
-	# ConstructionTickLoop credits a claimed job every real game tick
-	# regardless of whether the villager has physically arrived yet. This
-	# tool observes and reports whatever that real, currently-unwired
-	# behavior actually produces — it does not paper over it.
+	# Story scene-008 ("Hosting the gates that make work honest") closed the
+	# deviation this tool's own reading of valley.gd used to surface here:
+	# VillagerOnSiteGate/VillagerSealPreventionGate are now constructed and
+	# wired by Valley, so ConstructionTickLoop only credits a claimed job's
+	# cell while the claiming villager is actually on site. This tool
+	# observes and reports whatever that real, now-honest behavior actually
+	# produces — it does not paper over it either way.
 	await _wait_for_built(wall_cells, WALL_WAIT_CAP_SEC, "room walls")
 	var built_wall_count: int = _count_built(wall_cells)
 	print("payoff_loop_demo: REPORT — construction result: %d / %d wall cells reached BUILT" % [built_wall_count, wall_cells.size()])
@@ -359,13 +359,20 @@ func _count_built(blueprint_cells: Array[BlueprintCell]) -> int:
 	return count
 
 
-## Prints the BuildValidation finding this tool's own preparation surfaced —
-## a first-class finding, not a footnote. Grep-verified while writing this
-## tool: zero `BuildValidation.new(`/`VillagerOnSiteGate.new(`/
-## `VillagerSealPreventionGate.new(` call sites anywhere in `src/`.
+## Reports the BuildValidation/gate wiring state this tool's own preparation
+## used to surface as two FINDING lines (story scene-008's own "found by this
+## tool" origin). Story scene-008 closed both: Valley now constructs and
+## hosts [BuildValidation] (wired into [FurnitureBedProvider], replacing the
+## `null` `Open Decision 3, resolved (a)` used to record) and both
+## [VillagerOnSiteGate]/[VillagerSealPreventionGate] (wired into
+## [ConstructionJobQueue]'s own occupancy/seal-prevention predicate seams).
+## This method now reports the FIXED state — never the word "FINDING" — so a
+## future regression that silently un-hosts any of the three would need to
+## touch this print too, not just this tool's own text, before it could
+## misrepresent the shipped game as honest again.
 func _report_build_validation_gap() -> void:
-	print("payoff_loop_demo: REPORT — FINDING: BuildValidation (src/build_validation/build_validation.gd) is fully built and tested but hosted NOWHERE in src/ — Valley._wire_build_project_lifecycle() constructs FurnitureBedProvider.new(furniture_registry, null), passing null for its BuildValidation collaborator (see valley.gd's own doc comment, 'Open Decision 3, resolved (a)'). This means is_bed_sheltered() structurally ALWAYS returns false in the shipped game today, regardless of whether a room is actually enclosed — the same ship-green-and-uncalled pattern this M01 sprint already closed for the build-tool tier (scene-007), the camera (cam-013), and lighting (presentation-004), still open for shelter classification.")
-	print("payoff_loop_demo: REPORT — RELATED FINDING: VillagerOnSiteGate and VillagerSealPreventionGate (src/villager_ai/) are likewise constructed nowhere in src/ (grep-verified). Both default permissively when unwired, so ConstructionTickLoop credits a claimed job's progress every real tick regardless of whether the villager has physically arrived at the cell yet — a real behavior this run's own timing above reflects honestly, not a hypothetical.")
+	print("payoff_loop_demo: REPORT — BuildValidation is hosted and wired: is_bed_sheltered() now answers for real against the actual built room, never structurally false.")
+	print("payoff_loop_demo: REPORT — VillagerOnSiteGate and VillagerSealPreventionGate are hosted and wired: ConstructionTickLoop only credits a claimed job's progress while the claiming villager is actually on site — the timing above reflects that real, now-honest behavior.")
 
 
 ## Best-effort furniture stage (task step 7: "if it is reachable within the

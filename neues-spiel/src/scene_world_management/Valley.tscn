@@ -1,4 +1,4 @@
-[gd_scene load_steps=34 format=3]
+[gd_scene load_steps=36 format=3]
 
 [ext_resource type="Script" path="res://src/scene_world_management/valley.gd" id="1_valley"]
 [ext_resource type="Script" path="res://src/voxel_world/voxel_world_grid.gd" id="2_voxelgrid"]
@@ -35,6 +35,8 @@
 [ext_resource type="Script" path="res://src/camera_input/camera_mirror.gd" id="31_cameramirror"]
 [ext_resource type="Script" path="res://src/presentation/world_lighting.gd" id="32_worldlighting"]
 [ext_resource type="Resource" path="res://data/config/world_lighting_config.tres" id="33_worldlightingcfg"]
+[ext_resource type="Script" path="res://src/build_validation/build_validation.gd" id="34_buildvalidation"]
+[ext_resource type="Resource" path="res://data/config/build_validation_config.tres" id="35_buildvalidationcfg"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_torchindicator"]
 shading_mode = 0
@@ -84,6 +86,10 @@ config = ExtResource("10b_commitpipelinecfg")
 [node name="ConstructionTickLoop" type="Node" parent="."]
 script = ExtResource("11_tickloop")
 config = ExtResource("12_tickloopcfg")
+
+[node name="BuildValidation" type="Node" parent="."]
+script = ExtResource("34_buildvalidation")
+config = ExtResource("35_buildvalidationcfg")
 
 [node name="VillagerAi" type="Node" parent="."]
 script = ExtResource("13_villagerai")

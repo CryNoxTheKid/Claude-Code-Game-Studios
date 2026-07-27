@@ -110,6 +110,8 @@ func test_ac_assembly_gameworld_wires_all_tier_modules_into_valley_and_boots_act
 	assert_object(valley.get_placement_pick()).is_not_null()
 	assert_object(valley.get_commit_pipeline()).is_not_null()
 	assert_object(valley.get_construction_tick_loop()).is_not_null()
+	# Build Validation & Navigability (Story scene-008)
+	assert_object(valley.get_build_validation()).is_not_null()
 	# Villager AI
 	assert_object(valley.get_villager_ai()).is_not_null()
 	# Ambient torch flicker (M01 condition C4, production/milestones/
@@ -154,8 +156,14 @@ func test_ac_assembly_gameworld_wires_all_tier_modules_into_valley_and_boots_act
 	# own dev-story instructions to flag this file. Story presentation-004
 	# ("The world has no sun") adds ONE further injected-tier module,
 	# WorldLighting (21 -> 22) -- updated consciously, not incidentally.
+	# Story scene-008 ("Hosting the gates that make work honest") adds ONE
+	# further injected-tier module, BuildValidation (22 -> 23) -- updated
+	# consciously, not incidentally, per that story's own dev-story
+	# instructions to flag this file. VillagerOnSiteGate/
+	# VillagerSealPreventionGate are RefCounted collaborators, not scene
+	# children, and do not affect this count.
 	assert_array(world.injected_tier_modules).contains_exactly(valley.get_injected_tier_modules())
-	assert_int(world.injected_tier_modules.size()).is_equal(22)
+	assert_int(world.injected_tier_modules.size()).is_equal(23)
 
 
 func test_ac_assembly_hosted_modules_ran_through_boot_gated_setup_never_their_own_ready() -> void:
@@ -177,6 +185,7 @@ func test_ac_assembly_hosted_modules_ran_through_boot_gated_setup_never_their_ow
 	assert_bool(valley.get_placement_pick().is_set_up()).is_true()
 	assert_bool(valley.get_commit_pipeline().is_set_up()).is_true()
 	assert_bool(valley.get_construction_tick_loop().is_set_up()).is_true()
+	assert_bool(valley.get_build_validation().is_set_up()).is_true()
 	assert_bool(valley.get_villager_ai().is_set_up()).is_true()
 	# Story scene-007
 	assert_bool(valley.get_build_editor_mode().is_set_up()).is_true()

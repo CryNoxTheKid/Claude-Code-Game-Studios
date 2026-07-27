@@ -1,7 +1,7 @@
 # Story 008: Hosting the gates that make work honest
 
 > **Epic**: Scene & World Management
-> **Status**: Ready
+> **Status**: Complete (2026-07-27 — 1526/1526 suite green, 0 orphans, parent-verified; both FINDING lines gone from the demo report)
 > **Layer**: Core
 > **Type**: Integration
 > **Estimate**: 1 day
@@ -58,17 +58,17 @@ real and covered by tests; the game simply never asks the question.
 
 ## Acceptance Criteria
 
-- [ ] AC1: `BuildValidation` is constructed and hosted in the shipped scene chain, wired
+- [x] AC1: `BuildValidation` is constructed and hosted in the shipped scene chain, wired
       per ADR-0001, and `FurnitureBedProvider` receives it instead of `null`.
-- [ ] AC2: `VillagerOnSiteGate` and `VillagerSealPreventionGate` are constructed and
+- [x] AC2: `VillagerOnSiteGate` and `VillagerSealPreventionGate` are constructed and
       wired into `ConstructionTickLoop`'s job-crediting path in the shipped scene.
-- [ ] AC3: A claimed construction job accrues progress ONLY while the claiming villager
+- [x] AC3: A claimed construction job accrues progress ONLY while the claiming villager
       is actually on site. A villager that walks away stops crediting; when it returns,
       crediting resumes.
-- [ ] AC4: A bed inside a genuinely enclosed, built room reports sheltered in the shipped
+- [x] AC4: A bed inside a genuinely enclosed, built room reports sheltered in the shipped
       game; the same bed under open sky does not.
-- [ ] AC5: Boot invariants are added to Valley's existing block for all three.
-- [ ] AC6: `tools/payoff_loop_demo.gd`'s report no longer prints either FINDING line —
+- [x] AC5: Boot invariants are added to Valley's existing block for all three.
+- [x] AC6: `tools/payoff_loop_demo.gd`'s report no longer prints either FINDING line —
       the tool that found this is also the tool that proves it fixed.
 
 ## Anti-Vacuity Lever
@@ -109,3 +109,39 @@ Two assertions, both of which fail loudly on today's build:
 - Given: the real booted scene.
 - Then: `BuildValidation`, `VillagerOnSiteGate` and `VillagerSealPreventionGate` are each
   constructed exactly once, and `FurnitureBedProvider`'s validation dependency is not null.
+
+---
+
+## Closure Note (2026-07-27)
+
+Both gaps closed. `BuildValidation` is hosted in `Valley.tscn` and reaches
+`FurnitureBedProvider` instead of the old `null`; both gates are constructed and
+every hosted villager — the default and every roster member — is registered with
+them.
+
+THE PROOF IS A REGRESSION IN THE PICTURE. The same demo now builds 19 of 30 wall
+cells inside the same wait cap instead of 20, because the villager has to travel
+to each cell and stay there to earn credit. Less house, more truth. The demo's
+two FINDING lines are gone; `grep -n FINDING` on the full log returns nothing.
+
+THREE SELF-CAUGHT TEST DEFECTS, recorded because each is instructive:
+1. The AC3 fixture first drove a `MockTimeTickSystem` while the hosted
+   `ConstructionTickLoop` binds to the real `TimeTickSystem` autoload at boot.
+   Progress was therefore always zero and the test would have passed against a
+   completely unfixed build — a vacuous test of exactly the kind this project
+   keeps hunting. Rewired to the real autoload's `tick`.
+2. The AC4 fixture assumed the space above a written floor layer was empty. The
+   real world pages in procedural terrain, so the "open interior" premise was
+   false. Fixed by explicitly clearing a headroom column.
+3. A grep guard assumed `BuildValidation.new(` would appear once. It never does —
+   `BuildValidation` is scene-hosted like every other injected-tier Node. The
+   guard now checks for the hosted node.
+
+Out of scope and untouched, as required: `BuildValidation`'s own logic and both
+gates' rules.
+
+STILL OPEN, deliberately: the demo's walls plateaued at 19/30 for roughly 180
+seconds. The likely cause is the villager cycling through seal-prevention
+refusals as the room closes around it — expected gate behaviour rather than a
+defect, but not investigated. Worth a look before anyone reads the plateau as a
+performance problem.

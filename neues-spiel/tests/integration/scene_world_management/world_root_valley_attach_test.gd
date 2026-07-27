@@ -201,6 +201,12 @@ func test_hosted_building_system_and_villager_ai_modules_are_children_of_valley(
 	# `starting_villager_count = 1` and is placed by the SAME genesis call,
 	# so that call no longer add_child()s a SEPARATE roster member for the
 	# MVP default count -- (27 -> 26), updated consciously, not incidentally.
+	# Story scene-008 ("Hosting the gates that make work honest") adds ONE
+	# more hosted child -- [BuildValidation] -- (26 -> 27), updated
+	# consciously, not incidentally. [VillagerOnSiteGate]/
+	# [VillagerSealPreventionGate] are `RefCounted` collaborators, not scene
+	# children -- they do not affect this count, mirroring
+	# [ConstructionJobQueue]'s own established precedent.
 	var world: GameWorld = auto_free(GameWorld.new())
 	var database: MockResourceItemDatabase = auto_free(MockResourceItemDatabase.new())
 	database.configure_ready_immediately()
@@ -212,7 +218,7 @@ func test_hosted_building_system_and_villager_ai_modules_are_children_of_valley(
 
 	# Assert
 	var valley: Valley = world.get_valley() as Valley
-	assert_int(valley.get_child_count()).is_equal(26)
+	assert_int(valley.get_child_count()).is_equal(27)
 	assert_object(valley.get_voxel_world_mesher()).is_not_null()
 	assert_object(valley.get_voxel_world_mesh_streamer()).is_not_null()
 	assert_object(valley.get_tool_state_machine()).is_not_null()
@@ -256,6 +262,14 @@ func test_hosted_building_system_and_villager_ai_modules_are_children_of_valley(
 	assert_object(valley.get_sun_light()).is_not_null()
 	assert_object(valley.get_world_environment()).is_not_null()
 	assert_object(valley.get_world_lighting()).is_not_null()
+	# Story scene-008 ("Hosting the gates that make work honest") adds ONE
+	# more hosted child -- BuildValidation -- (26 -> 27). VillagerOnSiteGate/
+	# VillagerSealPreventionGate are RefCounted collaborators, present but not
+	# counted as scene children (mirrors ConstructionJobQueue's own precedent).
+	assert_object(valley.get_build_validation()).is_not_null()
+	assert_object(valley.get_villager_onsite_gate()).is_not_null()
+	assert_object(valley.get_villager_seal_prevention_gate()).is_not_null()
+	assert_object(valley.get_furniture_bed_provider().build_validation).is_same(valley.get_build_validation())
 
 
 # ---------------------------------------------------------------------------
