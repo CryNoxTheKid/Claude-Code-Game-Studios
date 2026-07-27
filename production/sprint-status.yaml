@@ -117,7 +117,7 @@ stories:
     name: "Burst ordering, pause & warp determinism (full-cycle tick anchors) — the crown's determinism harness"
     file: "production/epics/needs-mood-system/story-008-burst-pause-and-warp-determinism.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete
     owner: "godot-gdscript-specialist"
     estimate_days: 1.0
     blocker: "HARD: needs-mood-005 (in-sprint). Deps needs-mood-002/003 Complete. Domain review: systems-designer. ASSERT AGAINST TimeTickConfig.max_ticks_per_frame (landed default 12 per the S8 re-tune) — NEVER the literal 10 the GDD prose still says. Threshold signals are NEVER coalesced or deduplicated across a burst. SceneTree.paused and Engine.time_scale are project-wide forbidden — grep-guarded"

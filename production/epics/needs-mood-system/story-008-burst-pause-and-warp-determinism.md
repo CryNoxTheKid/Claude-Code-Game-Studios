@@ -1,7 +1,7 @@
 # Story 008: Burst ordering, pause & warp determinism (full-cycle tick anchors)
 
 > **Epic**: Needs & Mood System
-> **Status**: Ready
+> **Status: Complete (2026-07-27 — own suite 9/9 green 0 orphans; full-gate re-verified by parent once the concurrent bv-008 lands)
 > **Layer**: Feature
 > **Type**: Logic
 > **Estimate**: ~1 agent-day
