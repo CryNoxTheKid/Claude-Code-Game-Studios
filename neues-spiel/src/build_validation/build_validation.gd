@@ -75,6 +75,36 @@
 ## duck-typed and nil-safe -- a `null` provider yields zero items, zero
 ## emissions, no error; every dynamic call/connection onto it is guarded with
 ## [method Object.has_method]/[method Object.has_signal].
+##
+## Story build-validation-007 (this revision) lands [signal room_recognized]
+## -- Rule 11's continuity + celebration-pacing contract
+## ([TR-build-validation-navigability-040]/[-049]/[-050]). Continuity
+## ([method _patch_region_snapshot_and_is_newly_recognized]): a region newly
+## classified ROOM this pass fires ONLY if NONE of its cells were already
+## ROOM in [member _region_snapshot] immediately before this pass's own patch
+## -- one predicate that covers AC21's re-fire/merge/split cases without
+## three branches (see that method's own doc comment). Pacing ([method
+## _emit_room_recognized_group]): every region newly recognized in the SAME
+## pass shares one minted `pass_group_id` and one `celebrate` verdict (Rule
+## 11's same-pass grouping, AC32b) -- `celebrate` compares [member
+## _tick_count] against [member _last_celebrated_tick] + `config.
+## room_cue_cooldown_ticks`, and [member _last_celebrated_tick] is advanced
+## ONLY when a group actually celebrates (`celebrate == true`) -- a quiet
+## emission, a transient seal/unseal churn (never even reaching this method,
+## since it only runs for NEWLY-ROOM regions), or the load pass (which never
+## calls this method at all) can never arm the cooldown (CD Ruling 2
+## condition 3, `production/creative-decisions-m02-preflight-2026-07-26.md`).
+## [member time_tick_system] mirrors [member furniture_registry]'s own BV-1
+## nil-safe precedent rather than [NeedsMood]/[VillagerAi]'s asserted-required
+## shape: Rule 11's pacing is the ONLY consumer of ticks anywhere in this
+## module, and every pre-existing build-validation test file's `setup()` call
+## site (stories 001-006) has zero tick dependency -- an asserted requirement
+## here would force editing five unrelated, already-green test files for a
+## dependency their own scope never needed. A `null`/unresolvable Autoload
+## leaves [member _tick_count] frozen at `0` forever -- deterministic, never
+## a crash -- and Rule 11's pacing degrades to comparing a frozen clock
+## (harmless: no pre-existing test exercises [signal room_recognized] at
+## all, so none can observe the difference).
 class_name BuildValidation
 extends Node
 
@@ -84,6 +114,20 @@ extends Node
 ## emission (AC16: emission COUNT of 1, not consumer count). Silent on the
 ## load pass (Rule 11/AC31) -- see [method run_load_pass].
 signal shelter_status_changed(item_id: String, sheltered: bool)
+
+## Fires when a candidate region transitions non-Room -> Room this pass, per
+## Rule 11's continuity rule ([TR-build-validation-navigability-040]/[-049]):
+## [param region_cells] the region's own interior cells AS OF THIS PASS
+## (never re-queried afterward); [param celebrate] Rule 11's same-pass-group
+## pacing verdict -- every region newly recognized in ONE pass shares the
+## SAME `celebrate` value; [param pass_group_id] minted once per pass, ONLY
+## when at least one region was newly recognized (a pass recognizing zero
+## rooms mints nothing and emits nothing at all -- see [method
+## _emit_room_recognized_group]). Silent on [method run_load_pass] (Rule
+## 11/AC31 -- that method never calls the emitting path) and on a
+## furniture-only reclassification ([method _on_furniture_changed] never
+## forms or classifies a region).
+signal room_recognized(region_cells: Array[Vector3i], celebrate: bool, pass_group_id: StringName)
 
 ## Tuning config (ADR-0002). Wired via a scene file's Inspector in
 ## production, or assigned directly in a headless test. Asserted wired by
@@ -111,6 +155,41 @@ signal shelter_status_changed(item_id: String, sheltered: bool)
 ## a payload from that signal, matching [method _on_cells_changed_batch]'s own
 ## "re-query, don't inspect the payload" discipline.
 var furniture_registry: Object = null
+
+## Time & Tick System dependency (ADR-0001) -- OPTIONAL and duck-typed,
+## mirroring [member furniture_registry]'s own BV-1 nil-safe shape rather
+## than [NeedsMood]/[VillagerAi]/[ConstructionTickLoop]'s asserted-required
+## one. Rule 11's celebration pacing (story build-validation-007) is the
+## SOLE consumer of ticks anywhere in this module -- see class doc comment
+## for why this is deliberately NOT a hard assert. Duck-typed against the
+## one member [method setup] needs: `signal tick()`. Production resolves the
+## real Autoload lazily in [method setup]; a headless test assigns a mock
+## double (e.g. `MockTimeTickSystem`) directly beforehand.
+var time_tick_system: Object = null
+
+## This module's own relative tick counter (Rule 11 pacing), incremented by
+## [method _on_tick] -- independent of [TimeTickSystem]'s own global tick
+## count (mirrors [VillagerAi._tick_count]'s established precedent: this
+## class only ever observes the global count indirectly, via the `tick`
+## signal itself). Stays `0` forever if [member time_tick_system] never
+## resolves (see that member's own doc comment) -- never an error.
+var _tick_count: int = 0
+
+## The value of [member _tick_count] at which the most recent celebration
+## GROUP actually fired a cue (`celebrate == true`), or `-1` if no group has
+## ever done so (the "never armed" sentinel -- the first-ever recognition
+## this module observes therefore always celebrates, CD Ruling 2 condition
+## 3). Advanced ONLY by [method _emit_room_recognized_group] when its own
+## group celebrates -- a quiet emission (`celebrate == false`) never touches
+## this value, so the cooldown window is always measured from the last
+## celebration that actually fired a cue, never from a quiet one.
+var _last_celebrated_tick: int = -1
+
+## Monotonic counter minting a fresh [param pass_group_id] per pass that
+## recognizes at least one newly-valid room ([method
+## _emit_room_recognized_group]) -- never incremented for a pass that
+## recognizes zero rooms (no `pass_group_id` is minted at all in that case).
+var _next_pass_group_ordinal: int = 0
 
 ## True once [method setup] has completed at least once.
 var _is_set_up: bool = false
@@ -187,6 +266,22 @@ func setup() -> void:
 	if furniture_registry != null and furniture_registry.has_signal(&"furniture_changed"):
 		if not furniture_registry.is_connected(&"furniture_changed", _on_furniture_changed):
 			furniture_registry.connect(&"furniture_changed", _on_furniture_changed)
+	# Story build-validation-007 -- Rule 11's OPTIONAL tick dependency (see
+	# member doc comment for why this is nil-safe rather than asserted).
+	# Production resolves the real Autoload lazily; a test that assigned a
+	# mock keeps it. `is_inside_tree()` guards the lookup itself: per ADR-0001,
+	# a headless test constructs this module via `Node.new()` and calls
+	# `setup()` directly with ZERO scene tree -- calling `get_node_or_null` on
+	# an orphan node prints a noisy (harmless, but avoidable) engine ERROR
+	# ["Can't use get_node() with absolute paths from outside the active
+	# scene tree"]. A null result after this (no scene tree yet, no
+	# registered Autoload, no test-assigned mock) is a valid, silent state --
+	# _tick_count simply never advances.
+	if time_tick_system == null and is_inside_tree():
+		time_tick_system = get_node_or_null(^"/root/TimeTickSystem")
+	if time_tick_system != null and time_tick_system.has_signal(&"tick"):
+		if not time_tick_system.is_connected(&"tick", _on_tick):
+			time_tick_system.connect(&"tick", _on_tick)
 	_is_set_up = true
 
 
@@ -303,16 +398,21 @@ func _on_cells_changed_batch(changes: Array[CellChangeRecord]) -> void:
 ## batch spanning two disjoint regions is still ONE pass, two regions
 ## evaluated) -- the counter tracks PASSES, not regions or cells.
 ##
-## Emission of this GDD's own signal contract's REGION-facing signals
-## (`room_recognized`/`sealed_space_warning`/`unsheltered_furniture_info`) is
-## explicitly OUT OF SCOPE here (Out of Scope: "Story 007/008") -- this method
-## builds the region snapshot those stories diff against; it emits none of
-## its own. Story build-validation-006 (this revision) DOES additionally
-## re-classify every enumerated furniture item at the end of this same pass
-## ([method _reclassify_all_furniture]) and may emit [signal
-## shelter_status_changed] -- Edge Case 7's roof-hole re-classification is
-## exactly this: a structural change reaches furniture ONLY through this
-## pass, never a separate counter or a separate signal subscription.
+## Emission of this GDD's own signal contract's remaining REGION-facing
+## signals (`sealed_space_warning`/`unsheltered_furniture_info`) is
+## explicitly OUT OF SCOPE here (Out of Scope: "Story 008") -- this method
+## builds the region snapshot that story diffs against; it emits none of its
+## own. Story build-validation-006 DOES additionally re-classify every
+## enumerated furniture item at the end of this same pass ([method
+## _reclassify_all_furniture]) and may emit [signal shelter_status_changed]
+## -- Edge Case 7's roof-hole re-classification is exactly this: a
+## structural change reaches furniture ONLY through this pass, never a
+## separate counter or a separate signal subscription. Story
+## build-validation-007 (this revision) additionally detects and emits
+## [signal room_recognized] via [method
+## _patch_region_snapshot_and_is_newly_recognized] (per-region continuity)
+## and [method _emit_room_recognized_group] (same-pass grouping + pacing) --
+## see [signal room_recognized]'s own doc comment for the full contract.
 ##
 ## Never calls any Building System or Villager AI API beyond the shared,
 ## static [VillagerWalkabilityRules] predicates (Rule 9's second half, AC33):
@@ -325,13 +425,111 @@ func _run_analysis_pass(changed_cells: Array[Vector3i]) -> void:
 	var regions: Array[BuildValidationRegion] = BuildValidationRegionFormation.form_affected_regions(
 		voxel_world, changed_cells, config.max_room_height
 	)
+	var newly_recognized_regions: Array[BuildValidationRegion] = []
 	for region: BuildValidationRegion in regions:
 		var verdict: BuildValidationReachability.Verdict = BuildValidationReachability.classify_region(
 			voxel_world, region, config.min_room_cells, config.max_room_height
 		)
-		for cell: Vector3i in region.cell_list():
-			_region_snapshot[cell] = verdict
+		if _patch_region_snapshot_and_is_newly_recognized(region, verdict):
+			newly_recognized_regions.append(region)
+	_emit_room_recognized_group(newly_recognized_regions)
 	_reclassify_all_furniture(false)
+
+
+## [signal TimeTickSystem.tick] handler (story build-validation-007, Rule 11
+## pacing) -- the sole place [member _tick_count] ever advances, independent
+## of [TimeTickSystem]'s own global tick count (mirrors
+## [VillagerAi._tick_count]'s established "observed only indirectly, via the
+## signal" precedent). Never connected at all if [member time_tick_system]
+## stays `null` (see that member's own doc comment) -- this handler is then
+## simply never called, and [member _tick_count] stays frozen at `0`.
+func _on_tick() -> void:
+	_tick_count += 1
+
+
+## Patches [member _region_snapshot] for every cell of [param region] to
+## [param verdict] and returns whether [param region] is NEWLY RECOGNIZED
+## this pass (Rule 11 continuity, [TR-build-validation-navigability-049]):
+## [param verdict] is [constant BuildValidationReachability.Verdict.ROOM] AND
+## NONE of [param region]'s cells held [constant
+## BuildValidationReachability.Verdict.ROOM] in [member _region_snapshot]
+## immediately BEFORE this call's own patch (i.e. as of the pass immediately
+## prior). One predicate covers AC21's three cases without three branches:
+## - **Re-analysis keeping an existing room valid**: every cell of [param
+##   region] already held ROOM before this call -- the "any cell already
+##   ROOM" check trips, so this returns `false`.
+## - **A merge of two already-valid rooms**: the merged region carries at
+##   least one cell from EITHER contributing room, each already ROOM before
+##   this call -- returns `false` for the merged region (neither original
+##   room re-fires).
+## - **A split of an existing valid room**: each child region still carries
+##   a subset of the parent's own already-ROOM cells -- returns `false` for
+##   both children.
+## - **A previously-Sealed pocket merging into an existing valid room**
+##   (Accepted MVP consequence, GDD Rule 11) also correctly returns `false`:
+##   the pre-existing room's own cells were already ROOM, even though the
+##   pocket's own cells were not -- the region AS A WHOLE was not "new."
+## - **Room -> Sealed -> Room** (QA Test Cases edge case) correctly returns
+##   `true` on the SECOND transition: the Sealed pass already patched every
+##   cell to SEALED, so no cell holds ROOM immediately before the reopening
+##   pass's own patch.
+## A cell absent from [member _region_snapshot] entirely (never before
+## classified as part of any region) defaults to [constant
+## BuildValidationReachability.Verdict.OPEN] via [method Dictionary.get] --
+## the same "no status = the ordinary default" convention [method
+## get_region_status] already establishes.
+func _patch_region_snapshot_and_is_newly_recognized(
+	region: BuildValidationRegion, verdict: BuildValidationReachability.Verdict
+) -> bool:
+	var cells: Array[Vector3i] = region.cell_list()
+	var any_cell_was_room: bool = false
+	for cell: Vector3i in cells:
+		var previous: BuildValidationReachability.Verdict = _region_snapshot.get(
+			cell, BuildValidationReachability.Verdict.OPEN
+		)
+		if previous == BuildValidationReachability.Verdict.ROOM:
+			any_cell_was_room = true
+	for cell: Vector3i in cells:
+		_region_snapshot[cell] = verdict
+	return verdict == BuildValidationReachability.Verdict.ROOM and not any_cell_was_room
+
+
+## Same-pass grouping + celebration pacing (Rule 11, AC32/AC32b, [TR-build-
+## validation-navigability-050]): a no-op if [param newly_recognized_regions]
+## is empty (a pass recognizing zero rooms mints no `pass_group_id` and emits
+## nothing at all). Otherwise mints ONE fresh `pass_group_id` and resolves
+## ONE `celebrate` verdict for the WHOLE group -- every region in [param
+## newly_recognized_regions] emits [signal room_recognized] with the SAME
+## `celebrate`/`pass_group_id` pair (AC32b's "one combined celebration
+## event," never an arbitrary per-region winner).
+##
+## `celebrate` is `true` iff no group has ever celebrated yet ([member
+## _last_celebrated_tick] still `-1`, the "never armed" sentinel -- the
+## first-ever recognition always celebrates, CD Ruling 2 condition 3) OR
+## [member _tick_count] minus [member _last_celebrated_tick] is at least
+## `config.room_cue_cooldown_ticks` (the boundary is inclusive: exactly
+## `room_cue_cooldown_ticks` ticks later celebrates; one tick earlier does
+## not; `0` therefore means every group celebrates). [member
+## _last_celebrated_tick] advances to [member _tick_count] ONLY when this
+## group celebrates -- a quiet group (`celebrate == false`) never rewrites
+## it, so the cooldown window is always measured from the last celebration
+## that actually fired a cue, never from a quiet one, a load pass (which
+## never calls this method), or a transient seal/unseal churn (which never
+## reaches this method at all, since only NEWLY-ROOM regions are ever passed
+## in).
+func _emit_room_recognized_group(newly_recognized_regions: Array[BuildValidationRegion]) -> void:
+	if newly_recognized_regions.is_empty():
+		return
+	var celebrate: bool = (
+		_last_celebrated_tick < 0
+		or (_tick_count - _last_celebrated_tick) >= config.room_cue_cooldown_ticks
+	)
+	_next_pass_group_ordinal += 1
+	var pass_group_id: StringName = StringName("room_group_%d" % _next_pass_group_ordinal)
+	for region: BuildValidationRegion in newly_recognized_regions:
+		room_recognized.emit(region.cell_list(), celebrate, pass_group_id)
+	if celebrate:
+		_last_celebrated_tick = _tick_count
 
 
 ## [member furniture_registry]'s own placed/removed signal handler (BV-2's

@@ -1,7 +1,7 @@
 # Story 007: `room_recognized` continuity & celebration pacing
 
 > **Epic**: Build Validation & Navigability
-> **Status**: Ready
+> **Status: Complete (2026-07-27 — 1320/1320 suite green 0 orphans, agent-verified; parent re-verifies with the concurrent scene-006)
 > **Layer**: Feature
 > **Type**: Logic
 > **Estimate**: ~1 agent-day

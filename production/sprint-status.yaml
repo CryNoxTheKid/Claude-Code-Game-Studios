@@ -162,7 +162,7 @@ stories:
     name: "room_recognized continuity & celebration pacing — lane A's gap-filler; unblocks bv-008 and bv-009"
     file: "production/epics/build-validation-navigability/story-007-room-recognized-continuity-and-pacing.md"
     priority: should-have
-    status: backlog
+    status: complete
     owner: "ai-programmer"
     estimate_days: 1.0
     blocker: "Deps build-validation-004/005 both Complete — blocked on nothing. Runs on lane A in the gap between villager-ai-018 and the crown; it is NOT on the crown's path, so it is safe to trim. The snapshot is EDGE-DETECTION MEMORY ONLY, never a compute cache. NEVER re-fire room_recognized on a re-analysis that keeps a room valid, or on merges/splits of existing valid rooms. At most one celebration EVENT per room_cue_cooldown_ticks — READ THE CONFIG, never the prose: the knob (20) was authored against an earlier tick rate and the shipped rate is 4.0/s. The cue itself is CD-protected (Art Bible 5.6); this story owns the signal contract and pacing only. ⚑ FIXTURE TRAP (hit independently TWICE in S09): sealing a gap with a solid block creates a legal step-up that reopens the escape — assert the seal is still sealed AFTER the sealing write. ⚑ Open item D6(i): the celebration stagger is unspecified in every document that mentions it and still has no presentation-layer owner"
