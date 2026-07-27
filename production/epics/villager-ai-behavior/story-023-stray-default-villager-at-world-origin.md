@@ -1,4 +1,8 @@
-# Story 022: The stray villager at the world corner
+# Story 023: The stray villager at the world corner
+
+> **Renumbered 2026-07-27**: filed as story-022, which collided with the
+> pre-existing `story-022-max-deciding-retune.md` from Sprint 9. Renumbered to
+> 023. Commits 0e94aa1 and earlier refer to it as villager-ai-022.
 
 > **Epic**: Villager AI & Behavior
 > **Status**: Complete (2026-07-27 — 1522/1522 suite green, 0 orphans, parent-verified; live boot reports 1 villager at (998, 6, 1002), none at the origin)

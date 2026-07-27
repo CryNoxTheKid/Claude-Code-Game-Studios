@@ -231,6 +231,64 @@ stories:
     completed: ""
 
 # ─────────────────────────────────────────────────────────────────────────────
+# ADDED MID-SPRINT (back-filled 2026-07-27). These five were authored and
+# delivered after the sprint block was generated, so they were missing from
+# this file entirely — a real breach of S11's own DoD (S09 condition #2),
+# caught by the producer during close-out, not by any check. All five came out
+# of LOOKING AT THE RUNNING GAME rather than reading tables or tests.
+# ─────────────────────────────────────────────────────────────────────────────
+
+  - id: "cam-013"
+    name: "Camera hosting — the shipped game had no camera at all"
+    file: "production/epics/camera-input/story-013-camera-hosting-in-the-shipped-scene.md"
+    priority: must-have
+    status: complete
+    owner: "godot-specialist"
+    estimate_days: 1.0
+    blocker: "Found by counting Camera3D nodes in the live scene tree after boot: ZERO. Every piece of camera math existed and was covered; nothing drove a camera, so a human launching game_world.tscn saw nothing whatsoever. Sixth instance of ship-green-and-uncalled. CameraInput itself has a zero-line diff — its class doc's 'never holds a live camera' rationale stays true; a CameraMirror node in the hosting layer does the one-way mirroring. Commit 5793812."
+    completed: "2026-07-27"
+
+  - id: "presentation-004"
+    name: "World lighting and environment hosting — the world had no sun"
+    file: "production/epics/presentation-experience/story-004-world-lighting-and-environment-hosting.md"
+    priority: must-have
+    status: complete-with-open-ac
+    owner: "godot-specialist"
+    estimate_days: 1.0
+    blocker: "AC3 (art-director sign-off on the shipped values) IS OPEN — 0.95/0.28 ship as provisional, overturnable by editing world_lighting_config.tres. Seventh instance: zero DirectionalLight3D and zero WorldEnvironment anywhere in src/, so every screenshot this project ever produced was lit by the TOOLS. AC6 stripped the tools' own lighting, which is what stops this hiding again. Anti-vacuity lever DEVIATED — a computed Lambertian estimate replaced the demanded rendered-pixel measurement; recorded in the story's closure note as still owed. Commit 1502baa."
+    completed: "2026-07-27"
+
+  - id: "villager-ai-023"
+    name: "The stray villager at the world corner"
+    file: "production/epics/villager-ai-behavior/story-023-stray-default-villager-at-world-origin.md"
+    priority: must-have
+    status: complete
+    owner: "ai-programmer"
+    estimate_days: 0.5
+    blocker: "FILED AS story-022 AND RENUMBERED 2026-07-27 — it collided with the pre-existing Sprint-9 story-022-max-deciding-retune.md. Commits up to 0e94aa1 call it villager-ai-022. Found by booting the game and printing where everyone stands: two villagers, one at cell (0,0,0), the far world corner, ~1400 cells from the settlement — the scene-hosted default the roster spawner never placed, yet with needs seeded, a body view, and counted as a settler. Count convention now stated: villager 0 COUNTS TOWARD starting_villager_count. Commit 0e94aa1."
+    completed: "2026-07-27"
+
+  - id: "scene-008"
+    name: "Hosting the gates that make work honest"
+    file: "production/epics/scene-world-management/story-008-hosting-the-gates-that-make-work-honest.md"
+    priority: must-have
+    status: complete
+    owner: "godot-specialist"
+    estimate_days: 1.0
+    blocker: "Findings EIGHT and NINE, both seen in a photograph. BuildValidation, VillagerOnSiteGate and VillagerSealPreventionGate: zero construction sites in src/, sixteen in tests/. Both gates default PERMISSIVELY when unwired, so a claimed job accrued progress whether or not the villager arrived — visible in 04-built.png, walls rising with the villager far away. And the bed provider held a null validation, so is_bed_sheltered() was structurally false for every bed in the shipped game, leaving Sprint 10's crown inert in the product. The proof of the fix is a WORSE picture: 19/30 cells instead of 20/30, because the villager must now travel and stay. Commit 7cedffa."
+    completed: "2026-07-27"
+
+  - id: "tooling-capture"
+    name: "Dev capture tools — settlement overview and payoff-loop demo"
+    file: "neues-spiel/tools/payoff_loop_demo.gd"
+    priority: should-have
+    status: complete
+    owner: "godot-specialist"
+    estimate_days: 0.5
+    blocker: "Unplanned, and the source of findings 6-9. Both tools boot the REAL game_world.tscn, supply no lighting and no placeholder ground, and shoot through the game's own camera. payoff_loop_demo drives the real build chain end to end (01-before .. 05-furnished) and never writes a cell to fake a result — when a stage does not finish it says so and photographs the gap. Commits 3818dc5, f944af2."
+    completed: "2026-07-27"
+
+# ─────────────────────────────────────────────────────────────────────────────
 # SPRINT 10 HISTORY (retained; 14 of 16 TRACKED stories complete — the Sprint Result's own "16/16"
 # was CORRECTED by the QA sign-off: build-validation-009 (TD-gated, concurrence never given) and
 # building-009 (correctly deferred per D8 option (c)) never landed. Suite 1198 -> 1383 (the Result's
