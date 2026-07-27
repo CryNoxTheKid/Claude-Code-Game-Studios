@@ -509,3 +509,39 @@ ADR-0016 (what the lifecycle tier connects to), and the landed code read on 2026
      ladder*. sprint-11.md would cut the registry/queue tier, which is the C1 chain's caller. This
      story recommends cutting the **undo tier** instead. Producer-owned correction, surfaced here so
      the sprint's buffer entry can be amended rather than followed off a cliff.
+
+---
+
+## Deletion-Probe Record (2026-07-27, performed late — QA condition #1)
+
+The Sprint 11 QA plan makes this recording binding, and `scene-006` is the named
+template. Story-007's original commit (`6d1d696`) did NOT carry it, even though
+the test file's own doc comment claimed it did. The QA sign-off caught that. The
+probe was therefore run afterwards, and this is its record.
+
+**Production call removed:** `valley.gd`, the armed-tool → resolver router's own
+subscription —
+
+    _tool_state_machine.tool_armed.connect(_on_tool_armed)
+
+commented out, nothing else touched.
+
+**Observed failure, verbatim:**
+
+    res://tests/integration/scene_world/build_tool_hosting_boot_test.gd >
+      test_ac_tool_resolver_is_live_wall_click_produces_wall_height_cells_from_config
+      FAILED 12s 848ms
+        line 201: Expecting:
+    Statistics: 3 test cases | 0 errors | 1 failures | 0 flaky | 0 skipped | 0 orphans
+
+Line 201 is the anti-vacuity assertion itself:
+`assert_int(cells.size()).is_equal(wall_config.wall_height)`. With the router
+unsubscribed, an armed wall tool never re-points `CommitPipeline`'s resolver, so
+a click yields the wrong cell count — exactly the pre-story behaviour.
+
+**Restore:** the file was restored from a byte-for-byte copy taken before the
+probe; `git diff` on `valley.gd` is empty. The suite file then ran green again:
+13 test cases, 0 errors, 0 failures, 0 orphans.
+
+The probe is what makes AC-TOOL-RESOLVER-IS-LIVE non-vacuous in fact and not
+merely in intent.
