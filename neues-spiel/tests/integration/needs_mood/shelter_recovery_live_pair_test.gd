@@ -12,9 +12,22 @@
 ## (Sprint 10 plan, option (c)), the furniture chain feeding the OTHER side of
 ## the seam is ALSO real and unmocked: a real [FurnitureRegistry]
 ## (`building-028`/`016`) and a real [BuildValidation] (`bv-006`) behind a new
-## [FurnitureBedProvider] adapter -- only `building-017` (furniture
-## demolition/revocation) stays a directly-triggered signal, exactly as its
-## own Out of Scope section names (deferred to S11).
+## [FurnitureBedProvider] adapter. At the time this suite was first written,
+## `building-017` (furniture demolition/revocation) had not yet landed, so
+## `test_bed_revoked_mid_sleep_wakes_immediately_and_stop_recovery_credits_zero`
+## below proved revocation only by firing [signal
+## FurnitureBedProvider.furniture_revoked] directly from the test's own Act
+## phase -- a real signal, but never fired by a real demolition job.
+## **Now that `building-017` has landed** (this revision), that test is kept
+## as-is (a fast, minimal regression of the villager-side consequences alone)
+## and `test_bed_revoked_via_real_demolition_job_wakes_immediately_and_stop_recovery_credits_zero`
+## is ADDED alongside it -- the non-vacuous re-verification `building-017`'s
+## own story file names as its owed debt (D8 option (c)): the SAME revocation
+## scenario, this time driven end-to-end by a REAL `building-017` demolition
+## order/job (real [BuildProjectRegistry], real [ConstructionTickLoop], real
+## [RemovalTool]) reaching real completion, with both the T0 (order creation:
+## nothing happens) and T1 (completion: all three consequences land) halves
+## proven in ONE connected scenario.
 ##
 ## Round trip proven, in order (Implementation Notes: "record the sequence,
 ## then assert the sequence — not just the endpoints"):
@@ -393,6 +406,163 @@ func test_bed_revoked_mid_sleep_wakes_immediately_and_stop_recovery_credits_zero
 	assert_bool(villager.has_owned_bed()).is_false()
 	assert_int(needs_mood.get_need_state(villager.villager_id, &"sleep")).is_equal(NeedsMood.NeedState.URGENT)
 	assert_float(needs_mood.get_need_value(villager.villager_id, &"sleep")).is_equal_approx(value_before_revoke, 0.0001)
+
+
+# ---------------------------------------------------------------------------
+# Bed revoked via a REAL demolition job (Story building-017's owed debt,
+# D8 option (c), Sprint 10 sign-off) -- T0 (creation: nothing happens) and
+# T1 (completion: all three consequences) proven in ONE connected scenario,
+# driven by the real building-017 chain instead of a directly-fired signal
+# ---------------------------------------------------------------------------
+
+## The test above proved revocation only by firing [signal
+## FurnitureBedProvider.furniture_revoked] directly from this test's own Act
+## phase, because no real demolition system existed yet (building-017's own
+## story file names this test explicitly as the re-verification it owes).
+## This test replaces that direct emit with a REAL building-017 demolition
+## order/job, driven to completion through the REAL [ConstructionTickLoop]
+## tick mechanism -- a SEPARATE, isolated [MockTimeTickSystem] from the one
+## driving needs_mood/villager (mirrors building-009's own AC66 mocked-claim
+## pattern exactly, and sidesteps any same-dispatch tick-ordering question
+## between this system and Needs & Mood, which is not this seam's concern).
+##
+## The ONE piece building-017's own Implementation Notes mark PROVISIONAL --
+## translating "this furniture item was demolished" into [signal
+## FurnitureBedProvider.furniture_revoked] -- is wired here via [method
+## ConstructionTickLoop.set_furniture_demolished_callback], exactly the seam
+## that class's own doc comment names as "a future caller (or, today, a test
+## standing in for one)". The callable does nothing but forward the
+## ALREADY-KNOWN owning villager id (this scenario's own villager, already
+## established by the real claim/sleep round trip above) to the REAL
+## [FurnitureBedProvider.furniture_revoked] signal -- it is driven BY, and
+## only ever fires AFTER, the real demolition completion; it is never called
+## unconditionally by the test at a moment of its own choosing (the
+## difference from the directly-fired test above).
+func test_bed_revoked_via_real_demolition_job_wakes_immediately_and_stop_recovery_credits_zero() -> void:
+	# Arrange -- byte-for-byte the same setup as the directly-fired test above.
+	var grid: VoxelWorldGrid = _make_flat_platform_grid()
+	var bed_cell_a := Vector3i(2, 1, 2)
+	var bed_cell_b := Vector3i(2, 1, 3)
+	_roof_over(grid, bed_cell_a)
+	_roof_over(grid, bed_cell_b)
+	var nav_graph: VillagerNavGraph = _make_nav_graph(grid)
+
+	var registry := FurnitureRegistry.new()
+	var bv: BuildValidation = _make_build_validation(grid, registry)
+	_place_bed(registry, bed_cell_a, bed_cell_b)
+	var bed_provider := FurnitureBedProvider.new(registry, bv)
+
+	var config := NeedsMoodConfig.new()
+	var time_tick: MockTimeTickSystem = auto_free(MockTimeTickSystem.new())
+	var needs_mood: NeedsMood = _make_needs_mood(config, time_tick)
+	var scheduler := VillagerDecidingScheduler.new()
+	var villager: VillagerAi = _make_setup_villager(
+		grid, nav_graph, scheduler, needs_mood, bed_provider, time_tick
+	)
+	needs_mood.set_need_value(villager.villager_id, &"sleep", config.urgency_threshold + config.decay_per_tick_sleep)
+
+	# Drive until actually asleep in the bed (identical to the directly-fired
+	# test above).
+	var steps: int = 0
+	while villager.get_state() != VillagerAi.State.SLEEPING and steps < 200:
+		_tick(villager, time_tick)
+		steps += 1
+	assert_int(villager.get_state()).is_equal(VillagerAi.State.SLEEPING)
+	assert_int(needs_mood.get_need_state(villager.villager_id, &"sleep")).is_equal(NeedsMood.NeedState.RECOVERING)
+
+	# Arrange -- the REAL building-017 chain: a Build Project tracking the
+	# SAME 2-cell footprint the bed already occupies in `registry`, plus a
+	# ConstructionTickLoop wired to the SAME FurnitureRegistry, on its OWN
+	# isolated tick source (mirrors building-009's own AC66 pattern).
+	var project_registry := BuildProjectRegistry.new()
+	var group := FurnitureFootprintGroup.new()
+	var bed_contents := CellContents.new(1, 0)
+	var blueprint_a := BlueprintCell.new(
+		bed_cell_a, BlueprintCell.MicroState.BUILT, BlueprintCell.Category.FURNITURE, bed_contents, &"bed"
+	)
+	var blueprint_b := BlueprintCell.new(
+		bed_cell_b, BlueprintCell.MicroState.BUILT, BlueprintCell.Category.FURNITURE, bed_contents, &"bed"
+	)
+	group.cells = [blueprint_a, blueprint_b]
+	group.is_registered = true
+	blueprint_a.footprint_group = group
+	blueprint_b.footprint_group = group
+	project_registry.assign_cells([blueprint_a, blueprint_b])
+
+	var demolition_tick: MockTimeTickSystem = auto_free(MockTimeTickSystem.new())
+	var loop_config := ConstructionTickLoopConfig.new()
+	var tick_loop: ConstructionTickLoop = auto_free(ConstructionTickLoop.new())
+	tick_loop.voxel_world = grid
+	tick_loop.config = loop_config
+	tick_loop.time_tick_system = demolition_tick
+	tick_loop.setup()
+	tick_loop.furniture_registry = registry
+	var removal_tool := RemovalTool.new(project_registry, tick_loop)
+
+	# The ONE provisional piece (see doc comment above): forward a completed
+	# "bed" demolition to the REAL FurnitureBedProvider signal -- driven BY
+	# the real completion, never called unconditionally.
+	var deferred_revocation_calls: Array = []
+	tick_loop.set_furniture_demolished_callback(
+		func(definition_id: StringName, _cells: Array[Vector3i]) -> void:
+			if definition_id != &"bed":
+				return
+			deferred_revocation_calls.append(true)
+			bed_provider.furniture_revoked.emit(villager.villager_id, bed_cell_a)
+	)
+
+	# --- T0: order CREATION -- nothing happens yet --------------------------
+	# Captured at the SAME moment the directly-fired test above captures its
+	# own `value_before_revoke` -- right at Sleeping/Recovering onset, before
+	# any further tick of ANY kind -- so the T1 zero-credit comparison below
+	# reproduces the exact same scenario, not a perturbed one (AC17's "not
+	# blocked by usage" is proven separately, at the Building-System layer,
+	# by `furniture_demolition_test.gd`'s own AC17 case -- deliberately not
+	# re-derived here by also advancing the sleep clock, which would move the
+	# need's value across the SATISFIED/URGENT threshold before the order
+	# even completes and change what this test is supposed to reproduce).
+	var value_before_demolition: float = needs_mood.get_need_value(villager.villager_id, &"sleep")
+	var order_created: bool = removal_tool.remove_cell(bed_cell_a)
+	assert_bool(order_created).is_true()
+	assert_bool(blueprint_a.is_demolition_queued).is_true()
+	assert_bool(blueprint_b.is_demolition_queued).is_true()
+
+	assert_int(villager.get_state()).is_equal(VillagerAi.State.SLEEPING)
+	assert_int(needs_mood.get_need_state(villager.villager_id, &"sleep")).is_equal(NeedsMood.NeedState.RECOVERING)
+	assert_bool(villager.has_owned_bed()).is_true()
+	assert_int(deferred_revocation_calls.size()).is_equal(0)
+	assert_bool(registry.has_occupant(bed_cell_a)).is_true()
+	assert_bool(registry.has_occupant(bed_cell_b)).is_true()
+
+	# --- Claim + tick the REAL demolition job to one tick short of completion
+	assert_bool(tick_loop.claim_demolition_job(blueprint_a, 999)).is_true()
+	for i in range(loop_config.base_demolition_ticks_furniture - 1):
+		demolition_tick.fire_tick()
+
+	# Still nothing at the mid-point -- not even half torn down.
+	assert_int(deferred_revocation_calls.size()).is_equal(0)
+	assert_bool(registry.has_occupant(bed_cell_a)).is_true()
+	assert_bool(registry.has_occupant(bed_cell_b)).is_true()
+	assert_int(villager.get_state()).is_equal(VillagerAi.State.SLEEPING)
+
+	# --- T1: the FINAL demolition tick completes the job ---------------------
+	demolition_tick.fire_tick()
+
+	# Assert -- the SAME three consequences the directly-fired test above
+	# already proves, now via the REAL trigger.
+	assert_int(deferred_revocation_calls.size()).is_equal(1)
+	assert_int(villager.get_state()).is_equal(VillagerAi.State.DECIDING)
+	assert_bool(villager.has_owned_bed()).is_false()
+	assert_int(needs_mood.get_need_state(villager.villager_id, &"sleep")).is_equal(NeedsMood.NeedState.URGENT)
+	assert_float(needs_mood.get_need_value(villager.villager_id, &"sleep")).is_equal_approx(
+		value_before_demolition, 0.0001
+	)
+
+	# Atomicity, proven at this seam too: BOTH footprint cells are gone from
+	# the registry together -- never one gone with the other standing.
+	assert_bool(registry.is_empty()).is_true()
+	assert_bool(blueprint_a.is_demolition_queued).is_false()
+	assert_bool(blueprint_b.is_demolition_queued).is_false()
 
 
 # ---------------------------------------------------------------------------

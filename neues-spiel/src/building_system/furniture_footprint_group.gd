@@ -43,3 +43,20 @@ var cells: Array[BlueprintCell] = []
 ## dispatch would otherwise both observe "every sibling is Built" and both
 ## attempt to register the same entity).
 var is_registered: bool = false
+
+## Story building-017 addition (GDD Rule 16/[TR-building-system-127], atomic
+## multi-cell demolition) -- `true` from the moment ANY footprint cell of
+## this group is claimed for demolition ([method
+## ConstructionTickLoop.claim_demolition_job]) until that SAME job completes.
+## Guards a group-level double-claim [member ConstructionTickLoop._active_jobs]'s
+## own per-cell keying cannot see on its own: unlike construction (where each
+## sibling is its OWN independent job, keyed at its own cell address), a
+## footprint's demolition is exactly ONE job tracked under a single
+## representative cell key -- a second claim attempt against a DIFFERENT
+## sibling cell of the SAME group would otherwise find [member
+## ConstructionTickLoop._active_jobs] empty at THAT address and incorrectly
+## succeed, creating two concurrent teardown jobs for what must be a single
+## atomic entity removal ([TR-building-system-127]: "never a per-cell partial
+## teardown"). Starts `false` -- a freshly-created group has no demolition
+## order at all yet.
+var is_demolition_active: bool = false

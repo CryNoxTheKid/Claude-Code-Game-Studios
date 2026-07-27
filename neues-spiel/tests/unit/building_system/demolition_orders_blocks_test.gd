@@ -29,10 +29,14 @@
 ##    time-warp halves the wall-clock needed, never the tick COUNT required
 ##    to complete a demolition job.
 ## 8. Scope guards: [method ConstructionTickLoop.create_demolition_order]
-##    refuses a not-yet-Built cell and refuses a FURNITURE-category cell
-##    (Story 017's own future scope, not this story's); [method
+##    refuses a not-yet-Built cell; [method
 ##    ConstructionTickLoop.claim_demolition_job] refuses a cell with no
-##    demolition order queued.
+##    demolition order queued. (Story building-017, landed after this story,
+##    widened [method create_demolition_order]'s own category guard to also
+##    accept FURNITURE -- see that story's own `furniture_demolition_test.gd`
+##    for the atomic multi-cell-footprint / deferred-revocation proof this
+##    suite does not attempt; this suite keeps only a direct single-cell
+##    regression for the changed guard, below.)
 class_name DemolitionOrdersBlocksTest
 extends GdUnitTestSuite
 
@@ -112,21 +116,26 @@ func test_create_demolition_order_on_not_yet_built_cell_fails() -> void:
 	assert_bool(cell.is_demolition_queued).is_false()
 
 
-func test_create_demolition_order_on_furniture_cell_fails() -> void:
-	# Story 017 is furniture demolition's own future scope -- this story
-	# (009) handles BLOCK-category demolition only.
+func test_create_demolition_order_on_a_single_cell_furniture_cell_now_succeeds() -> void:
+	# Story building-017 (this revision, landed after this story) widened
+	# create_demolition_order to accept FURNITURE, reusing this SAME
+	# mechanism -- see that story's own `furniture_demolition_test.gd` for
+	# the full atomic multi-cell-footprint / deferred-revocation proof; this
+	# suite keeps only the direct regression that THIS entry point's own
+	# category guard changed. Furniture never enters VoxelWorldGrid (BV-1),
+	# so this fixture -- unlike a BLOCK cell's -- deliberately never writes
+	# anything into the grid at all.
 	var grid: VoxelWorldGrid = _new_grid()
 	var loop: ConstructionTickLoop = _new_loop(grid, auto_free(MockTimeTickSystem.new()))
 	var contents := CellContents.new(4, 0)
-	grid.set_cell(Vector3i(3, 0, 3), contents)
 	var cell := BlueprintCell.new(
 		Vector3i(3, 0, 3), BlueprintCell.MicroState.BUILT, BlueprintCell.Category.FURNITURE, contents, &"bed"
 	)
 
 	var created: bool = loop.create_demolition_order(cell)
 
-	assert_bool(created).is_false()
-	assert_bool(cell.is_demolition_queued).is_false()
+	assert_bool(created).is_true()
+	assert_bool(cell.is_demolition_queued).is_true()
 
 
 # ---------------------------------------------------------------------------

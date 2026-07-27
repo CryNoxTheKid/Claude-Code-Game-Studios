@@ -161,7 +161,7 @@ stories:
     name: "Furniture demolition — closes criterion #6 to 4/4 and PAYS D8 option (c)'s OWED FOLLOW-ON AC"
     file: "production/epics/building-system/story-017-furniture-demolition.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete
     owner: "godot-specialist"
     estimate_days: 1.0
     blocker: "HARD: building-009 AND building-015 (both in-sprint). Dep building-016 Complete (S10) — all three are its own header. Furniture demolition REUSES 009's job-based contract and 015's not-yet-Built branch, removing the LAST instant-removal carve-out; a multi-cell footprint demolishes as ONE ENTITY, never per-cell. ⚑ THE DEBT, NAMED: needs-mood-010's bed-revocation edge case is currently proven by firing FurnitureBedProvider.furniture_revoked DIRECTLY (QA-verified in the S10 sign-off Gate 2). THIS STORY OWES ITS NON-VACUOUS RE-VERIFICATION — re-run shelter_recovery_live_pair_test.gd's revocation case driven by a REAL DEMOLITION JOB COMPLETING, asserting wake + stop_recovery crediting ZERO that tick + ownership dissolving. This is the follow-on AC that D8 option (c) promised in exchange for letting the crown ship in S10; it is BLOCKING. Same discipline already applied twice (BV-1's furniture-transparency guard, bv-006's need-functional branch). ⚑ CROSS-LANE FILE HANDOFF: that test file belongs to the ai-programmer lane — serialize the re-run against anything lane B has open. Depth-4 on lane C."

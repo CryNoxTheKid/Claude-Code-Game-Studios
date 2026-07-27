@@ -45,18 +45,31 @@
 ## lands -- only [ConstructionTickLoop]'s own single-cell call site needs to
 ## grow into a whole-footprint completion (that story's job, not this one's).
 ##
-## **Removal is explicitly out of scope** (Story building-017) -- this class
-## exposes no `remove()`/`release()` of any kind. A re-`place()` at an
-## already-occupied cell overwrites [member _cell_index]'s reverse-index
-## entry for that address without erasing the PRIOR record's own stale
-## `cells` list -- a known, deliberate limitation until Story building-017
-## gives removal a real caller (mirrors this codebase's own established
-## "documented gap, future story's job" idiom, e.g. [BuildProjectRegistry]'s
-## own "no registry wiring yet calls back to erase a reverse-index entry on
-## cancel/demolish" precedent). No test in this story exercises re-placement
-## at an occupied cell -- CommitPipeline's own combined-view validity gate
-## already prevents a normal double-commit at the same address before
-## construction ever reaches this class.
+## **Removal (Story building-017, this revision)** -- [method remove] is the
+## atomic counterpart to [method place]: erases a whole item's record AND
+## every one of its occupied cells from [member _cell_index] in ONE call,
+## never a per-cell partial removal (mirrors [method place]'s own "every
+## footprint cell together" discipline in reverse). [method
+## ConstructionTickLoop._complete_jobs] is the sole call site -- a completed
+## FURNITURE demolition job, resolved via [method get_occupant_at] against
+## whichever cell the job happened to be claimed under (every footprint cell
+## shares the SAME occupant id, so any one of them resolves the whole
+## entity). Emits [signal furniture_changed] exactly once on success -- this
+## class's own doc comment already named this as the expected shape ("Story
+## building-017... is expected to emit this SAME signal on a successful
+## removal, not a second one").
+##
+## A re-`place()` at an already-occupied cell (still never exercised by any
+## real caller -- [CommitPipeline]'s own combined-view validity gate already
+## prevents a normal double-commit at the same address before construction
+## ever reaches this class) still overwrites [member _cell_index]'s
+## reverse-index entry for that address without erasing the PRIOR record's
+## own stale `cells` list -- a known, narrow, pre-existing limitation, but
+## strictly orthogonal to [method remove]'s own correctness: a genuine
+## remove-then-place at the same address works correctly, since [method
+## remove] fully erases the prior record (both its [member
+## _FurnitureRecord.cells] entries in [member _cell_index] AND the record
+## itself) before any later [method place] call could ever run.
 class_name FurnitureRegistry
 extends RefCounted
 
@@ -172,3 +185,24 @@ func get_record(item_id: String) -> Dictionary:
 ## Whether this registry currently tracks zero placed items.
 func is_empty() -> bool:
 	return _records.is_empty()
+
+
+## Removes a previously-placed furniture item (Story building-017,
+## [TR-building-system-127]; see class doc comment's "Removal" section) --
+## the atomic counterpart to [method place]. Erases [param item_id]'s own
+## record and every one of its occupied cells from [member _cell_index] in
+## one call, so a multi-cell footprint's occupancy clears for EVERY cell
+## together, never one cell freed while another still reads occupied. Emits
+## [signal furniture_changed] exactly once on success. Returns `false`
+## (no-op, nothing mutated, no signal) if [param item_id] is not currently
+## tracked -- a defensive, never-crashing "already gone" case, never a
+## crash.
+func remove(item_id: String) -> bool:
+	if not _records.has(item_id):
+		return false
+	var record: _FurnitureRecord = _records[item_id]
+	for cell: Vector3i in record.cells:
+		_cell_index.erase(cell)
+	_records.erase(item_id)
+	furniture_changed.emit()
+	return true

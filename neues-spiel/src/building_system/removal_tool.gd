@@ -62,7 +62,8 @@
 ##    terrain simply stays exactly as it always was, which IS the correct
 ##    "restored" outcome for a cell that was never actually replaced.
 ## 2. **Built**: delegates entirely to [method
-##    ConstructionTickLoop.create_demolition_order] (Story building-009) -- a
+##    ConstructionTickLoop.create_demolition_order] (Story building-009,
+##    widened to also accept FURNITURE by Story building-017) -- a
 ##    demolition order is created, already released/job-eligible; [param
 ##    cell]'s own [member BlueprintCell.state] and [member BuildProject.cells]
 ##    membership are left COMPLETELY untouched (AC65: "not removed
@@ -70,12 +71,16 @@
 ##    calls [method VoxelWorldGrid.set_cell]/[method VoxelWorldGrid.bulk_write]/
 ##    [method VoxelWorldGrid.clear_cell] anywhere in its own code (grep-guard,
 ##    mirrors every other Building System module's "the write happens
-##    elsewhere" precedent). A FURNITURE-category Built cell is refused by
-##    [method create_demolition_order] ITSELF (Story 017 is the future caller
-##    that extends demolition to furniture, [TR-building-system-127]) -- this
-##    class performs no furniture carve-out of its own and no instant-removal
-##    fallback for a rejected furniture cell; it only forwards whatever that
-##    method decides. A cell that already carries a demolition order ([member
+##    elsewhere" precedent). A FURNITURE-category Built cell is now ALSO
+##    accepted by [method create_demolition_order] (Story building-017, this
+##    revision, [TR-building-system-127]) -- this class performs no furniture
+##    carve-out of its own, before or after that story: it only forwards
+##    whatever that method decides, exactly as it always has. The atomic
+##    multi-cell-footprint mechanics (Rule 16: "never a per-cell partial
+##    teardown") live entirely inside [ConstructionTickLoop]/
+##    [FurnitureFootprintGroup] -- this class still only ever resolves and
+##    forwards ONE targeted [BlueprintCell] at a time, regardless of
+##    category. A cell that already carries a demolition order ([member
 ##    BlueprintCell.is_demolition_queued]) is likewise a no-op via that SAME
 ##    method's own Edge 17 duplicate guard -- re-verified at this seam, not
 ##    reimplemented.

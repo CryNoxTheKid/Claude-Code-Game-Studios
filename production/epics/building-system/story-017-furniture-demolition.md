@@ -1,7 +1,7 @@
 # Story 017: Furniture demolition — job-gated, atomic multi-cell
 
 > **Epic**: Building System
-> **Status**: Ready
+> **Status: Complete (2026-07-27 — 1448/1448 suite green 0 orphans, parent-verified; completes the demolition chain 009->012->015->017 and makes the Sprint-10 crown's claim revocation non-vacuous)
 > **Layer**: Core
 > **Type**: Integration
 > **Estimate**: 1 day

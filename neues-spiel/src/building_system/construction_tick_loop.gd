@@ -292,6 +292,71 @@
 ##    codebase) consumes to remove the cell from its owning [BuildProject]
 ##    and [BuildProjectRegistry]'s reverse index.
 ##
+## **Story building-017 (this revision, ADR-0016 primary, GDD Rule 14j/16/17b,
+## [TR-building-system-127]/[TR-building-system-064]): furniture demolition --
+## job-gated and uniform with block demolition, reusing [method
+## create_demolition_order]/[method claim_demolition_job] verbatim, atomic
+## across a multi-cell footprint.** Four differences from the BLOCK path
+## above, everything else identical:
+## 1. **Category guard widened, not removed.** [method create_demolition_order]
+##    now accepts [constant BlueprintCell.Category.FURNITURE] alongside
+##    [constant BlueprintCell.Category.BLOCK] (previously refused outright --
+##    see the "Story building-009" block above, point 3, which named THIS
+##    story as the future caller). A [constant BlueprintCell.Category.FURNITURE]
+##    cell whose [member BlueprintCell.footprint_group] is set additionally
+##    sets [member BlueprintCell.is_demolition_queued] on EVERY sibling cell
+##    of the group in the SAME call (Edge 17's duplicate guard is checked
+##    across the WHOLE group first -- any sibling already queued refuses the
+##    whole call, never queues "the other half" on top of an existing order)
+##    -- "the order exists" now means "the whole entity's order exists,"
+##    never a partial per-cell flag set.
+## 2. **Atomic ONE job per entity, not per cell** ([TR-building-system-127]:
+##    "demolishes atomically as ONE job -- never per-cell"). Unlike
+##    construction (Story building-016 above), where a footprint's siblings
+##    are each their OWN independent job and only the FINAL completion's
+##    registry write is atomic, a furniture DEMOLITION job is tracked as
+##    exactly ONE [_ActiveJob] under whichever cell [method
+##    claim_demolition_job] was called with -- [member
+##    FurnitureFootprintGroup.is_demolition_active] (Story 017 addition to
+##    that class) is the group-level guard preventing a second, concurrent
+##    claim against a DIFFERENT sibling cell of the SAME group (a per-cell
+##    [member _active_jobs] key lookup alone cannot catch this, since only
+##    ONE cell address is ever actually keyed for the whole entity).
+## 3. **Never a [VoxelWorldGrid] write, on EITHER side of demolition.** Exactly
+##    like a FURNITURE construction completion (see the "Story building-028"
+##    block above), a completing FURNITURE demolition job is EXCLUDED from
+##    [param changes] in [method _on_tick] -- furniture never entered the
+##    grid when it was built, so there is nothing to clear when it is torn
+##    down. Instead, [method _complete_jobs] routes the completion to
+##    [member furniture_registry]'s own new [method FurnitureRegistry.remove]
+##    call (resolved via [method FurnitureRegistry.get_occupant_at] against
+##    whichever cell the job was claimed under -- every footprint cell shares
+##    the SAME occupant id, so any one of them resolves the whole entity) --
+##    the atomic counterpart to [method FurnitureRegistry.place]. Every cell
+##    of the group (not just the claimed one) is cleared of [member
+##    BlueprintCell.is_demolition_queued] and named in [signal
+##    demolition_completed] -- mirroring [signal construction_completed]'s
+##    own "names every cell regardless of category" precedent exactly (see
+##    the "Story building-009" block above, point 5).
+## 4. **Deferred revocation seam** (GDD Rule 17b, [TR-building-system-064]):
+##    [member _furniture_demolished_callback] -- an OPTIONAL
+##    `Callable(definition_id: StringName, cells: Array[Vector3i]) -> void`,
+##    invoked exactly once per completed FURNITURE demolition, strictly AFTER
+##    [method FurnitureRegistry.remove] -- mirrors [member
+##    _occupancy_predicate]/[member _seal_prevention_predicate]'s own
+##    "optional, default-invalid Callable seam" precedent exactly. This is
+##    deliberately NOT a direct call into `FurnitureBedProvider`
+##    (`src/villager_ai/`) -- this class stays Villager-AI-agnostic by
+##    construction, mirroring every other seam in this file; a future caller
+##    (or, today, a test standing in for one -- this codebase's established
+##    "seam lands now, a later story assembles the real wiring" idiom) is
+##    responsible for translating "this furniture item was demolished" into
+##    `FurnitureBedProvider.furniture_revoked` if -- and only if -- it was
+##    owned. The event structurally cannot fire before THIS method's own
+##    completion write (GDD Rule 17b: "the event now fires on demolition-
+##    order completion, not at order creation") -- there is no earlier call
+##    site in this class that could invoke it.
+##
 ## Injected-tier module (ADR-0001): [member voxel_world]/[member config] are
 ## wired via a scene file's Inspector in production (once a future
 ## scene-assembly story attaches this node), or assigned directly in a
@@ -474,6 +539,17 @@ var _occupancy_predicate: Callable = Callable()
 ## own doc comment for why that reentrant release, mid-iteration, is safe.
 var _seal_prevention_predicate: Callable = Callable()
 
+## Story building-017 addition (GDD Rule 17b, [TR-building-system-064]) --
+## optional `Callable(definition_id: StringName, cells: Array[Vector3i]) ->
+## void` seam, invoked exactly once per completed FURNITURE demolition job,
+## strictly AFTER [method FurnitureRegistry.remove] -- see class doc
+## comment's "Story building-017" block, point 4, for why this stays
+## Villager-AI-agnostic rather than calling `FurnitureBedProvider` directly.
+## Default `Callable()` (invalid) is a silent no-op -- mirrors [member
+## _occupancy_predicate]/[member _seal_prevention_predicate]'s own "invalid
+## by default" precedent exactly.
+var _furniture_demolished_callback: Callable = Callable()
+
 
 ## Explicitly callable wiring/validation entry point (ADR-0001). Asserts
 ## [member voxel_world] and a [member time_tick_system]-shaped dependency
@@ -594,10 +670,28 @@ func is_job_active(cell: Vector3i) -> bool:
 func create_demolition_order(blueprint_cell: BlueprintCell) -> bool:
 	if blueprint_cell.state != BlueprintCell.MicroState.BUILT:
 		return false
-	if blueprint_cell.category != BlueprintCell.Category.BLOCK:
+	if (
+		blueprint_cell.category != BlueprintCell.Category.BLOCK
+		and blueprint_cell.category != BlueprintCell.Category.FURNITURE
+	):
 		return false
 	if blueprint_cell.is_demolition_queued:
 		return false
+	# Story building-017 (Rule 16/[TR-building-system-127], class doc
+	# comment's "Story building-017" block point 1) -- a multi-cell furniture
+	# footprint's order covers the WHOLE entity atomically: Edge 17's
+	# duplicate guard is checked across every sibling BEFORE any flag is set
+	# (a partially-already-queued group refuses the whole call, never queues
+	# "the other half" on top of an existing order), then every sibling is
+	# flagged in the SAME call.
+	var group: FurnitureFootprintGroup = blueprint_cell.footprint_group
+	if group != null:
+		for sibling: BlueprintCell in group.cells:
+			if sibling.is_demolition_queued:
+				return false
+		for sibling: BlueprintCell in group.cells:
+			sibling.is_demolition_queued = true
+		return true
 	blueprint_cell.is_demolition_queued = true
 	return true
 
@@ -622,6 +716,18 @@ func claim_demolition_job(blueprint_cell: BlueprintCell, villager_id: int) -> bo
 		return false
 	if _active_jobs.has(blueprint_cell.cell):
 		return false
+	# Story building-017 (Rule 16/[TR-building-system-127], class doc
+	# comment's "Story building-017" block point 2) -- a multi-cell
+	# footprint's demolition is ONE job for the whole entity: the group-level
+	# [member FurnitureFootprintGroup.is_demolition_active] flag catches a
+	# second claim attempt against a DIFFERENT sibling cell of the SAME
+	# group, which the per-cell [member _active_jobs] key alone cannot see
+	# (only the cell passed to THIS call is ever keyed).
+	var group: FurnitureFootprintGroup = blueprint_cell.footprint_group
+	if group != null and blueprint_cell.category == BlueprintCell.Category.FURNITURE:
+		if group.is_demolition_active:
+			return false
+		group.is_demolition_active = true
 	_active_jobs[blueprint_cell.cell] = _ActiveJob.new(blueprint_cell, villager_id, JobType.DEMOLISH, true)
 	return true
 
@@ -644,6 +750,16 @@ func set_occupancy_predicate(predicate: Callable) -> void:
 ## behavior.
 func set_seal_prevention_predicate(predicate: Callable) -> void:
 	_seal_prevention_predicate = predicate
+
+
+## Wires the furniture-demolition notification seam (Story building-017,
+## [member _furniture_demolished_callback]'s own doc comment) -- a future
+## Villager-AI-side bridge (or a test standing in for one) supplies
+## `Callable(definition_id: StringName, cells: Array[Vector3i]) -> void`.
+## Passing an invalid [Callable] (the default, or an explicit `Callable()`)
+## restores the "no notification" no-op behavior.
+func set_furniture_demolished_callback(callback: Callable) -> void:
+	_furniture_demolished_callback = callback
 
 
 ## Ticks credited so far toward [param cell]'s active job, or `0` if it has
@@ -746,14 +862,23 @@ func _on_tick() -> void:
 				if not allow_write:
 					continue
 			if job.is_demolition:
-				# Story building-009 (Rule 14j/14l, TR-115) -- always included:
-				# the restore_value snapshot if this was a floor-excavation
-				# entry, otherwise an explicit empty cell ("the clear occurs").
-				changes[cell] = (
-					job.blueprint_cell.restore_value
-					if job.blueprint_cell.restore_value != null
-					else CellContents.empty()
-				)
+				# Story building-017 (BV-1 ruling extended to removal, class
+				# doc comment's "Story building-017" block point 3) -- a
+				# FURNITURE-category demolition NEVER touches VoxelWorldGrid,
+				# exactly like a furniture construction completion: furniture
+				# was never written into the grid in the first place, so
+				# there is nothing to clear. Routed to [member
+				# furniture_registry] instead, in [method _complete_jobs].
+				if job.blueprint_cell.category != BlueprintCell.Category.FURNITURE:
+					# Story building-009 (Rule 14j/14l, TR-115) -- always
+					# included for a BLOCK cell: the restore_value snapshot
+					# if this was a floor-excavation entry, otherwise an
+					# explicit empty cell ("the clear occurs").
+					changes[cell] = (
+						job.blueprint_cell.restore_value
+						if job.blueprint_cell.restore_value != null
+						else CellContents.empty()
+					)
 			# Story building-028 (ADR-0016 BV-1 ruling) -- a FURNITURE-category
 			# construction completion is EXCLUDED from the bulk_write payload
 			# entirely; it is routed to [member furniture_registry] instead, in
@@ -806,8 +931,20 @@ func _complete_jobs(changes: Dictionary[Vector3i, CellContents], completed_jobs:
 	for job: _ActiveJob in completed_jobs:
 		_active_jobs.erase(job.blueprint_cell.cell)
 		if job.is_demolition:
-			job.blueprint_cell.is_demolition_queued = false
-			completed_demolition_cells.append(job.blueprint_cell.cell)
+			# Story building-017 (Rule 16/[TR-building-system-127]) -- a
+			# multi-cell furniture footprint clears EVERY sibling together,
+			# atomically, never just the one cell the job happened to be
+			# keyed under (class doc comment's "Story building-017" block,
+			# point 2/3).
+			var group: FurnitureFootprintGroup = job.blueprint_cell.footprint_group
+			if group != null and job.blueprint_cell.category == BlueprintCell.Category.FURNITURE:
+				group.is_demolition_active = false
+				for sibling: BlueprintCell in group.cells:
+					sibling.is_demolition_queued = false
+					completed_demolition_cells.append(sibling.cell)
+			else:
+				job.blueprint_cell.is_demolition_queued = false
+				completed_demolition_cells.append(job.blueprint_cell.cell)
 		else:
 			job.blueprint_cell.state = BlueprintCell.MicroState.BUILT
 			completed_construction_cells.append(job.blueprint_cell.cell)
@@ -852,6 +989,37 @@ func _complete_jobs(changes: Dictionary[Vector3i, CellContents], completed_jobs:
 		for sibling: BlueprintCell in group.cells:
 			footprint_cells.append(sibling.cell)
 		furniture_registry.place(job.blueprint_cell.furniture_definition_id, footprint_cells)
+	# Third pass (Story building-017): route furniture DEMOLITION
+	# completions to [member furniture_registry]'s own [method
+	# FurnitureRegistry.remove] -- the atomic counterpart to [method
+	# FurnitureRegistry.place] above. A multi-cell footprint's demolition is
+	# already ONE job (see class doc comment's "Story building-017" block,
+	# point 2), so this never needs an [member
+	# FurnitureFootprintGroup.is_registered]-style dedup guard the way
+	# construction's per-cell-independent jobs do -- [param completed_jobs]
+	# contains at most one entry for the whole entity.
+	for job: _ActiveJob in completed_jobs:
+		if not job.is_demolition or job.blueprint_cell.category != BlueprintCell.Category.FURNITURE:
+			continue
+		if furniture_registry == null:
+			continue
+		var definition_id: StringName = job.blueprint_cell.furniture_definition_id
+		var footprint_cells: Array[Vector3i] = []
+		var group: FurnitureFootprintGroup = job.blueprint_cell.footprint_group
+		if group != null:
+			for sibling: BlueprintCell in group.cells:
+				footprint_cells.append(sibling.cell)
+		else:
+			footprint_cells.append(job.blueprint_cell.cell)
+		var item_id: String = furniture_registry.get_occupant_at(job.blueprint_cell.cell)
+		if item_id != "":
+			furniture_registry.remove(item_id)
+		# Story building-017 (GDD Rule 17b, [TR-building-system-064]) -- the
+		# deferred revocation seam fires HERE, strictly after the registry
+		# removal above, never earlier (see class doc comment's "Story
+		# building-017" block, point 4).
+		if _furniture_demolished_callback.is_valid():
+			_furniture_demolished_callback.call(definition_id, footprint_cells)
 	if not completed_construction_cells.is_empty():
 		construction_completed.emit(completed_construction_cells)
 	if not completed_demolition_cells.is_empty():

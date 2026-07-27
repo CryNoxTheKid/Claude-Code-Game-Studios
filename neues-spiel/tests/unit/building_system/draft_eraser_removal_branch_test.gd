@@ -27,9 +27,13 @@
 ##    erase -- the raw grid was never written for a not-yet-Built cell, so
 ##    "restoring restore_value on erase" holds by construction.
 ## 7. An untracked cell (no owning project) is a no-op.
-## 8. Scope boundary (own QA Test Cases): a Built FURNITURE cell is NOT
-##    instantly removed by this seam -- it is refused by Story 009's own
-##    category guard (Story 017's future scope), never carved out here.
+## 8. Scope boundary (own QA Test Cases): a Built FURNITURE cell routes to
+##    Story 009/017's demolition-order contract exactly like a BLOCK cell --
+##    never carved out or instantly removed here. (Story building-017,
+##    landed after this story, widened Story 009's own category guard to
+##    accept FURNITURE; this class needed no change of its own, since it
+##    already only ever forwards to [method
+##    ConstructionTickLoop.create_demolition_order] regardless of category.)
 class_name DraftEraserRemovalBranchTest
 extends GdUnitTestSuite
 
@@ -287,26 +291,37 @@ func test_remove_cell_on_an_untracked_cell_is_a_no_op() -> void:
 # Scope boundary — Built furniture is never instantly removed here (Story 017)
 # ---------------------------------------------------------------------------
 
-func test_remove_cell_on_built_furniture_cell_is_refused_not_instantly_removed() -> void:
-	# Arrange — a Built FURNITURE cell (Story 017's own future scope; Story
-	# 009's create_demolition_order already refuses this category outright).
+func test_remove_cell_on_built_furniture_cell_creates_a_demolition_order_story_017() -> void:
+	# Story building-017 (landed after this story) widened Story 009's own
+	# create_demolition_order to accept FURNITURE, reusing this SAME
+	# mechanism -- this class needed no change of its own (it only ever
+	# forwards). See `furniture_demolition_test.gd` for the full atomic
+	# multi-cell-footprint / deferred-revocation proof; this suite keeps only
+	# the direct regression that THIS seam's own delegation still holds for
+	# furniture now that the category guard downstream has changed. Furniture
+	# never enters VoxelWorldGrid (BV-1), so -- unlike the BLOCK fixture
+	# above -- nothing is ever written into the grid for this cell.
 	var registry: BuildProjectRegistry = _new_registry()
 	var grid: VoxelWorldGrid = _new_grid()
 	var tick_loop: ConstructionTickLoop = _new_tick_loop(grid)
 	var tool := RemovalTool.new(registry, tick_loop)
 	var cell := Vector3i(7, 0, 7)
 	var contents := CellContents.new(5, 0)
-	grid.set_cell(cell, contents)
-	registry.assign_cells([_built_cell(cell, contents, BlueprintCell.Category.FURNITURE, &"bed")])
+	var result: Array[BuildProject] = registry.assign_cells(
+		[_built_cell(cell, contents, BlueprintCell.Category.FURNITURE, &"bed")]
+	)
+	var project: BuildProject = result[0]
 
 	# Act
 	var removed: bool = tool.remove_cell(cell)
 
-	# Assert — refused (not this story's scope), and critically NOT instantly
-	# removed: the grid still shows the furniture cell's contents, unchanged.
-	assert_bool(removed).is_false()
-	assert_bool(grid.get_cell(cell).is_empty()).is_false()
-	assert_int(grid.get_cell(cell).block_type_id).is_equal(5)
+	# Assert — a demolition order now exists (not instant, not refused); the
+	# blueprint cell's own state/project membership are untouched (mirrors the
+	# BLOCK case above -- AC65's "not removed instantly" applies uniformly).
+	assert_bool(removed).is_true()
+	assert_bool(project.cells[cell].is_demolition_queued).is_true()
+	assert_int(project.cells[cell].state).is_equal(BlueprintCell.MicroState.BUILT)
+	assert_bool(project.has_cell(cell)).is_true()
 
 
 # ---------------------------------------------------------------------------
