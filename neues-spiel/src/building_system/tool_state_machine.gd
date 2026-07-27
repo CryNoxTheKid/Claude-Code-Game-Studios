@@ -63,6 +63,24 @@ enum State {
 	SUSPENDED,
 }
 
+## Story scene-007 addition (Open Decision 2, producer recommendation (a)):
+## the armed-tool id vocabulary [member _armed_tool_id] already stores as an
+## opaque [StringName] -- named here, ONCE, so scene-007's armed-tool ->
+## resolver router (and any future Building UI caller) shares one canonical
+## spelling instead of re-inventing bare literals per call site. Before this
+## story these ids existed ONLY as bare string literals inside test files
+## (`gameworld_e2e_loop_test.gd`, `block_tool_test.gd`,
+## `build_editor_mode_test.gd`, `commit_pipeline_test.gd`) -- this is their
+## first production-code owner. This class owns [member _armed_tool_id]'s
+## vocabulary already, which is why the ids live here rather than on
+## [BuildEditorMode] (Option (b), not chosen) or as bare literals in
+## `valley.gd` (Option (c), not chosen).
+const TOOL_ID_WALL: StringName = &"wall"
+const TOOL_ID_FLOOR: StringName = &"floor"
+const TOOL_ID_ROOF: StringName = &"roof"
+const TOOL_ID_BLOCK: StringName = &"block"
+const TOOL_ID_FURNITURE: StringName = &"furniture"
+
 ## Fires whenever [enum State] actually changes value (never a redundant
 ## re-fire for a same-enum-value call, e.g. re-arming a different tool while
 ## already [constant State.TOOL_ARMED] -- see [signal tool_armed] for that

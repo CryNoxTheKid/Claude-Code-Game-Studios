@@ -1,7 +1,7 @@
 # Story 007: Build-tool & project-lifecycle hosting in the Valley scene — the player can actually build
 
 > **Epic**: Scene / World Management
-> **Status**: Ready
+> **Status: Complete (2026-07-27 — 1461/1461 suite green 0 orphans, parent-verified; Sprint 11 gate G2 — the shipped game now hosts the whole build chain)
 > **Layer**: Foundation (boot sequencing / scene topology) → drives Core (Building System interaction tier)
 > **Type**: Integration
 > **Estimate**: **2.0 days** *(relative-complexity anchor, not a calendar prediction — sprint-09.md sizing convention)*. ⚑ **The sprint plan anchored this at 1.0; authoring raised it to 2.0 — that discovery is exactly what gate G2 exists for.** See **Sizing and the descope ladder** below; the ladder is pre-declared so a mid-sprint trim is a choice, not an accident.

@@ -69,12 +69,33 @@
 ##
 ## Unlike [WallTool] (an injected-tier module per ADR-0001 with a `config`
 ## dependency to wire/validate in `setup()`), this class has no dependency of
-## any kind -- there is nothing to wire and nothing to validate, so no
-## `setup()`/`is_set_up()` gate exists here, mirroring [FloorTool]/[RoofTool]'s
-## identical no-setup precedent. [method resolve_cell_set] is callable
-## immediately after construction.
+## any kind -- there is nothing to wire and nothing to validate. [method
+## resolve_cell_set] is callable immediately after construction.
+##
+## Story scene-007 addition: a trivial [method setup]/[method is_set_up] pair
+## is added SOLELY so [GameWorld]._setup_injected_tier()'s own
+## `module.has_method(&"setup")` boot-gate contract (ADR-0005) can host this
+## tool as a real [Valley]-reported injected-tier module (see [FloorTool]/
+## [RoofTool]'s own identical scene-007 addition/rationale) -- it validates/
+## asserts nothing.
 class_name BlockTool
 extends Node
+
+## True once [method setup] has completed at least once (Story scene-007
+## addition).
+var _is_set_up: bool = false
+
+
+## Story scene-007 addition -- a trivial wiring entry point with nothing to
+## assert. Exists only so this class can be hosted as a real injected-tier
+## module.
+func setup() -> void:
+	_is_set_up = true
+
+
+## Returns whether [method setup] has completed (Story scene-007 addition).
+func is_set_up() -> bool:
+	return _is_set_up
 
 
 ## The [method CommitPipeline.set_cell_set_resolver]-compatible bound entry

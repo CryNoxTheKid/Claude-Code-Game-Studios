@@ -181,7 +181,15 @@ func test_hosted_building_system_and_villager_ai_modules_are_children_of_valley(
 	# `needs_provider` seam (12 -> 13). Story presentation-003 (Villager body
 	# view, hit proxy & slice hook) adds a FOURTEENTH -- the hosted
 	# [VillagerBodyPresenter], concurrent with needs-mood-010 in this same
-	# sprint; updated consciously here, not incidentally (13 -> 14).
+	# sprint; updated consciously here, not incidentally (13 -> 14). Story
+	# scene-007 (Build-tool & project-lifecycle hosting) adds EIGHT more --
+	# [BuildEditorMode], [WallTool], [FloorTool], [RoofTool], [BlockTool],
+	# [FurnitureTool], [GhostPreview], [UndoRedoStack] -- the entire
+	# build-interaction tier that was, before this story, in no scene at all
+	# (14 -> 22). [BuildProjectRegistry]/[ConstructionJobQueue]/[RemovalTool]/
+	# [PlanOnlyUndoGate]/[FurnitureRegistry]/[FurnitureBedProvider] are
+	# `RefCounted` collaborators, not scene children -- they do not affect
+	# this count.
 	var world: GameWorld = auto_free(GameWorld.new())
 	var database: MockResourceItemDatabase = auto_free(MockResourceItemDatabase.new())
 	database.configure_ready_immediately()
@@ -193,7 +201,7 @@ func test_hosted_building_system_and_villager_ai_modules_are_children_of_valley(
 
 	# Assert
 	var valley: Valley = world.get_valley() as Valley
-	assert_int(valley.get_child_count()).is_equal(14)
+	assert_int(valley.get_child_count()).is_equal(22)
 	assert_object(valley.get_voxel_world_mesher()).is_not_null()
 	assert_object(valley.get_voxel_world_mesh_streamer()).is_not_null()
 	assert_object(valley.get_tool_state_machine()).is_not_null()
@@ -206,6 +214,24 @@ func test_hosted_building_system_and_villager_ai_modules_are_children_of_valley(
 	assert_object(valley.get_needs_mood()).is_not_null()
 	assert_object(valley.get_villager_ai().needs_provider).is_same(valley.get_needs_mood())
 	assert_object(valley.get_villager_body_presenter()).is_not_null()
+	# Story scene-007's own new hosted children (presence only -- the
+	# non-vacuous proof of what they actually DO lives in
+	# build_tool_hosting_boot_test.gd, not here; see that file's own
+	# AC-PROBE-IS-NON-VACUOUS discipline).
+	assert_object(valley.get_build_editor_mode()).is_not_null()
+	assert_object(valley.get_wall_tool()).is_not_null()
+	assert_object(valley.get_floor_tool()).is_not_null()
+	assert_object(valley.get_roof_tool()).is_not_null()
+	assert_object(valley.get_block_tool()).is_not_null()
+	assert_object(valley.get_furniture_tool()).is_not_null()
+	assert_object(valley.get_ghost_preview()).is_not_null()
+	assert_object(valley.get_undo_redo_stack()).is_not_null()
+	assert_object(valley.get_build_project_registry()).is_not_null()
+	assert_object(valley.get_construction_job_queue()).is_not_null()
+	assert_object(valley.get_removal_tool()).is_not_null()
+	assert_object(valley.get_plan_only_undo_gate()).is_not_null()
+	assert_object(valley.get_furniture_registry()).is_not_null()
+	assert_object(valley.get_furniture_bed_provider()).is_not_null()
 
 
 # ---------------------------------------------------------------------------

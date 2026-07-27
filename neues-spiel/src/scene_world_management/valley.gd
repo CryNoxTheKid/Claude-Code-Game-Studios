@@ -205,6 +205,131 @@
 ## hosted child's `setup()` itself, per the class doc comment's opening
 ## hosting-vs-DI distinction).
 ##
+## Story scene-007 (Build-tool & project-lifecycle hosting, ADR-0005 + ADR-0001
+## primary, ADR-0016 primary for the lifecycle tier's own semantics) closes
+## the fourth ship-green-and-uncalled occurrence: the ENTIRE build-interaction
+## tier -- [BuildEditorMode], the five placement tools ([WallTool]/[FloorTool]/
+## [RoofTool]/[BlockTool]/[FurnitureTool]), [GhostPreview], [UndoRedoStack] --
+## was, before this story, a set of already-green, already-tested `Node`s in
+## no scene, and [BuildProjectRegistry]/[ConstructionJobQueue]/
+## [PlanOnlyUndoGate]/[RemovalTool]/[FurnitureRegistry] were `RefCounted`
+## collaborators constructed nowhere in `src/`. Hosted here on the SAME
+## precedent every module above already establishes: each `Node`'s own config
+## `Resource` (if any) is Inspector-wired on `Valley.tscn`; Node-typed
+## cross-references between hosted siblings are code-assigned in [method
+## _wire_hosted_modules] below; the `RefCounted` collaborators are constructed
+## in [method _wire_build_project_lifecycle], mirroring [method
+## _wire_villager_population]'s own established construction-site precedent.
+## This class still never calls a hosted child's `setup()` itself (the class
+## doc comment's opening hosting-vs-DI distinction, unchanged) -- [WallTool],
+## [BuildEditorMode], [FurnitureTool], [GhostPreview], and [UndoRedoStack] are
+## the five NEW `setup()`-bearing modules appended to [method
+## get_injected_tier_modules] below; [FloorTool]/[RoofTool]/[BlockTool] gained
+## a trivial `setup()`/`is_set_up()` pair of their own (this story's addition,
+## see each class's own doc comment) for the SAME reason.
+##
+## **The armed-tool -> resolver router** (the one genuinely new piece of
+## code this story adds, per its own Implementation Notes: "small"): [method
+## _on_tool_armed] re-points [CommitPipeline]'s single [method
+## CommitPipeline.set_cell_set_resolver] / [method
+## CommitPipeline.set_terrain_replace_resolver] / [method
+## CommitPipeline.set_furniture_support_predicate] slots on every [signal
+## ToolStateMachine.tool_armed] emission, keyed by the tool-id vocabulary
+## [ToolStateMachine] now owns ([constant ToolStateMachine.TOOL_ID_WALL] etc.,
+## this story's own Open Decision 2 resolution).
+##
+## **Correction to this story's own Implementation Notes, found during this
+## story's own development (recorded in the commit body) -- a real bug, not a
+## hypothetical one.** The Implementation Notes read as "wire
+## `set_furniture_support_predicate` once, unconditionally." That wiring was
+## tried first and BROKE every non-furniture multi-cell-tall commit: a real,
+## hosted 3-cell [WallTool] column was rejected with [constant
+## CommitPipeline.RejectReason.FURNITURE_UNSUPPORTED], because [method
+## CommitPipeline._all_cells_supported] is NOT category-gated -- it runs
+## against EVERY commit, not only furniture ones -- and a column's own upper
+## cells have no support directly below them until the commit itself lands
+## (a chicken-and-egg: the predicate runs BEFORE any [BlueprintCell] of the
+## SAME commit exists to count as support for the cell above it). The fix,
+## proven by this story's own hosted-boot test: [method
+## CommitPipeline.set_furniture_support_predicate] is tool-swapped exactly
+## like the other two resolvers (see [member _furniture_support_predicates]),
+## not wired once.
+##
+## **The `blueprint_cells_created` chain** (Sub-scope B, the C1 demolition
+## chain's production caller): [method _on_blueprint_cells_created], the SOLE
+## listener on [signal CommitPipeline.blueprint_cells_created], performs BOTH
+## of this story's remaining seam connections in one place: records the whole
+## commit as ONE [UndoRedoStack] command (Core Rule 17, Sub-scope C) THEN
+## routes the same cells into [method BuildProjectRegistry.assign_cells]
+## (Sub-scope B) -- a freshly-created OR newly-merged-into project is
+## registered into [ConstructionJobQueue] via [method
+## ConstructionJobQueue.add_project] exactly once per project id ([member
+## _job_queue_registered_project_ids] guards a repeat visit on a later merge
+## from double-registering the SAME project instance, since neither
+## [BuildProjectRegistry] nor [ConstructionJobQueue] carries that guard
+## itself -- this class is the seam-gluing layer that adds it, not a change to
+## either landed class).
+##
+## **`BuildingSystemWriteTag` sharing** (Sub-scope C): [method
+## _wire_hosted_modules] constructs ONE shared instance and assigns it to both
+## [member UndoRedoStack.write_tag] and [member ConstructionTickLoop.write_tag]
+## BEFORE either module's `setup()` ever runs (both lazily default-construct
+## their own if left unassigned) -- so [ConstructionTickLoop]'s own batched
+## completion write is recognized by [UndoRedoStack]'s undo-invalidation
+## listener as self-originated, never silently invalidating the player's undo
+## history (AC-UNDO-IS-PLAN-ONLY-THROUGH-THE-HOSTED-STACK).
+##
+## **`game_world` back-references**: [member ToolStateMachine.game_world] and
+## [member UndoRedoStack.game_world] are both nullable `@export`s that no-op
+## when unwired -- and both were `null` in production before this story (a
+## pre-existing silent gap this story fixes, named explicitly in its own
+## Implementation Notes rather than left unmentioned). This class reaches
+## [GameWorld] through [method Node.get_parent] (cast, `null`-safe) --
+## `GameWorld._attach_valley` always calls `add_child(_valley)` BEFORE this
+## instance's own [method _ready] can run (Godot's bottom-up `_ready()`
+## ordering means the parent link is already established the instant this
+## method's body executes), so the cast resolves correctly in every real boot;
+## a bare, test-constructed `Valley` added under a non-`GameWorld` parent (this
+## project's own established direct-construction test convention) simply casts
+## to `null`, an already-handled no-op for both consumers.
+##
+## **`FurnitureRegistry`/`FurnitureBedProvider`** (Open Decision 3, resolved
+## (a) per this story's own producer recommendation): [method
+## _wire_build_project_lifecycle] constructs both, wires
+## [member ConstructionTickLoop.furniture_registry], and assigns the provider
+## to every hosted [VillagerAi]'s `bed_provider` seam (both [member
+## _villager_ai] and every [method spawn_starting_roster] member) -- the
+## moment a completed bed becomes claimable by a real villager in the shipped
+## game. **Honest, named deviation, not silently absorbed**: [FurnitureBedProvider]
+## requires a `BuildValidation` collaborator for its own [method
+## FurnitureBedProvider.is_bed_sheltered] query; `BuildValidation` is ITSELF a
+## fifth uncalled-in-`src/` injected-tier module (found while reading for this
+## story, exactly the same defect class as every module this story DOES host)
+## -- hosting it is a materially different, unscoped change (a whole
+## additional Foundation/Core module with its own config/signal-subscription
+## surface) this story does not make. [method _wire_build_project_lifecycle]
+## therefore passes `null` for that collaborator -- [FurnitureBedProvider]'s
+## own documented nil-safe fallback means `is_bed_sheltered` conservatively
+## reads `false` (never inflated) rather than crashing, and bed CLAIMING
+## ([method FurnitureBedProvider.get_unowned_bed_cells]/[method
+## FurnitureBedProvider.claim_bed], the literal "no villager can ever claim a
+## bed" gap this story closes) is fully functional regardless -- only the
+## shelter-quality bonus on top of a claimed bed remains a named, tracked
+## follow-on gap ([VillagerAi]'s own `_is_bed_sheltered` doc comment already
+## documents the conservative-`false`-is-safe fallback this exercises, unlike
+## a NEW invented behavior).
+##
+## **Also found while reading, also explicitly NOT pulled into this story**:
+## [VillagerOnSiteGate]/[VillagerSealPreventionGate] (`src/villager_ai/`) are
+## likewise constructed nowhere in `src/` -- Villager AI's own occupancy-defer/
+## seal-prevention wiring for [ConstructionJobQueue]/[ConstructionTickLoop],
+## a DIFFERENT epic's gap (villager-ai-012/016's own documented "wires this for
+## REAL... for the first time" language) than "build tool & project-lifecycle
+## hosting." Both predicates default permissively (never occupied / always
+## allow) when unwired, so leaving them unwired changes no existing behavior
+## and blocks nothing this story's own ACs require -- named here so it is not
+## silently mistaken for closed.
+##
 ## Story scene-006 (Villager need seeding in the boot sequence, ADR-0005
 ## primary) closes `needs-mood-006`'s own "uncalled in `src/`" gap: [method
 ## NeedsMood.initialize_villager] is now driven from exactly two call sites,
@@ -338,6 +463,115 @@ var _villager_unstuck_telemetry: VillagerUnstuckTelemetry = null
 ## _wire_hosted_modules] to [member _villager_roster_provider] below.
 @onready var _villager_body_presenter: VillagerBodyPresenter = $VillagerBodyPresenter
 
+## Hosted Building System outer Build/Editor Mode gate instance (Story
+## scene-007; `building-system` epic, story building-001). Structural child,
+## wraps [member _tool_state_machine] -- see class doc comment's own Story
+## scene-007 paragraph.
+@onready var _build_editor_mode: BuildEditorMode = $BuildEditorMode
+
+## Hosted Building System wall tool instance (Story scene-007; `building-system`
+## epic, story building-024). Structural child -- [member WallTool.config] is
+## Inspector-assigned directly on `Valley.tscn` from the already-existing
+## `wall_tool_config.tres` (shipped `wall_height = 3`).
+@onready var _wall_tool: WallTool = $WallTool
+
+## Hosted Building System floor tool instance (Story scene-007; `building-system`
+## epic, stories building-025/012). Structural child -- carries no config of
+## its own (documented deviation, that class's own doc comment).
+@onready var _floor_tool: FloorTool = $FloorTool
+
+## Hosted Building System roof tool instance (Story scene-007; `building-system`
+## epic, story building-026). Structural child -- carries no config/dependency
+## of its own.
+@onready var _roof_tool: RoofTool = $RoofTool
+
+## Hosted Building System block tool instance (Story scene-007; `building-system`
+## epic, story building-027). Structural child -- carries no config/dependency
+## of its own.
+@onready var _block_tool: BlockTool = $BlockTool
+
+## Hosted Building System furniture tool instance (Story scene-007;
+## `building-system` epic, stories building-028/016). Structural child -- its
+## [member FurnitureTool.voxel_world]/[member FurnitureTool.commit_pipeline]
+## Node-typed cross-references are code-assigned in [method
+## _wire_hosted_modules], mirroring every other hosted sibling's precedent.
+@onready var _furniture_tool: FurnitureTool = $FurnitureTool
+
+## Hosted Building System ghost preview renderer instance (Story scene-007;
+## `building-system` epic, story building-023). Structural child --
+## [member GhostPreview.config] is Inspector-assigned directly on
+## `Valley.tscn` from the already-existing `ghost_preview_config.tres`; its
+## three Node-typed cross-references ([member GhostPreview.tool_state_machine]/
+## [member GhostPreview.placement_pick]/[member GhostPreview.commit_pipeline])
+## are code-assigned in [method _wire_hosted_modules].
+@onready var _ghost_preview: GhostPreview = $GhostPreview
+
+## Hosted Building System undo/redo stack instance (Story scene-007;
+## `building-system` epic, stories building-032/033). Structural child --
+## [member UndoRedoStack.config] is Inspector-assigned directly on
+## `Valley.tscn` from the already-existing `undo_redo_stack_config.tres`; its
+## `game_world`/`voxel_world_write_source`/`write_tag` fields are code-assigned
+## in [method _wire_hosted_modules] -- see class doc comment's own Story
+## scene-007 paragraphs.
+@onready var _undo_redo_stack: UndoRedoStack = $UndoRedoStack
+
+## The build-project lifecycle tier's `RefCounted` collaborators (Story
+## scene-007, ADR-0016; Sub-scope B/C) -- constructed in [method
+## _wire_build_project_lifecycle], mirroring [method
+## _wire_villager_population]'s own established "population-wide shared
+## `RefCounted`, code-assigned, no Inspector representation" construction-site
+## precedent. See class doc comment's own Story scene-007 paragraphs for the
+## full wiring rationale.
+var _build_project_registry: BuildProjectRegistry = null
+var _construction_job_queue: ConstructionJobQueue = null
+var _removal_tool: RemovalTool = null
+var _plan_only_undo_gate: PlanOnlyUndoGate = null
+var _furniture_registry: FurnitureRegistry = null
+var _furniture_bed_provider: FurnitureBedProvider = null
+
+## Every project id [method _on_blueprint_cells_created] has already
+## registered into [member _construction_job_queue] -- this class's own
+## guard against double-registering the SAME [BuildProject] instance on a
+## later commit that merges INTO an already-registered project (neither
+## [BuildProjectRegistry] nor [ConstructionJobQueue] carries that guard
+## itself; see class doc comment's own "blueprint_cells_created chain"
+## paragraph).
+var _job_queue_registered_project_ids: Dictionary[int, bool] = {}
+
+## The armed-tool -> [method CommitPipeline.set_cell_set_resolver] router's
+## own lookup table (Story scene-007) -- built once in [method
+## _wire_hosted_modules], keyed by [ToolStateMachine]'s own tool-id
+## vocabulary ([constant ToolStateMachine.TOOL_ID_WALL] etc.). See class doc
+## comment's own "armed-tool -> resolver router" paragraph.
+var _cell_set_resolvers: Dictionary[StringName, Callable] = {}
+
+## The armed-tool -> [method CommitPipeline.set_terrain_replace_resolver]
+## router's own lookup table (Story scene-007, Story building-012's terrain-
+## replace seam) -- only [constant ToolStateMachine.TOOL_ID_FLOOR] has an
+## entry; every other tool-id falls back to an invalid [Callable] (no cell of
+## that commit is terrain-replace eligible), re-pointed on every arm exactly
+## like [member _cell_set_resolvers].
+var _terrain_replace_resolvers: Dictionary[StringName, Callable] = {}
+
+## The armed-tool -> [method CommitPipeline.set_furniture_support_predicate]
+## router's own lookup table (Story scene-007). **Corrected from this story's
+## own Implementation Notes, which read as "wire this once, unconditionally"
+## -- found to be a real bug during this story's own development (recorded in
+## the commit body): [method CommitPipeline._all_cells_supported] is NOT
+## category-gated -- it applies to EVERY commit, not only furniture ones.
+## Wiring [method FurnitureTool.is_cell_supported] unconditionally rejected
+## every non-furniture multi-cell-tall commit (e.g. a 3-cell [WallTool]
+## column) with [constant CommitPipeline.RejectReason.FURNITURE_UNSUPPORTED],
+## because a column's own UPPER cells have no support directly below them
+## until the commit ITSELF lands (chicken-and-egg: the predicate ran BEFORE
+## any [BlueprintCell] of the same commit existed to count as support for the
+## cell above it).** Tool-swapped exactly like [member _cell_set_resolvers]/
+## [member _terrain_replace_resolvers] instead -- only
+## [constant ToolStateMachine.TOOL_ID_FURNITURE] has an entry; every other
+## tool-id falls back to an invalid [Callable] ("no support requirement",
+## [CommitPipeline]'s own documented default for every non-furniture tool).
+var _furniture_support_predicates: Dictionary[StringName, Callable] = {}
+
 ## Small anonymous roster-provider [RefCounted] (Story presentation-003) --
 ## its sole member, `get_villagers() -> Array[VillagerAi]`, delegates to
 ## [method get_villagers] (the SAME "one hard-wired villager + spawned
@@ -370,6 +604,7 @@ var _villager_deciding_scheduler: VillagerDecidingScheduler = null
 
 func _ready() -> void:
 	_wire_hosted_modules()
+	_wire_build_project_lifecycle()
 	_wire_villager_population()
 
 
@@ -393,6 +628,113 @@ func _wire_hosted_modules() -> void:
 	_torch_flicker.light = _ambient_torch_light
 	_villager_roster_provider = _ValleyRosterProvider.new(self)
 	_villager_body_presenter.roster_provider = _villager_roster_provider
+
+	# Story scene-007: the build-tool tier's cross-sibling Node references +
+	# the armed-tool -> resolver router. See class doc comment's own Story
+	# scene-007 paragraphs for the full rationale.
+	var game_world: GameWorld = get_parent() as GameWorld
+	_tool_state_machine.game_world = game_world
+	_build_editor_mode.tool_state_machine = _tool_state_machine
+	_floor_tool.voxel_world = _voxel_world
+	_floor_tool.commit_pipeline = _commit_pipeline
+	_furniture_tool.voxel_world = _voxel_world
+	_furniture_tool.commit_pipeline = _commit_pipeline
+	_ghost_preview.tool_state_machine = _tool_state_machine
+	_ghost_preview.placement_pick = _placement_pick
+	_ghost_preview.commit_pipeline = _commit_pipeline
+	_undo_redo_stack.game_world = game_world
+	_undo_redo_stack.voxel_world_write_source = _voxel_world
+
+	# Sub-scope C: a SHARED BuildingSystemWriteTag, assigned to both modules
+	# BEFORE either module's setup() ever runs (both lazily default-construct
+	# their own if left unassigned) -- see class doc comment's own
+	# "BuildingSystemWriteTag sharing" paragraph.
+	var shared_write_tag := BuildingSystemWriteTag.new()
+	_undo_redo_stack.write_tag = shared_write_tag
+	_construction_tick_loop.write_tag = shared_write_tag
+
+	# The armed-tool -> resolver router's own lookup tables (Implementation
+	# Notes: "the natural shape is a StringName -> Callable map"). Rule 8's
+	# furniture-support check is TOOL-SWAPPED, not wired once unconditionally
+	# -- see class doc comment's own "Correction to this story's own
+	# Implementation Notes" paragraph for the real bug this fixes.
+	_cell_set_resolvers = {
+		ToolStateMachine.TOOL_ID_WALL: _wall_tool.resolve_cell_set,
+		ToolStateMachine.TOOL_ID_FLOOR: _floor_tool.resolve_cell_set,
+		ToolStateMachine.TOOL_ID_ROOF: _roof_tool.resolve_cell_set,
+		ToolStateMachine.TOOL_ID_BLOCK: _block_tool.resolve_cell_set,
+		ToolStateMachine.TOOL_ID_FURNITURE: _furniture_tool.resolve_cell_set,
+	}
+	_furniture_support_predicates = {
+		ToolStateMachine.TOOL_ID_FURNITURE: _furniture_tool.is_cell_supported,
+	}
+	_terrain_replace_resolvers = {
+		ToolStateMachine.TOOL_ID_FLOOR: _floor_tool.resolve_terrain_replace_cells,
+	}
+	_tool_state_machine.tool_armed.connect(_on_tool_armed)
+
+
+## The armed-tool -> resolver router (Story scene-007, AC-TOOL-RESOLVER-IS-LIVE)
+## -- re-points [CommitPipeline]'s single cell-set/terrain-replace resolver
+## slots every time [signal ToolStateMachine.tool_armed] fires, keyed by
+## [param tool_id]. An unrecognized [param tool_id] (or the future furniture
+## id before this story wired it) falls back to an invalid [Callable] for
+## both slots -- [CommitPipeline]'s own documented fallback (the
+## `_default_cell_set` placeholder for cell-set; "no cell of this commit is
+## terrain-replace eligible" for the other) -- never a crash. This method
+## itself never calls [method ToolStateMachine.arm_tool] (AC-BUILD-MODE-IS-
+## THE-ONLY-ARMING-PATH's own grep guard: zero `arm_tool(` call sites in this
+## file) -- it only REACTS to the signal [BuildEditorMode]/[ToolStateMachine]
+## already fired.
+func _on_tool_armed(tool_id: StringName) -> void:
+	_commit_pipeline.set_cell_set_resolver(_cell_set_resolvers.get(tool_id, Callable()))
+	_commit_pipeline.set_terrain_replace_resolver(_terrain_replace_resolvers.get(tool_id, Callable()))
+	_commit_pipeline.set_furniture_support_predicate(_furniture_support_predicates.get(tool_id, Callable()))
+
+
+## Constructs and wires the build-project lifecycle tier's `RefCounted`
+## collaborators (Story scene-007, Sub-scopes B/C, ADR-0016) -- mirrors
+## [method _wire_villager_population]'s own established construction-site
+## precedent. Connects [signal CommitPipeline.blueprint_cells_created] to
+## [method _on_blueprint_cells_created], the sole seam that drives BOTH the
+## undo-recording (Sub-scope C) and the registry/job-queue chain (Sub-scope
+## B) from one real commit. See class doc comment's own Story scene-007
+## paragraphs for the full rationale, including the `BuildValidation`
+## deviation named there.
+func _wire_build_project_lifecycle() -> void:
+	_build_project_registry = BuildProjectRegistry.new()
+	_construction_job_queue = ConstructionJobQueue.new(_construction_tick_loop)
+	_removal_tool = RemovalTool.new(_build_project_registry, _construction_tick_loop, _construction_job_queue)
+	_plan_only_undo_gate = PlanOnlyUndoGate.new(
+		_undo_redo_stack, _build_project_registry, _voxel_world, _construction_job_queue, _construction_tick_loop
+	)
+	_furniture_registry = FurnitureRegistry.new()
+	_construction_tick_loop.furniture_registry = _furniture_registry
+	# Open Decision 3, resolved (a) -- see class doc comment for the named
+	# `BuildValidation`-hosting deviation this `null` records.
+	_furniture_bed_provider = FurnitureBedProvider.new(_furniture_registry, null)
+	_commit_pipeline.blueprint_cells_created.connect(_on_blueprint_cells_created)
+
+
+## The `blueprint_cells_created` chain (Story scene-007, Sub-scopes B + C) --
+## see class doc comment's own dedicated paragraph. Records the WHOLE commit
+## as one [UndoRedoStack] command FIRST (Core Rule 17: "one wall drag = one
+## command = one undo step" -- the full cell list, not per-cell), then routes
+## the same cells into [method BuildProjectRegistry.assign_cells] and
+## registers every distinct resulting project into [member
+## _construction_job_queue] EXACTLY ONCE per project id (see [member
+## _job_queue_registered_project_ids]'s own doc comment for why this guard is
+## this class's own responsibility, not either landed class's).
+func _on_blueprint_cells_created(cells: Array[BlueprintCell]) -> void:
+	var cell_addresses: Array[Vector3i] = []
+	for cell: BlueprintCell in cells:
+		cell_addresses.append(cell.cell)
+	_undo_redo_stack.record_command(cell_addresses)
+	var projects: Array[BuildProject] = _build_project_registry.assign_cells(cells, BuildProject.Kind.BUILD)
+	for project: BuildProject in projects:
+		if not _job_queue_registered_project_ids.has(project.id):
+			_job_queue_registered_project_ids[project.id] = true
+			_construction_job_queue.add_project(project)
 
 
 ## Story vox-018's ONE new per-frame hook (class doc comment) -- reads the
@@ -444,6 +786,12 @@ func _wire_villager_population() -> void:
 	_villager_ai.nav_graph = _villager_nav_graph
 	_villager_ai.unstuck_telemetry = _villager_unstuck_telemetry
 	_villager_ai.needs_provider = _needs_mood
+	# Story scene-007: the SAME ConstructionJobQueue/FurnitureBedProvider
+	# instance every hosted VillagerAi (this one, plus every future roster
+	# member spawn_starting_roster() creates) is assigned -- see class doc
+	# comment's own Story scene-007 paragraphs.
+	_villager_ai.job_queue = _construction_job_queue
+	_villager_ai.bed_provider = _furniture_bed_provider
 	_villager_nav_graph.subscribe_to_voxel_world(_voxel_world, _villager_ai)
 
 
@@ -626,6 +974,12 @@ func spawn_starting_roster() -> Array[VillagerAi]:
 	)
 	for villager: VillagerAi in new_villagers:
 		villager.needs_provider = _needs_mood
+		# Story scene-007: the SAME shared job_queue/bed_provider instances
+		# every roster member is assigned -- see [method
+		# _wire_villager_population]'s own identical assignment for villager_id
+		# 0 and class doc comment's own Story scene-007 paragraphs.
+		villager.job_queue = _construction_job_queue
+		villager.bed_provider = _furniture_bed_provider
 		# Story scene-006 (AC-SEED-EVERY-ROSTER-MEMBER): seed this villager's
 		# needs through the landed [method NeedsMood.initialize_villager]
 		# surface, right where its provider is assigned -- already legal here
@@ -665,6 +1019,83 @@ func get_villager_body_presenter() -> VillagerBodyPresenter:
 	return _villager_body_presenter
 
 
+## Returns the hosted [BuildEditorMode] instance (Story scene-007).
+func get_build_editor_mode() -> BuildEditorMode:
+	return _build_editor_mode
+
+
+## Returns the hosted [WallTool] instance (Story scene-007).
+func get_wall_tool() -> WallTool:
+	return _wall_tool
+
+
+## Returns the hosted [FloorTool] instance (Story scene-007).
+func get_floor_tool() -> FloorTool:
+	return _floor_tool
+
+
+## Returns the hosted [RoofTool] instance (Story scene-007).
+func get_roof_tool() -> RoofTool:
+	return _roof_tool
+
+
+## Returns the hosted [BlockTool] instance (Story scene-007).
+func get_block_tool() -> BlockTool:
+	return _block_tool
+
+
+## Returns the hosted [FurnitureTool] instance (Story scene-007).
+func get_furniture_tool() -> FurnitureTool:
+	return _furniture_tool
+
+
+## Returns the hosted [GhostPreview] instance (Story scene-007).
+func get_ghost_preview() -> GhostPreview:
+	return _ghost_preview
+
+
+## Returns the hosted [UndoRedoStack] instance (Story scene-007).
+func get_undo_redo_stack() -> UndoRedoStack:
+	return _undo_redo_stack
+
+
+## Returns the constructed [BuildProjectRegistry] collaborator (Story
+## scene-007).
+func get_build_project_registry() -> BuildProjectRegistry:
+	return _build_project_registry
+
+
+## Returns the constructed [ConstructionJobQueue] collaborator (Story
+## scene-007) -- the SAME instance [method get_villager_ai]/every roster
+## member's own `job_queue` field points at.
+func get_construction_job_queue() -> ConstructionJobQueue:
+	return _construction_job_queue
+
+
+## Returns the constructed [RemovalTool] collaborator (Story scene-007).
+func get_removal_tool() -> RemovalTool:
+	return _removal_tool
+
+
+## Returns the constructed [PlanOnlyUndoGate] collaborator (Story scene-007).
+func get_plan_only_undo_gate() -> PlanOnlyUndoGate:
+	return _plan_only_undo_gate
+
+
+## Returns the constructed [FurnitureRegistry] collaborator (Story scene-007)
+## -- the SAME instance [member ConstructionTickLoop.furniture_registry]
+## points at.
+func get_furniture_registry() -> FurnitureRegistry:
+	return _furniture_registry
+
+
+## Returns the constructed [FurnitureBedProvider] collaborator (Story
+## scene-007) -- the SAME instance [method get_villager_ai]/every roster
+## member's own `bed_provider` field points at.
+func get_furniture_bed_provider() -> FurnitureBedProvider:
+	return _furniture_bed_provider
+
+
 ## The GameWorld assembly seam (Story scene-004): every hosted tier module
 ## this Valley owns, in the load-bearing DI order [method
 ## GameWorld._setup_injected_tier] will call `setup()` in (Voxel World grid,
@@ -694,8 +1125,16 @@ func get_injected_tier_modules() -> Array[Node]:
 		_voxel_world_mesh_streamer,
 		_camera_input,
 		_tool_state_machine,
+		_build_editor_mode,
 		_placement_pick,
 		_commit_pipeline,
+		_wall_tool,
+		_floor_tool,
+		_roof_tool,
+		_block_tool,
+		_furniture_tool,
+		_ghost_preview,
+		_undo_redo_stack,
 		_construction_tick_loop,
 		_needs_mood,
 		_villager_ai,

@@ -120,6 +120,17 @@ func test_ac_assembly_gameworld_wires_all_tier_modules_into_valley_and_boots_act
 	# Villager body presenter (Story presentation-003 -- concurrent with
 	# needs-mood-010 in this same sprint)
 	assert_object(valley.get_villager_body_presenter()).is_not_null()
+	# Story scene-007 (Build-tool & project-lifecycle hosting) -- the entire
+	# build-interaction tier, now real hosted children of Valley. See the
+	# count comment below for the injected_tier_modules() detail.
+	assert_object(valley.get_build_editor_mode()).is_not_null()
+	assert_object(valley.get_wall_tool()).is_not_null()
+	assert_object(valley.get_floor_tool()).is_not_null()
+	assert_object(valley.get_roof_tool()).is_not_null()
+	assert_object(valley.get_block_tool()).is_not_null()
+	assert_object(valley.get_furniture_tool()).is_not_null()
+	assert_object(valley.get_ghost_preview()).is_not_null()
+	assert_object(valley.get_undo_redo_stack()).is_not_null()
 
 	# The assembly seam (GameWorld._gather_valley_tier_modules) fed exactly
 	# these twelve (story vox-018 added the mesh streamer as a ninth; M01
@@ -127,8 +138,17 @@ func test_ac_assembly_gameworld_wires_all_tier_modules_into_valley_and_boots_act
 	# added Needs & Mood as an eleventh; story presentation-003 added the
 	# villager body presenter as a twelfth -- updated consciously, not
 	# incidentally), in the load-bearing DI order Valley itself reports.
+	# Story scene-007 adds a FURTHER FIVE injected-tier modules -- BuildEditorMode,
+	# WallTool, FloorTool, RoofTool, BlockTool, FurnitureTool, GhostPreview,
+	# UndoRedoStack are EIGHT new hosted `Node`s total, but FloorTool/RoofTool/
+	# BlockTool's own `setup()`/`is_set_up()` pair (this story's own trivial
+	# addition to those three classes, see each class's own doc comment) means
+	# ALL EIGHT actually expose `setup()` and are therefore ALL EIGHT appended
+	# to Valley.get_injected_tier_modules() (12 -> 20), not merely five --
+	# corrected count, not the sprint plan's own pre-authoring guess of "20"
+	# which happened to already assume this.
 	assert_array(world.injected_tier_modules).contains_exactly(valley.get_injected_tier_modules())
-	assert_int(world.injected_tier_modules.size()).is_equal(12)
+	assert_int(world.injected_tier_modules.size()).is_equal(20)
 
 
 func test_ac_assembly_hosted_modules_ran_through_boot_gated_setup_never_their_own_ready() -> void:
@@ -151,6 +171,15 @@ func test_ac_assembly_hosted_modules_ran_through_boot_gated_setup_never_their_ow
 	assert_bool(valley.get_commit_pipeline().is_set_up()).is_true()
 	assert_bool(valley.get_construction_tick_loop().is_set_up()).is_true()
 	assert_bool(valley.get_villager_ai().is_set_up()).is_true()
+	# Story scene-007
+	assert_bool(valley.get_build_editor_mode().is_set_up()).is_true()
+	assert_bool(valley.get_wall_tool().is_set_up()).is_true()
+	assert_bool(valley.get_floor_tool().is_set_up()).is_true()
+	assert_bool(valley.get_roof_tool().is_set_up()).is_true()
+	assert_bool(valley.get_block_tool().is_set_up()).is_true()
+	assert_bool(valley.get_furniture_tool().is_set_up()).is_true()
+	assert_bool(valley.get_ghost_preview().is_set_up()).is_true()
+	assert_bool(valley.get_undo_redo_stack().is_set_up()).is_true()
 
 
 func test_ac_assembly_building_and_villager_source_holds_no_non_di_root_reference() -> void:

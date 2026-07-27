@@ -1,4 +1,4 @@
-[gd_scene load_steps=21 format=3]
+[gd_scene load_steps=32 format=3]
 
 [ext_resource type="Script" path="res://src/scene_world_management/valley.gd" id="1_valley"]
 [ext_resource type="Script" path="res://src/voxel_world/voxel_world_grid.gd" id="2_voxelgrid"]
@@ -21,6 +21,17 @@
 [ext_resource type="Script" path="res://src/needs_mood/needs_mood.gd" id="17_needsmood"]
 [ext_resource type="Resource" path="res://data/config/needs_mood_config.tres" id="18_needsmoodcfg"]
 [ext_resource type="Script" path="res://src/presentation/villager_body_presenter.gd" id="19_villagerbodypresenter"]
+[ext_resource type="Script" path="res://src/building_system/build_editor_mode.gd" id="20_buildeditormode"]
+[ext_resource type="Script" path="res://src/building_system/wall_tool.gd" id="21_walltool"]
+[ext_resource type="Resource" path="res://data/config/wall_tool_config.tres" id="22_walltoolcfg"]
+[ext_resource type="Script" path="res://src/building_system/floor_tool.gd" id="23_floortool"]
+[ext_resource type="Script" path="res://src/building_system/roof_tool.gd" id="24_rooftool"]
+[ext_resource type="Script" path="res://src/building_system/block_tool.gd" id="25_blocktool"]
+[ext_resource type="Script" path="res://src/building_system/furniture_tool.gd" id="26_furnituretool"]
+[ext_resource type="Script" path="res://src/building_system/ghost_preview.gd" id="27_ghostpreview"]
+[ext_resource type="Resource" path="res://data/config/ghost_preview_config.tres" id="28_ghostpreviewcfg"]
+[ext_resource type="Script" path="res://src/building_system/undo_redo_stack.gd" id="29_undoredostack"]
+[ext_resource type="Resource" path="res://data/config/undo_redo_stack_config.tres" id="30_undoredostackcfg"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_torchindicator"]
 shading_mode = 0
@@ -88,3 +99,30 @@ config = ExtResource("16_ambientcfg")
 
 [node name="VillagerBodyPresenter" type="Node3D" parent="."]
 script = ExtResource("19_villagerbodypresenter")
+
+[node name="BuildEditorMode" type="Node" parent="."]
+script = ExtResource("20_buildeditormode")
+
+[node name="WallTool" type="Node" parent="."]
+script = ExtResource("21_walltool")
+config = ExtResource("22_walltoolcfg")
+
+[node name="FloorTool" type="Node" parent="."]
+script = ExtResource("23_floortool")
+
+[node name="RoofTool" type="Node" parent="."]
+script = ExtResource("24_rooftool")
+
+[node name="BlockTool" type="Node" parent="."]
+script = ExtResource("25_blocktool")
+
+[node name="FurnitureTool" type="Node" parent="."]
+script = ExtResource("26_furnituretool")
+
+[node name="GhostPreview" type="Node" parent="."]
+script = ExtResource("27_ghostpreview")
+config = ExtResource("28_ghostpreviewcfg")
+
+[node name="UndoRedoStack" type="Node" parent="."]
+script = ExtResource("29_undoredostack")
+config = ExtResource("30_undoredostackcfg")

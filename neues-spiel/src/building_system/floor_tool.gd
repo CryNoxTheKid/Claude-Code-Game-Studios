@@ -46,13 +46,20 @@
 ## Unlike [WallTool] (an injected-tier module per ADR-0001 with a `config`
 ## dependency to wire/validate in `setup()`), this class has no REQUIRED
 ## dependency -- there is nothing that must be wired for the plain F2 formula
-## itself, so no `setup()`/`is_set_up()` gate exists here. [method
-## resolve_cell_set] is callable immediately after construction with both new
-## deps left `null` (every pre-012 caller/test behaves identically). A future
-## scene-assembly story still attaches this as a plain `Node` (matching
-## [WallTool]'s shape for the tool family's uniformity, e.g. a future
-## ghost-preview call site, Story 023), it just never needs to call `setup()`
-## on it first.
+## itself. [method resolve_cell_set] is callable immediately after
+## construction with both new deps left `null` (every pre-012 caller/test
+## behaves identically).
+##
+## Story scene-007 addition: a trivial [method setup]/[method is_set_up] pair
+## is added SOLELY so [GameWorld]._setup_injected_tier()'s own
+## `module.has_method(&"setup")` boot-gate contract (ADR-0005) can host this
+## tool as a real [Valley]-reported injected-tier module -- see [Valley]'s own
+## class doc comment. It validates/asserts nothing (there is still nothing
+## REQUIRED to wire here; [member voxel_world]/[member commit_pipeline] stay
+## fully optional, unasserted, exactly as before this story) and every
+## pre-scene-007 bare `FloorTool.new()` construction (this project's own
+## direct-construction test convention) continues to work identically whether
+## or not `setup()` is ever called on it.
 ##
 ## **Story building-012 (this revision, ADR-0016 primary, GDD Rule 14l,
 ## [TR-building-system-120]): the terrain-start excavation branch.** [member
@@ -117,6 +124,22 @@ extends Node
 ## starts_on_terrain_top_surface]'s combined-view check ([method
 ## CommitPipeline.get_blueprint_cell_at]).
 @export var commit_pipeline: CommitPipeline = null
+
+## True once [method setup] has completed at least once (Story scene-007
+## addition -- see class doc comment).
+var _is_set_up: bool = false
+
+
+## Story scene-007 addition -- a trivial wiring entry point with nothing to
+## assert (see class doc comment: this tool has no REQUIRED dependency).
+## Exists only so this class can be hosted as a real injected-tier module.
+func setup() -> void:
+	_is_set_up = true
+
+
+## Returns whether [method setup] has completed (Story scene-007 addition).
+func is_set_up() -> bool:
+	return _is_set_up
 
 
 ## The [method CommitPipeline.set_cell_set_resolver]-compatible bound entry
