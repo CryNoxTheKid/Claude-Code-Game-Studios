@@ -1,7 +1,7 @@
 # Story 022: Multi block-type terrain generation — the world stops being one material
 
 > **Epic**: Voxel World / Grid Data
-> **Status**: Ready
+> **Status**: Complete (2026-07-27 — 1559/1559 suite green, 0 orphans, parent-verified; a full extent now yields ids [1, 2, 3])
 > **Layer**: Foundation (world data) → drives Presentation (the mesher, via `vox-023`)
 > **Type**: Logic
 > **Estimate**: **1.5 days** *(relative-complexity anchor, not a calendar prediction — sprint-09.md sizing convention)*. Authored at gate G2 of Sprint 12; the sprint anchored 1.5 and authoring did **not** move it — but authoring did surface one blocking design question (§ Open Decision 1) and one storage question with a definite answer (§ Open Decision 2). See **Sizing and the descope ladder**.
@@ -213,50 +213,50 @@ three-colour table is the same defect as a hardcoded one-colour table."*
 
 ## Acceptance Criteria
 
-- [ ] **AC-ONE-RULE-TWO-PATHS** ⚑ *the story's structural requirement*: the band → id rule
+- [x] **AC-ONE-RULE-TWO-PATHS** ⚑ *the story's structural requirement*: the band → id rule
       exists exactly **once**, as a `static func` on `VoxelWorldGrid` parameterized entirely
       by primitives (the landed `_pure_terrain_height` / `_pure_terrain_noise` precedent),
       and **both** `generate_terrain()` and `_bg_regenerate_from_seed()` call it. Grep-guarded
       by test: `TERRAIN_BLOCK_TYPE_ID` no longer appears as the written value in either
       write path, and no second implementation of the boundary comparison exists anywhere in
       `src/voxel_world/`. [ADR-0015 §6, TR-voxel-world-039]
-- [ ] **AC-BACKGROUND-PATH-READS-NO-INSTANCE-STATE**: `_bg_regenerate_from_seed()` still reads
+- [x] **AC-BACKGROUND-PATH-READS-NO-INSTANCE-STATE**: `_bg_regenerate_from_seed()` still reads
       **nothing** from `config` or any other shared instance state — every value the band
       rule needs is captured on the main thread in `_try_dispatch_read()` and bound into the
       task before dispatch, exactly as `base_height`/`amplitude`/`frequency`/`min_y`/`max_y`
       already are. Determinism is unchanged: two runs with the same `terrain_seed` produce
       **byte-identical** chunk payloads. [TR-voxel-world-039, ADR-0015 §6]
-- [ ] **AC-BOTH-PATHS-AGREE** ⚑ *the drift guard, and the reason the rule is expressed once*:
+- [x] **AC-BOTH-PATHS-AGREE** ⚑ *the drift guard, and the reason the rule is expressed once*:
       for the same chunk key and the same seed, the chunk produced by `generate_terrain()`
       and the chunk produced by `_bg_regenerate_from_seed()` are **byte-identical in
       `block_type_ids`**, not merely "both banded". This assertion is what makes a future
       one-sided edit fail loudly instead of silently splitting the world into two terrains.
-- [ ] **AC-IDS-ARE-IN-RANGE-AND-DIG-ELIGIBLE**: every emitted terrain id is inside `0–255`
+- [x] **AC-IDS-ARE-IN-RANGE-AND-DIG-ELIGIBLE**: every emitted terrain id is inside `0–255`
       (the existing `set_cell`/`bulk_write` packed-byte assertions still hold, unmodified and
       unweakened) **and** inside the **1..5 value family** GDD Core Rule 8 /
       TR-voxel-world-051 reserves for terrain bands and sand — so dig-order eligibility keeps
       working with **zero** change to the dig-order rules. Asserted against the id set the
       band rule can produce, not against a literal list. [TR-voxel-world-051, TR-voxel-world-041]
-- [ ] **AC-ID-1-STAYS-LOWLAND** ⚑ *a compatibility constraint read off disk, not a taste
+- [x] **AC-ID-1-STAYS-LOWLAND** ⚑ *a compatibility constraint read off disk, not a taste
       call*: the lowest band keeps id **1**. Two reasons, both verified: (a) every
       already-serialized region file holds id-1 chunks, and (b) `blueprint_cell.gd:183`
       defaults every **built** cell to `CellContents.new(1, 0)`, so renumbering id 1 would
       silently change the colour of every wall and floor the player has ever built.
       Renumbering is out of scope; new bands take ids **above** 1. (The built-cell id
       collision itself is recorded in **Out of Scope** and escalated, not fixed here.)
-- [ ] **AC-BAND-BOUNDARIES-ARE-CONFIG-NOT-LITERALS**: the band boundaries live on
+- [x] **AC-BAND-BOUNDARIES-ARE-CONFIG-NOT-LITERALS**: the band boundaries live on
       `VoxelWorldConfig` as typed `@export` fields with GDD-defaulted values and a
       `validate()` rule (monotonically increasing, inside `[min_y, max_y]`, count matching
       the id set — a mismatch is a **BLOCKING** issue per ADR-0002's two-tier policy, not a
       silent clamp). Changing where a band starts is a `.tres` number edit and nothing else.
       **No band boundary appears as a literal in `voxel_world_grid.gd`.** [ADR-0002,
       CONTRACTS.md §2]
-- [ ] **AC-BAND-ANCHOR-RULING-RECORDED**: the anchor chosen in **Open Decision 1** is written
+- [x] **AC-BAND-ANCHOR-RULING-RECORDED**: the anchor chosen in **Open Decision 1** is written
       into this file and into the config class's doc comment, with its rationale. If it ships
       unratified, it carries the same explicit `PROVISIONAL — awaiting art-director sign-off`
       marker `world_lighting_config.gd` uses, and the commit body says so. ⚑ **A silently
       chosen denominator is a producer-invented palette by another name.**
-- [ ] **AC-REGION-FILES-STAY-READABLE**: a region file written by the **pre-story** build is
+- [x] **AC-REGION-FILES-STAY-READABLE**: a region file written by the **pre-story** build is
       still read back without error by the post-story build, with its `block_type_ids`
       preserved exactly — proving the on-disk layout did not change. The **stale-content**
       consequence (a persisted pre-story chunk pages back in as single-colour, because
@@ -264,17 +264,17 @@ three-colour table is the same defect as a hardcoded one-colour table."*
       stamp) is **stated in the commit body and in the sprint smoke artifact**, together with
       the `user://regions` clear step. **No format change and no migration are authored here**
       (Open Decision 2). [ADR-0015 §2/§4/§5]
-- [ ] **AC-NO-MEANING-RESOLVED-HERE**: `VoxelWorldGrid` still resolves **nothing** about what
+- [x] **AC-NO-MEANING-RESOLVED-HERE**: `VoxelWorldGrid` still resolves **nothing** about what
       a block-type id means — no colour, no material name, no RID lookup enters this file.
       Appearance is `vox-023`'s, and the seam between them is the opaque integer.
       [TR-voxel-world-028]
-- [ ] **AC-FIXTURE-SWEEP-IS-EXPLICIT** ⚑ *the sprint's own named trap*: every existing test
+- [x] **AC-FIXTURE-SWEEP-IS-EXPLICIT** ⚑ *the sprint's own named trap*: every existing test
       fixture that assumed a single terrain block type is **found, listed by name in the
       commit body, and corrected** — not loosened. A fixture that asserted `block_type_id == 1`
       because that was the only id becomes an assertion about the band rule's actual output;
       it does not become `is_greater(0)`. Any fixture that must change is named individually
       with the reason.
-- [ ] **AC-SUITE-GREEN-AND-DIAGNOSED**: the full blocking suite is green headless, 0 orphans,
+- [x] **AC-SUITE-GREEN-AND-DIAGNOSED**: the full blocking suite is green headless, 0 orphans,
       exit 0, both checked explicitly. A red run is re-run **in isolation** before any change
       is reverted on its basis (S10 §5), and never concurrently with a second suite — CPU
       starvation makes the reachability corpus breach its 60 s ceiling and that is a load

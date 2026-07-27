@@ -122,6 +122,18 @@ const CHUNK_GENERATION_COST_MS_MAX: float = 1000.0
 const STREAM_BUDGET_MS_MIN: float = 0.1
 const STREAM_BUDGET_MS_MAX: float = 1000.0
 
+## Safe range for a [member band_ids] entry (Story vox-022, GDD Core Rule 8 /
+## TR-voxel-world-051's dig-order-eligible "1..5 value family" -- terrain
+## bands and sand, explicitly EXCLUDING water and trunk/leaves values). Every
+## band id this config declares MUST fall inside this range so terrain
+## generation can never emit an id dig-order eligibility does not already
+## cover -- checked as a BLOCKING cross-value invariant in [method validate],
+## the same tier as [member min_y]/[member max_y]'s own relationship, not a
+## single-field clamp (there is no single "nearest valid id" to clamp a band
+## assignment to).
+const BAND_ID_MIN: int = 1
+const BAND_ID_MAX: int = 5
+
 ## Fallback used by [method validate] when [member region_directory] is
 ## empty (a single-field clamp-to-default, same two-tier policy as every
 ## other ranged knob here).
@@ -385,6 +397,67 @@ const REGION_DIRECTORY_DEFAULT: String = "user://regions"
 ## the shared time-based-not-fixed-count rationale. [TR-voxel-world-025]
 @export var mesh_unload_budget_ms: float = 4.0
 
+## Ordered terrain height-band ids (Story vox-022, art bible §4.3's four
+## bands -- Lowland/Midland/Highland/Peak -- mapped onto GDD Core Rule 8 /
+## TR-voxel-world-051's dig-order-eligible "1..5 value family"), paired
+## positionally with [member band_boundaries]: `band_ids[i]` is emitted for
+## every cell whose Y falls at or below `band_boundaries[i]` (and above
+## `band_boundaries[i-1]`, or [member min_y] for `i == 0`); the LAST id in
+## this array is emitted for every Y strictly above `band_boundaries`' last
+## entry, all the way to [member max_y] -- so [member band_boundaries] is
+## always exactly one entry SHORTER than this array (validated in [method
+## validate]).
+##
+## `band_ids[0]` MUST stay `1` -- a compatibility constraint, not a taste
+## call (story vox-022 AC-ID-1-STAYS-LOWLAND): every already-serialized
+## region file holds id-1 chunks, and `blueprint_cell.gd`'s built-cell
+## default is also `CellContents.new(1, 0)` -- renumbering id 1 would
+## silently recolour every wall the player has ever built AND every
+## persisted region file. [method validate] reports a violation as BLOCKING.
+##
+## PROVISIONAL -- Open Decision 1 (story vox-022), awaiting art-director +
+## user ratification, same status [WorldLightingConfig]'s AC3 fields carry.
+## Shipped as 4 bands (matching art bible §4.3 verbatim) rather than the
+## sprint's own descope-ladder fallback of 2, because the shipped tuning
+## (see [member band_boundaries]'s doc comment) already reaches all four
+## bands without a retune.
+@export var band_ids: Array[int] = [1, 2, 3, 4]
+
+## Upper-inclusive Y threshold for each band in [member band_ids] EXCEPT the
+## last (which has no ceiling of its own -- see that member's doc comment).
+## Story vox-022, Open Decision 1's ratified anchor **(a)**: normalises the
+## art bible's four bands across the ACHIEVABLE terrain height range
+## `[base_height - amplitude, base_height + amplitude]` -- **NOT** the art
+## bible's literal "of 32" denominator (§4.3) applied against [member min_y]/
+## [member max_y] directly. Read off two files on disk at authoring time
+## (2026-07-27): the shipped `.tres` ships `max_y = 16`, `base_height = 4`,
+## `amplitude = 3.0`, so `procedural_terrain_height`'s own clamp() means
+## every column's top surface lands between Y = 1 and Y = 7 -- entirely
+## inside the art bible's literal band 1 (0-8). Applying §4.3's denominator
+## verbatim would therefore still emit exactly ONE id after this story
+## shipped, which is the exact defect story vox-022 exists to end.
+##
+## Anchor (a)'s arithmetic, applied once to produce these DEFAULTS (a plain
+## `.tres` number edit reverses or retunes this, never a code change):
+## achievable range `[1, 7]` (width 6) split into 4 equal quarters of 1.5,
+## floored per boundary -- `floor(1 + 1*1.5) = 2`, `floor(1 + 2*1.5) = 4`,
+## `floor(1 + 3*1.5) = 5` -- giving band spans Lowland Y∈[0,2], Midland
+## Y∈[3,4], Highland Y∈[5,5], Peak Y∈[6,16]. Cost (recorded per Open
+## Decision 1): "Peak" snow sits at Y≈6-7, a hilltop rather than a literal
+## mountain -- the hue ramp (warm-neutral low → cool-pale high) reads as the
+## art bible intends; the literal material story (snow) does not, at this
+## tuning. Retuning [member amplitude]/[member base_height] later shifts
+## these boundaries' MEANING (they stay in absolute Y) but not their
+## validity -- [method validate] only requires them monotonically
+## increasing and inside `[min_y, max_y]`, never tied to `amplitude`/
+## `base_height`'s current values.
+##
+## PROVISIONAL -- Open Decision 1 (story vox-022), awaiting art-director +
+## user ratification. Because these are typed `@export` fields (ADR-0002)
+## rather than a literal inside `voxel_world_grid.gd`, overturning this
+## ruling is a `.tres` number edit and nothing else.
+@export var band_boundaries: Array[int] = [2, 4, 5]
+
 
 ## See [ConfigResource.validate]. Clamps every ranged knob to its
 ## GDD-documented safe bound in place (the sole sanctioned runtime write to
@@ -508,5 +581,56 @@ func validate() -> Array[String]:
 	if min_y > max_y:
 		issues.append(ConfigResource.format_blocking(
 			"min_y (%s) must be <= max_y (%s)" % [min_y, max_y]
+		))
+	issues.append_array(_validate_bands())
+	return issues
+
+
+## Band-boundary cross-value invariants (Story vox-022, GDD Core Rule 8 /
+## TR-voxel-world-051, ADR-0002 two-tier policy) -- every check here is a
+## relationship between fields (counts matching, monotonic ordering, id
+## family membership, the id-1-stays-Lowland compatibility rule), so each
+## violation is reported BLOCKING rather than clamped, the same tier
+## [member min_y]/[member max_y]'s own relationship already uses: there is
+## no single "nearest valid" band boundary or id to silently clamp to.
+func _validate_bands() -> Array[String]:
+	var issues: Array[String] = []
+	if band_ids.is_empty():
+		issues.append(ConfigResource.format_blocking("band_ids must not be empty"))
+		return issues
+	if band_boundaries.size() != band_ids.size() - 1:
+		issues.append(ConfigResource.format_blocking(
+			"band_boundaries length (%s) must be exactly band_ids length (%s) minus one" %
+			[band_boundaries.size(), band_ids.size()]
+		))
+		return issues
+	for i in band_boundaries.size():
+		if band_boundaries[i] < min_y or band_boundaries[i] > max_y:
+			issues.append(ConfigResource.format_blocking(
+				"band_boundaries[%s] (%s) must be within [min_y, max_y] ([%s, %s])" %
+				[i, band_boundaries[i], min_y, max_y]
+			))
+		if i > 0 and band_boundaries[i] <= band_boundaries[i - 1]:
+			issues.append(ConfigResource.format_blocking(
+				"band_boundaries must be strictly increasing -- band_boundaries[%s] (%s) <= band_boundaries[%s] (%s)" %
+				[i, band_boundaries[i], i - 1, band_boundaries[i - 1]]
+			))
+	var seen_ids: Dictionary[int, bool] = {}
+	for i in band_ids.size():
+		var id: int = band_ids[i]
+		if id < BAND_ID_MIN or id > BAND_ID_MAX:
+			issues.append(ConfigResource.format_blocking(
+				"band_ids[%s] (%s) must be within the dig-order-eligible [%s, %s] family (TR-voxel-world-051)" %
+				[i, id, BAND_ID_MIN, BAND_ID_MAX]
+			))
+		if seen_ids.has(id):
+			issues.append(ConfigResource.format_blocking(
+				"band_ids[%s] (%s) duplicates an earlier entry" % [i, id]
+			))
+		seen_ids[id] = true
+	if band_ids[0] != 1:
+		issues.append(ConfigResource.format_blocking(
+			"band_ids[0] (%s) must stay 1 -- the Lowland/lowest band's id is a compatibility constraint" %
+			[band_ids[0]]
 		))
 	return issues

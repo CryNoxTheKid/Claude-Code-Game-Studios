@@ -341,9 +341,20 @@ func test_voxel_world_config_validate_min_y_greater_than_max_y_is_blocking() -> 
 func test_voxel_world_config_validate_min_y_equal_max_y_is_not_blocking() -> void:
 	# Arrange — the invariant is "<=", so equal bounds are valid (single-height
 	# world), unlike ReferenceModuleConfig's strict "<" precedent.
+	#
+	# Fixture sweep (story vox-022): the GDD-defaulted band_boundaries ([2, 4,
+	# 5]) are absolute Y literals computed against the SHIPPED [0, 16] extent
+	# -- a degenerate single-Y-height world (min_y == max_y == 8) can never
+	# host 3 strictly-increasing boundaries inside a single point, so this
+	# fixture now ALSO reduces to one band (band_ids=[1], no boundaries) —
+	# the sprint's own descope-ladder shape ("reduce the band count, never
+	# the mechanism") — to isolate the min_y<=max_y invariant this test
+	# actually targets from the new, unrelated band cross-value check.
 	var config := VoxelWorldConfig.new()
 	config.min_y = 8
 	config.max_y = 8
+	config.band_ids = [1]
+	config.band_boundaries = []
 
 	# Act
 	var issues: Array[String] = config.validate()
@@ -355,10 +366,20 @@ func test_voxel_world_config_validate_min_y_equal_max_y_is_not_blocking() -> voi
 func test_voxel_world_config_validate_warning_alongside_blocking_still_dominates() -> void:
 	# Arrange — a single-field warning AND a blocking failure in the same
 	# validate() call: blocking must still be detected (QA plan edge case).
+	#
+	# Fixture sweep (story vox-022): the GDD-defaulted band_boundaries ([2, 4,
+	# 5]) fall outside this fixture's deliberately-invalid `min_y=20` -- also
+	# reduced to one band (band_ids=[1], no boundaries) so the issue COUNT
+	# this test asserts stays scoped to exactly the two invariants under
+	# test (the width clamp + the min_y > max_y blocking), never inflated by
+	# an unrelated band-boundary-range violation this fixture never intended
+	# to exercise.
 	var config := VoxelWorldConfig.new()
 	config.world_width_cells = 10
 	config.min_y = 20
 	config.max_y = 16
+	config.band_ids = [1]
+	config.band_boundaries = []
 
 	# Act
 	var issues: Array[String] = config.validate()

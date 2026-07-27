@@ -252,13 +252,26 @@ const CHUNK_SIZE: int = 16
 ## purely as the observable milestone AC1/AC-4 (QA plan) require.
 enum GridState { UNINITIALIZED, GENERATED }
 
-## Opaque terrain block-type id (Story vox-006) [CellContents]'s "Resource &
-## Item Database vocabulary" doc-comment applies -- this class never resolves
-## what the id MEANS (Core Rule 2, TR-voxel-world-028); a single fixed id is
-## a placeholder consistent with the GDD's "terrain-band/sand 1..5 value
-## family" convention (TR-voxel-world-051, Story 009 dig-order eligibility),
-## not itself a designer tuning knob (same "locked engine-shape data"
-## rationale as [constant CHUNK_SIZE]/[constant NEIGHBOR_OFFSETS]).
+## Opaque terrain block-type id for the LOWEST height band ("Lowland", art
+## bible §4.3) -- [CellContents]'s "Resource & Item Database vocabulary"
+## doc-comment applies, this class never resolves what the id MEANS (Core
+## Rule 2, TR-voxel-world-028). Story vox-006 introduced this as the ONLY id
+## terrain generation ever wrote; Story vox-022 (this revision) replaces that
+## single-id fill with [method _pure_band_id_for_height], a per-Y-band rule
+## driven by [member VoxelWorldConfig.band_ids]/[member
+## VoxelWorldConfig.band_boundaries] -- this constant now documents and
+## fixes ONLY the Lowland band's id, never written as a bare literal by
+## either generation path anymore. Kept at `1` deliberately (never
+## renumbered, AC-ID-1-STAYS-LOWLAND): every already-serialized region file
+## holds id-1 chunks, and `blueprint_cell.gd`'s built-cell default is also
+## `CellContents.new(1, 0)` -- [VoxelWorldConfig.validate] reports
+## `band_ids[0] != 1` as a BLOCKING issue specifically so this invariant
+## cannot silently drift out from under this constant. Several existing test
+## fixtures across the suite construct cells directly via
+## `CellContents.new(1, 0)` as an arbitrary "some solid block" stand-in
+## (building/villager-ai/build-validation tests that never call terrain
+## generation) -- those remain valid unchanged, since id 1 keeps its
+## meaning.
 const TERRAIN_BLOCK_TYPE_ID: int = 1
 
 ## Opaque terrain material id (Story vox-006) -- paired with [constant
@@ -580,11 +593,22 @@ func mark_generated() -> void:
 ## `h(x, z)` via the GDD Formulas' `procedural_terrain_height` --
 ## `clamp(round(base_height + amplitude * noise2D(x*frequency, z*frequency)),
 ## min_y, max_y)` (TR-voxel-world-038) -- and fills every cell from [member
-## VoxelWorldConfig.min_y] up to and including that column's height `h` with
-## [constant TERRAIN_BLOCK_TYPE_ID]/[constant TERRAIN_MATERIAL_ID]; cells
-## above `h` (up to `max_y`) are left empty. "Every in-bounds cell holds
-## either a terrain block or empty" (AC1/AC-4, QA plan) follows directly from
-## this fill rule.
+## VoxelWorldConfig.min_y] up to and including that column's height `h`;
+## cells above `h` (up to `max_y`) are left empty. "Every in-bounds cell
+## holds either a terrain block or empty" (AC1/AC-4, QA plan) follows
+## directly from this fill rule.
+##
+## Story vox-022 (this revision, art bible §4.3, GDD Core Rule 8 /
+## TR-voxel-world-051): each filled cell's block-type id is no longer the
+## single fixed [constant TERRAIN_BLOCK_TYPE_ID] -- it is [method
+## _pure_band_id_for_height], evaluated at THAT cell's own absolute Y (not
+## the column's overall height `h`), driven by [member
+## VoxelWorldConfig.band_ids]/[member VoxelWorldConfig.band_boundaries] --
+## the SAME shared static rule [method _bg_regenerate_from_seed] calls, so a
+## column reads as horizontal strata of bands from `min_y` up through `h`,
+## exactly matching the art bible's per-elevation color mapping. [constant
+## TERRAIN_MATERIAL_ID] is unchanged -- appearance/material variety per band
+## is `vox-023`'s scope, not this one's (TR-voxel-world-028).
 ##
 ## Writes through [method bulk_write] -- reusing the already-established
 ## single-write core ([method _apply_write]) -- so the entire fill emits AT
@@ -634,7 +658,8 @@ func generate_terrain() -> void:
 		for z in config.world_depth_cells:
 			var height: int = _terrain_height(x, z, noise)
 			for y in range(config.min_y, height + 1):
-				changes[Vector3i(x, y, z)] = CellContents.new(TERRAIN_BLOCK_TYPE_ID, TERRAIN_MATERIAL_ID)
+				var block_type_id: int = VoxelWorldGrid._pure_band_id_for_height(y, config.band_ids, config.band_boundaries)
+				changes[Vector3i(x, y, z)] = CellContents.new(block_type_id, TERRAIN_MATERIAL_ID)
 	bulk_write(changes)
 	_state = GridState.GENERATED
 
@@ -664,6 +689,36 @@ static func _pure_terrain_height(
 ) -> int:
 	var raw: float = float(base_height) + amplitude * noise.get_noise_2d(float(x) * frequency, float(z) * frequency)
 	return clampi(roundi(raw), min_y, max_y)
+
+
+## THE shared height-band rule (Story vox-022, art bible §4.3, GDD Core Rule
+## 8 / TR-voxel-world-051) -- exists in exactly ONE place, a pure `static
+## func` parameterized entirely by primitives (an `int` and two `Array[int]`
+## primitives-only data, never a [VoxelWorldConfig] reference), the same
+## "landed `_pure_terrain_height` precedent" this story's own AC-ONE-RULE-
+## TWO-PATHS names. Called by BOTH [method generate_terrain] (main thread,
+## reading [param band_ids]/[param band_boundaries] off [member config]) and
+## [method _bg_regenerate_from_seed] (background thread, reading them from
+## its own bound task arguments, captured on the main thread before dispatch
+## -- see that method's doc comment) -- there is no second, independently
+## maintained copy of this comparison anywhere in `src/voxel_world/`.
+##
+## [param band_boundaries] holds the upper-INCLUSIVE Y threshold for every
+## band in [param band_ids] except the last; the first threshold [param
+## y] does not exceed wins. [param band_ids]'s LAST entry is returned for
+## any [param y] above every threshold in [param band_boundaries] (including
+## the degenerate single-band case, [param band_boundaries] empty). Never
+## itself bounds-checks [param y] against `[min_y, max_y]` -- both call
+## sites only ever invoke this for a `y` already known in-range (the fill
+## loop's own `range(min_y, height + 1)`), and [VoxelWorldConfig.validate]
+## is what guarantees every [param band_boundaries] entry itself already
+## sits inside `[min_y, max_y]` (a BLOCKING cross-value invariant, not a
+## responsibility of this pure function).
+static func _pure_band_id_for_height(y: int, band_ids: Array[int], band_boundaries: Array[int]) -> int:
+	for i in band_boundaries.size():
+		if y <= band_boundaries[i]:
+			return band_ids[i]
+	return band_ids[band_ids.size() - 1]
 
 
 ## Shared, fully-parameterized [FastNoiseLite] constructor (Story vox-010
@@ -1715,7 +1770,8 @@ func _try_dispatch_read(chunk_key: Vector2i) -> bool:
 		task_id = WorkerThreadPool.add_task(
 			Callable(self, "_bg_regenerate_from_seed").bind(
 				chunk_key, config.terrain_seed, config.base_height, config.amplitude, config.frequency,
-				config.min_y, config.max_y, config.world_width_cells, config.world_depth_cells
+				config.min_y, config.max_y, config.world_width_cells, config.world_depth_cells,
+				config.band_ids.duplicate(), config.band_boundaries.duplicate()
 			)
 		)
 	_read_tasks[chunk_key] = task_id
@@ -1756,9 +1812,26 @@ func _bg_read_from_disk(chunk_key: Vector2i, path: String, offset: int, payload_
 ## doc comment already establishes. Never marks anything dirty and never
 ## emits any signal -- page-in must be silent/transparent to consumers
 ## (ADR-0015 Decision §1), and this runs off the main thread besides.
+##
+## Story vox-022 (this revision, art bible §4.3, GDD Core Rule 8 /
+## TR-voxel-world-051): [param band_ids]/[param band_boundaries] are two MORE
+## values captured on the main thread and bound in before dispatch (see
+## [method _try_dispatch_read] -- `config.band_ids.duplicate()`/
+## `config.band_boundaries.duplicate()`, the exact same "every value this
+## needs is captured on the MAIN thread" discipline this doc comment already
+## established for every other parameter here), never read from [member
+## config] itself -- this method's own body still references no instance
+## state of any kind (AC-BACKGROUND-PATH-READS-NO-INSTANCE-STATE,
+## grep-verifiable). Each filled cell's block-type id is now [method
+## _pure_band_id_for_height] -- THE SAME shared static rule [method
+## generate_terrain] calls -- evaluated at that cell's own absolute Y, never
+## the bare [constant TERRAIN_BLOCK_TYPE_ID] this method used to write
+## unconditionally (AC-ONE-RULE-TWO-PATHS: neither write path assigns
+## [constant TERRAIN_BLOCK_TYPE_ID] as a cell value any more).
 func _bg_regenerate_from_seed(
 	chunk_key: Vector2i, terrain_seed: int, base_height: int, amplitude: float, frequency: float,
-	min_y: int, max_y: int, world_width_cells: int, world_depth_cells: int
+	min_y: int, max_y: int, world_width_cells: int, world_depth_cells: int,
+	band_ids: Array[int], band_boundaries: Array[int]
 ) -> void:
 	var noise: FastNoiseLite = VoxelWorldGrid._pure_terrain_noise(terrain_seed)
 	var chunk_height: int = max_y - min_y + 1
@@ -1780,7 +1853,7 @@ func _bg_regenerate_from_seed(
 			)
 			for y in range(min_y, height + 1):
 				var offset: int = ((y - min_y) * CHUNK_SIZE + local_z) * CHUNK_SIZE + local_x
-				block_type_ids[offset] = TERRAIN_BLOCK_TYPE_ID
+				block_type_ids[offset] = VoxelWorldGrid._pure_band_id_for_height(y, band_ids, band_boundaries)
 				material_ids[offset] = TERRAIN_MATERIAL_ID
 	var payload := PackedByteArray()
 	payload.append_array(block_type_ids)
