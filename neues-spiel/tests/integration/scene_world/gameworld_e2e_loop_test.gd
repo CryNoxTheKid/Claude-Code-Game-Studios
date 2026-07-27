@@ -161,9 +161,14 @@ func test_ac_assembly_gameworld_wires_all_tier_modules_into_valley_and_boots_act
 	# consciously, not incidentally, per that story's own dev-story
 	# instructions to flag this file. VillagerOnSiteGate/
 	# VillagerSealPreventionGate are RefCounted collaborators, not scene
-	# children, and do not affect this count.
+	# children, and do not affect this count. Story build-validation-009
+	# ("Loop-payoff surface receives real signals," milestone criterion #7)
+	# adds TWO further injected-tier modules, LoopPayoffSignalSurface and
+	# LoopPayoffAdapter (23 -> 25) -- updated consciously, not incidentally.
+	assert_object(valley.get_loop_payoff_signal_surface()).is_not_null()
+	assert_object(valley.get_loop_payoff_adapter()).is_not_null()
 	assert_array(world.injected_tier_modules).contains_exactly(valley.get_injected_tier_modules())
-	assert_int(world.injected_tier_modules.size()).is_equal(23)
+	assert_int(world.injected_tier_modules.size()).is_equal(25)
 
 
 func test_ac_assembly_hosted_modules_ran_through_boot_gated_setup_never_their_own_ready() -> void:
@@ -196,6 +201,9 @@ func test_ac_assembly_hosted_modules_ran_through_boot_gated_setup_never_their_ow
 	assert_bool(valley.get_furniture_tool().is_set_up()).is_true()
 	assert_bool(valley.get_ghost_preview().is_set_up()).is_true()
 	assert_bool(valley.get_undo_redo_stack().is_set_up()).is_true()
+	# Story build-validation-009
+	assert_bool(valley.get_loop_payoff_signal_surface().is_set_up()).is_true()
+	assert_bool(valley.get_loop_payoff_adapter().is_set_up()).is_true()
 
 
 func test_ac_assembly_building_and_villager_source_holds_no_non_di_root_reference() -> void:

@@ -497,6 +497,26 @@
 ## asserted non-null (constructed) and [member
 ## FurnitureBedProvider.build_validation] is asserted non-null (wired, not
 ## the `null` Story scene-007 recorded).
+##
+## Story build-validation-009 ("Loop-payoff surface receives real signals,"
+## milestone criterion #7 -- the ninth instance of this project's own
+## ship-green-and-uncalled failure mode this sprint) hosts [LoopPayoffSignalSurface]
+## (`presentation-002`, shipped and tested since its own scaffolding story but
+## never called by anything real in `src/`) and [LoopPayoffAdapter] (this
+## story's own new class -- the first real production writer) exactly like
+## every other paired hosted-module/driver above ([member
+## _ambient_torch_light]/[member _torch_flicker], [member _sun_light]/[member
+## _world_lighting]): both are structural children; [member
+## LoopPayoffAdapter.build_validation]/[member LoopPayoffAdapter.payoff_surface]
+## are code-assigned Node-typed cross-references in [method
+## _wire_hosted_modules]; `setup()` is reached ONLY via [method
+## get_injected_tier_modules] (this class still calls no hosted child's
+## `setup()` itself). [method _assert_loop_payoff_wiring_boot_invariant]
+## extends this class's own "fail loudly, not silently" boot-invariant block
+## once more: both hosted nodes must exist, and the adapter's own two
+## dependencies must be wired (never left `null`, mirroring [method
+## _assert_build_validation_gates_boot_invariant]'s own shape for
+## [FurnitureBedProvider.build_validation]).
 class_name Valley
 extends Node3D
 
@@ -719,6 +739,18 @@ var _villager_unstuck_telemetry: VillagerUnstuckTelemetry = null
 ## TorchFlicker.light]'s own identical wiring shape.
 @onready var _world_lighting: WorldLighting = $WorldLighting
 
+## Hosted [LoopPayoffSignalSurface] instance (Story build-validation-009).
+## Structural child, no config/cross-reference of its own -- see class doc
+## comment's own Story build-validation-009 paragraph.
+@onready var _loop_payoff_signal_surface: LoopPayoffSignalSurface = $LoopPayoffSignalSurface
+
+## Hosted [LoopPayoffAdapter] instance (Story build-validation-009) -- the
+## first real production writer onto [member _loop_payoff_signal_surface].
+## Structural child -- [member LoopPayoffAdapter.build_validation]/[member
+## LoopPayoffAdapter.payoff_surface] are code-assigned Node-typed
+## cross-references in [method _wire_hosted_modules].
+@onready var _loop_payoff_adapter: LoopPayoffAdapter = $LoopPayoffAdapter
+
 ## The build-project lifecycle tier's `RefCounted` collaborators (Story
 ## scene-007, ADR-0016; Sub-scope B/C) -- constructed in [method
 ## _wire_build_project_lifecycle], mirroring [method
@@ -821,6 +853,7 @@ func _ready() -> void:
 	_wire_villager_population()
 	_assert_lighting_boot_invariant()
 	_assert_build_validation_gates_boot_invariant()
+	_assert_loop_payoff_wiring_boot_invariant()
 
 
 ## Code-assigned DI for the Node-typed cross-references between hosted
@@ -852,6 +885,12 @@ func _wire_hosted_modules() -> void:
 	# Story cam-013: the camera-mirror driver's two Node-typed cross-refs.
 	_camera_mirror.camera = _valley_camera
 	_camera_mirror.camera_input = _camera_input
+
+	# Story build-validation-009: the loop-payoff adapter's two Node-typed
+	# cross-refs -- see class doc comment's own Story build-validation-009
+	# paragraph.
+	_loop_payoff_adapter.build_validation = _build_validation
+	_loop_payoff_adapter.payoff_surface = _loop_payoff_signal_surface
 
 	# Story scene-007: the build-tool tier's cross-sibling Node references +
 	# the armed-tool -> resolver router. See class doc comment's own Story
@@ -1369,6 +1408,32 @@ func _assert_build_validation_gates_boot_invariant() -> void:
 	)
 
 
+## Boot invariant (Story build-validation-009) -- extends this class's own
+## established "fail loudly, not silently" boot-invariant block once more
+## (mirrors [method _assert_lighting_boot_invariant]/[method
+## _assert_build_validation_gates_boot_invariant]): both [LoopPayoffSignalSurface]
+## and [LoopPayoffAdapter] must be hosted (non-null), and the adapter's own
+## two dependencies ([member LoopPayoffAdapter.build_validation]/[member
+## LoopPayoffAdapter.payoff_surface]) must be wired -- never left `null`,
+## which would otherwise surface only as a silent no-op the first time a
+## real room is recognized, not as a loud boot-time failure. Called from
+## [method _ready], after [method _wire_hosted_modules].
+func _assert_loop_payoff_wiring_boot_invariant() -> void:
+	assert(
+		_loop_payoff_signal_surface != null,
+		"Valley must host exactly one LoopPayoffSignalSurface instance"
+	)
+	assert(_loop_payoff_adapter != null, "Valley must host exactly one LoopPayoffAdapter instance")
+	assert(
+		_loop_payoff_adapter.build_validation != null,
+		"Valley: LoopPayoffAdapter.build_validation must not be null"
+	)
+	assert(
+		_loop_payoff_adapter.payoff_surface != null,
+		"Valley: LoopPayoffAdapter.payoff_surface must not be null"
+	)
+
+
 ## Returns the hosted ambient torch/lantern light fixture (M01 condition C4).
 func get_ambient_torch_light() -> Light3D:
 	return _ambient_torch_light
@@ -1496,6 +1561,19 @@ func get_villager_seal_prevention_gate() -> VillagerSealPreventionGate:
 	return _villager_seal_prevention_gate
 
 
+## Returns the hosted [LoopPayoffSignalSurface] instance (Story
+## build-validation-009).
+func get_loop_payoff_signal_surface() -> LoopPayoffSignalSurface:
+	return _loop_payoff_signal_surface
+
+
+## Returns the hosted [LoopPayoffAdapter] instance (Story
+## build-validation-009) -- the real production writer onto [method
+## get_loop_payoff_signal_surface].
+func get_loop_payoff_adapter() -> LoopPayoffAdapter:
+	return _loop_payoff_adapter
+
+
 ## The GameWorld assembly seam (Story scene-004): every hosted tier module
 ## this Valley owns, in the load-bearing DI order [method
 ## GameWorld._setup_injected_tier] will call `setup()` in (Voxel World grid,
@@ -1526,6 +1604,8 @@ func get_villager_seal_prevention_gate() -> VillagerSealPreventionGate:
 ## to flag this file (`VillagerOnSiteGate`/`VillagerSealPreventionGate` are
 ## `RefCounted` collaborators, not scene children, and do not affect this
 ## list -- they mirror `_construction_job_queue`'s own established shape).
+## Story build-validation-009 adds TWO more, [LoopPayoffSignalSurface] and
+## [LoopPayoffAdapter] (23 -> 25) -- updated consciously, not incidentally.
 func get_injected_tier_modules() -> Array[Node]:
 	return [
 		_voxel_world,
@@ -1551,4 +1631,6 @@ func get_injected_tier_modules() -> Array[Node]:
 		_villager_body_presenter,
 		_camera_mirror,
 		_world_lighting,
+		_loop_payoff_signal_surface,
+		_loop_payoff_adapter,
 	]

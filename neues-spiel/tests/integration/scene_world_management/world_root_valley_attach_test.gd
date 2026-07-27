@@ -206,7 +206,11 @@ func test_hosted_building_system_and_villager_ai_modules_are_children_of_valley(
 	# consciously, not incidentally. [VillagerOnSiteGate]/
 	# [VillagerSealPreventionGate] are `RefCounted` collaborators, not scene
 	# children -- they do not affect this count, mirroring
-	# [ConstructionJobQueue]'s own established precedent.
+	# [ConstructionJobQueue]'s own established precedent. Story
+	# build-validation-009 ("Loop-payoff surface receives real signals,"
+	# milestone criterion #7) adds TWO more hosted children --
+	# [LoopPayoffSignalSurface] and [LoopPayoffAdapter] -- (27 -> 29), updated
+	# consciously, not incidentally.
 	var world: GameWorld = auto_free(GameWorld.new())
 	var database: MockResourceItemDatabase = auto_free(MockResourceItemDatabase.new())
 	database.configure_ready_immediately()
@@ -218,7 +222,7 @@ func test_hosted_building_system_and_villager_ai_modules_are_children_of_valley(
 
 	# Assert
 	var valley: Valley = world.get_valley() as Valley
-	assert_int(valley.get_child_count()).is_equal(27)
+	assert_int(valley.get_child_count()).is_equal(29)
 	assert_object(valley.get_voxel_world_mesher()).is_not_null()
 	assert_object(valley.get_voxel_world_mesh_streamer()).is_not_null()
 	assert_object(valley.get_tool_state_machine()).is_not_null()
@@ -270,6 +274,15 @@ func test_hosted_building_system_and_villager_ai_modules_are_children_of_valley(
 	assert_object(valley.get_villager_onsite_gate()).is_not_null()
 	assert_object(valley.get_villager_seal_prevention_gate()).is_not_null()
 	assert_object(valley.get_furniture_bed_provider().build_validation).is_same(valley.get_build_validation())
+	# Story build-validation-009 ("Loop-payoff surface receives real signals")
+	# adds TWO more hosted children -- LoopPayoffSignalSurface and
+	# LoopPayoffAdapter -- (27 -> 29). The adapter's own two dependencies are
+	# wired to the SAME real, hosted instances every other cross-reference in
+	# this suite already checks.
+	assert_object(valley.get_loop_payoff_signal_surface()).is_not_null()
+	assert_object(valley.get_loop_payoff_adapter()).is_not_null()
+	assert_object(valley.get_loop_payoff_adapter().build_validation).is_same(valley.get_build_validation())
+	assert_object(valley.get_loop_payoff_adapter().payoff_surface).is_same(valley.get_loop_payoff_signal_surface())
 
 
 # ---------------------------------------------------------------------------

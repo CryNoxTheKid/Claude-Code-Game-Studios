@@ -384,7 +384,7 @@ sprint_10_history:
       name: "Loop-payoff surface receives real signals (criterion #7) — ⚠ externally blocked"
       file: "production/epics/build-validation-navigability/story-009-loop-payoff-real-signal-wiring.md"
       priority: nice-to-have
-      status: not-delivered-carried-to-s11
+      status: complete
       owner: "godot-gdscript-specialist"
       estimate_days: 0.5
       blocker: "⛔ EXTERNAL: technical-director concurrence on CD Ruling 2's implementation form — DO NOT START WITHOUT IT. ⚑ THE COLLISION TO RESOLVE FIRST: CD Ruling 2 specifies PayoffDetail as a typed RefCounted sidecar, and S8 MEASURED that Godot 4.7 cannot @export RefCounted/Object. CD's own scope note permits TD to substitute an equivalent form (Resource vs RefCounted) provided the five assertable conditions hold — this is a DECISION, not a code workaround to improvise. FIRST TRIM CANDIDATE (it is externally blocked anyway; cutting it costs nothing this sprint). In-sprint dep: bv-007. Dep bv-006 Complete. Injected-tier binding only; grep-guard proves zero placeholder emitters remain on the payoff path; LoopPayoffSignalSurface's parameter list is NEVER reshaped (a new payoff kind is a new payoff_type value); NO CONNECT_DEFERRED on this path — it would break Rule 10's one-pass-one-frame reconciliation unit"

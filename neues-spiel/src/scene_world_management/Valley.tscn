@@ -1,4 +1,4 @@
-[gd_scene load_steps=36 format=3]
+[gd_scene load_steps=38 format=3]
 
 [ext_resource type="Script" path="res://src/scene_world_management/valley.gd" id="1_valley"]
 [ext_resource type="Script" path="res://src/voxel_world/voxel_world_grid.gd" id="2_voxelgrid"]
@@ -37,6 +37,8 @@
 [ext_resource type="Resource" path="res://data/config/world_lighting_config.tres" id="33_worldlightingcfg"]
 [ext_resource type="Script" path="res://src/build_validation/build_validation.gd" id="34_buildvalidation"]
 [ext_resource type="Resource" path="res://data/config/build_validation_config.tres" id="35_buildvalidationcfg"]
+[ext_resource type="Script" path="res://src/presentation/loop_payoff_signal_surface.gd" id="36_looppayoffsurface"]
+[ext_resource type="Script" path="res://src/presentation/loop_payoff_adapter.gd" id="37_looppayoffadapter"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_torchindicator"]
 shading_mode = 0
@@ -149,3 +151,9 @@ config = ExtResource("30_undoredostackcfg")
 [node name="WorldLighting" type="Node" parent="."]
 script = ExtResource("32_worldlighting")
 config = ExtResource("33_worldlightingcfg")
+
+[node name="LoopPayoffSignalSurface" type="Node" parent="."]
+script = ExtResource("36_looppayoffsurface")
+
+[node name="LoopPayoffAdapter" type="Node" parent="."]
+script = ExtResource("37_looppayoffadapter")

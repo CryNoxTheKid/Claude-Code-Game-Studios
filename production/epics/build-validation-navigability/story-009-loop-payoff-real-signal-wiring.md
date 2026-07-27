@@ -1,7 +1,7 @@
 # Story 009: Loop-payoff surface receives real signals (milestone criterion #7)
 
 > **Epic**: Build Validation & Navigability
-> **Status**: Ready
+> **Status**: Complete (2026-07-27 — 1541/1541 suite green, 0 orphans, parent-verified; carried twice from Sprint 10, delivered)
 > **Layer**: Feature (wiring into Presentation)
 > **Type**: Integration
 > **Estimate**: ~0.5 agent-day
@@ -167,3 +167,41 @@ compiles and behaves verbatim, and the signal itself does not move.
 - Depends on: 006 (`shelter_status_changed`), 007 (`room_recognized` + pacing). **The signal-shape decision is RESOLVED** by CD Ruling 2 (provisional). **Remaining external input**: technical-director concurrence on the implementation form (the CD ruled the experience requirements; TD owns the form and must confirm constraints 1–4 and that minimums 1–5 stay assertable).
 - Unlocks: milestone criterion #7
 
+
+---
+
+## Closure Note (2026-07-27)
+
+Delivered after being carried twice. `LoopPayoffAdapter` subscribes to exactly the
+two signals the story names and translates each into one payoff type;
+`LoopPayoffSignalSurface`'s signal shape is untouched — the new typed
+`PayoffDetail` rides as a trailing optional argument, so a new payoff kind stays
+a new `payoff_type` VALUE, never a new signal or a reshaped parameter list.
+
+NON-VACUOUS BY CONSTRUCTION: the crown test boots the real `GameWorld` →
+`Valley`, forces real chunk residency, writes real cells through the real
+`VoxelWorldGrid`, and asserts the real hosted `BuildValidation` →
+`LoopPayoffAdapter` → `LoopPayoffSignalSurface` chain fires with real detail
+data — then places a real bed through the real `FurnitureRegistry` and proves
+`shelter_status` arrives. The file does not even compile against the pre-story
+codebase, so it cannot pass vacuously.
+
+FIXTURE TRAP, worth recording because it cost a full cycle: the idempotency test
+roofed only the escape cell and then asserted the region read SEALED. It did not
+— the analysis pass never reseeded the region containing the interior cell, so
+`get_region_status()` returned the stale ROOM verdict. The test would have failed
+against a perfectly correct product. `room_recognized_pacing_test.gd` already
+documents the remedy at length: bundle a same-content rewrite of a known region
+member with the roof write to force the reseed. Applied at both the seal and the
+reopen, with the reason recorded inline.
+
+ALSO UNDOCUMENTED UNTIL NOW, surfaced during this work: the world is NOT empty
+after boot. Chunks lazily regenerate real deterministic terrain the instant
+residency is requested, even though `generate_terrain()` is never called
+eagerly. Tests building geometry against a real booted `VoxelWorldGrid` must
+build above `base_height + amplitude` (Y >= 8 on the shipped config) or probe for
+clear cells first. Two separate agents hit this today.
+
+STILL TRUE, per the story's own text: minimum 5's "flourish-then-room" ordering
+half cannot be tested — no Building-System flourish emitter exists on this
+surface yet. It ships as a regression grep-guard only.
