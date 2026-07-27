@@ -188,7 +188,7 @@ stories:
     name: "Wandering / idle micro-behaviors — Cluster B's opener, CD-protected, unblocks criterion #9"
     file: "production/epics/villager-ai-behavior/story-019-wandering-micro-behaviors.md"
     priority: should-have
-    status: backlog
+    status: complete
     owner: "ai-programmer"
     estimate_days: 1.0
     blocker: "Its own header depends on villager-ai-006 + 007, both Complete — BLOCKED ON NOTHING, day one on lane B. Deferred from S09 and S10; Cluster B is CD-PROTECTED and cutting it requires CD sign-off. Idle fall-through produces bounded, reachable wandering off the EXISTING graph — never a new pathfinder; deterministic under the tick contract, no wall-clock. THE MILESTONE'S OLDEST OPEN FINDING RIDES ON THIS: criterion #9 says the CD ruled the slice debrief's #1 'world lacks life' finding stays OPEN until presentation-001 Sub-B lands, and Sub-B is gated on exactly this story."

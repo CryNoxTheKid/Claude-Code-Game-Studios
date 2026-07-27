@@ -344,6 +344,55 @@
 ## own `other_villager_cells` parameter (that function's own doc comment:
 ## "the watchdog's responsibility to assemble... never queries a
 ## population/registry itself").
+##
+## Story villager-ai-019 (this revision) implements [method _tick_wandering]
+## itself -- GDD F3 (wander-target selection) / Rule 7c (idle micro-behaviors)
+## -- no longer a stub. The actual flood-fill/micro-behavior algorithms live
+## on the new stateless [VillagerWanderSelector] library (see its own doc
+## comment for the full reachability/determinism rationale); this class owns
+## only the CADENCE ([member _ticks_since_last_wander_pick], counting up to
+## [member VillagerAIConfig.wander_interval] independently of [member
+## _ticks_since_last_decision] -- mirrors [VillagerAi]'s own Breather-beat
+## doc note that a life-texture beat "runs on a dedicated ticks-since-entry
+## counter, independent of `decision_interval`") and WIRES the result: a
+## `WALK`/`BED_DRIFT` pick calls the SAME [method start_traveling] every
+## other target-selection story already uses (arrival state `WANDERING`),
+## reusing its whole existing abandon/redirect machinery for free -- a
+## voxel-world write that strands a wander walk mid-route falls through
+## [method _abandon_travel]'s pre-existing `PursuedActivity.NONE` branch
+## ("abandon and re-decide," unchanged since story villager-ai-009), which
+## already satisfies GDD Edge Case 1's own "for a wander target — pick a new
+## one" wording with zero new code. A `PAUSE_LOOK`/`SIT` pick, or a `WALK`/
+## `BED_DRIFT` pick whose own target resolves to [member current_cell]
+## itself (this story's AC31/Edge Case 8 -- a flood-fill returning only the
+## current cell), is a deliberate no-op: the villager stays in `State.
+## WANDERING`, [member _tick_wandering] simply re-fires the next time its own
+## counter reaches `wander_interval` -- never an error, never a forced state
+## change.
+##
+## **Determinism, no live RNG, no wall-clock** (this sprint's own QA-plan
+## grep guard for this story: "no wall-clock dependency
+## (`OS.get_ticks_msec`/`Time.get_ticks_msec` absent from any decision
+## path)"): [member wander_rng] is a per-villager [RandomNumberGenerator],
+## mirroring [member nav_graph]'s own "DI'd, nil-safe, assigned externally
+## before first use, never `setup()`-asserted" precedent -- but unlike a
+## mocked-boundary mocked default, an unwired villager's [method
+## _get_wander_rng] lazily self-constructs one seeded from [member
+## villager_id] itself, NEVER `randomize()` (which pulls OS-clock entropy)
+## and never any other wall-clock-derived value. This is a deliberate
+## narrowing of the GDD/ADR-0008's own "production uses the live RNG" wording
+## (this story's own interpretation): every draw this class ever makes is a
+## pure function of already-deterministic state (`villager_id`, the fixed
+## sequence of prior draws), so an identical world replayed identically
+## always reproduces an identical wander history end to end -- satisfying
+## this story's AC30 ("wandering runs twice from the same state produce
+## identical paths") for BOTH a test's own explicitly-injected generator
+## (assigned to [member wander_rng] before first use, exactly like [member
+## nav_graph]'s own wiring-order convention) and an untouched production
+## villager alike, with no separate code path between the two. Different
+## villagers still draw independently-varied sequences (different
+## `villager_id` seeds), so the population does not read as one synchronized
+## clock.
 class_name VillagerAi
 extends Node
 
@@ -614,6 +663,19 @@ var unstuck_telemetry: VillagerUnstuckTelemetry = null
 ## this villager's own [method setup] runs.
 var nav_graph: VillagerNavGraph = null
 
+## Story villager-ai-019's own per-villager random source for F3/Rule 7c
+## selection ([VillagerWanderSelector.select_micro_behavior]/[method
+## VillagerWanderSelector.select_wander_target]) -- see this class's own doc
+## comment's villager-ai-019 paragraph for the full "no live RNG, no
+## wall-clock" determinism rationale. Deliberately nil-safe and NOT
+## `setup()`-asserted (mirrors [member nav_graph]'s own precedent exactly):
+## a test assigns an explicitly-seeded [RandomNumberGenerator] here BEFORE
+## Wandering ever runs for full control over the draw sequence; an untouched
+## production villager gets one lazily self-constructed, seeded from [member
+## villager_id], the first time [method _get_wander_rng] is called -- never
+## `randomize()`.
+var wander_rng: RandomNumberGenerator = null
+
 ## This villager's stable identity/processing-order index (GDD Edge Case 3 /
 ## F2 tie-break convention: "stable villager processing order (villager
 ## index)"). Explicitly assigned by whichever code assembles the population
@@ -649,6 +711,25 @@ var _is_set_up: bool = false
 ## request_deciding_pass] on cadence) -- the actual preemption/priority-list
 ## BEHAVIOUR once a pass runs is story 006's scope, untouched here.
 var _ticks_since_last_decision: int = 0
+
+## Ticks elapsed since this villager's last F3/Rule 7c wander pick (Story
+## villager-ai-019) -- a SEPARATE, independently-counting cadence from
+## [member _ticks_since_last_decision] (mirrors GDD 7b's own Breather beat,
+## which "runs on a dedicated ticks-since-entry counter, independent of
+## `decision_interval`"). Only ever advances while [method _tick_wandering]
+## itself runs, i.e. while [member _state] is `State.WANDERING` -- a villager
+## mid-walk toward a chosen wander/bed-drift target is `State.TRAVELING`
+## instead (see [method _perform_wander_pick]'s own doc comment), so this
+## counter naturally pauses for the walk's duration and resumes counting
+## once travel completes and [member _state] returns to `State.WANDERING`.
+var _ticks_since_last_wander_pick: int = 0
+
+## The most recent [enum VillagerWanderSelector.MicroBehavior] this villager
+## drew (Story villager-ai-019) -- `null` until [method _perform_wander_pick]
+## has run at least once (mirrors [method get_owned_bed_cell]'s own
+## "`Variant`, `null` until a real value exists" convention). Read-only
+## observability/test seam, see [method get_last_micro_behavior].
+var _last_micro_behavior: Variant = null
 
 ## DISCRETE, tick-boundary-quantized occupancy value -- the SOLE
 ## authoritative value for every logic/occupancy query (ADR-0009 Decision
@@ -922,6 +1003,14 @@ func get_owned_bed_cell() -> Variant:
 ## _has_owned_bed]'s own doc comment.
 func has_owned_bed() -> bool:
 	return _has_owned_bed
+
+
+## Read-only observability seam (Story villager-ai-019) -- the most recent
+## [enum VillagerWanderSelector.MicroBehavior] this villager drew, or `null`
+## if [method _perform_wander_pick] has never run yet (see [member
+## _last_micro_behavior]'s own doc comment).
+func get_last_micro_behavior() -> Variant:
+	return _last_micro_behavior
 
 
 ## Returns this villager's stable identity/processing-order index (see
@@ -2130,9 +2219,88 @@ func _tick_breather() -> void:
 	pass
 
 
-## Wandering-state tick body -- stub (story 004 wander/idle micro-behaviours).
+## Wandering-state tick body (Story villager-ai-019; GDD F3/Rule 7c). Counts
+## up toward [member VillagerAIConfig.wander_interval] independently of
+## [member _ticks_since_last_decision] (see [member
+## _ticks_since_last_wander_pick]'s own doc comment) and, once the interval
+## elapses, resets the counter and runs [method _perform_wander_pick] --
+## exactly [method _check_decision_interval_trigger]'s own "count up, fire
+## on reaching the knob, reset" shape, applied to a different cadence and a
+## different action. A freshly-`State.WANDERING` villager (tier 3's own
+## `_state = State.WANDERING` assignment, [method _tick_deciding], never
+## edited by this story) starts this counter at its literal field default
+## (`0`), so the FIRST pick fires `wander_interval` ticks after entering
+## Wandering, not immediately -- this story's own minimal, GDD-silent-on-entry
+## interpretation (mirrors every other periodic-cadence counter in this
+## class, none of which force an immediate first fire on state entry either).
 func _tick_wandering() -> void:
-	pass
+	_ticks_since_last_wander_pick += 1
+	if _ticks_since_last_wander_pick < config.wander_interval:
+		return
+	_ticks_since_last_wander_pick = 0
+	_perform_wander_pick()
+
+
+## The F3/Rule 7c pick itself (Story villager-ai-019), called once every
+## `wander_interval` ticks by [method _tick_wandering]. Recomputes the F3
+## flood-fill FRESH from [member current_cell] every pick ([VillagerWanderSelector.
+## flood_fill] -- never a cached set from a prior pick, since the world may
+## have changed and the villager has certainly moved since the last one),
+## then draws a micro-behavior via [method _get_wander_rng] ([VillagerWanderSelector.
+## select_micro_behavior], bed-drift eligible iff [member _has_owned_bed]) and
+## resolves it to a target cell:
+## - `BED_DRIFT`: [VillagerWanderSelector.select_bed_drift_target] against
+##   [member _owned_bed_cell] (only ever drawable when a bed IS owned, see
+##   that selector's own eligibility gate).
+## - `WALK`: [VillagerWanderSelector.select_wander_target] -- a further
+##   uniform draw from the SAME flood-filled set, same `rng` stream.
+## - `PAUSE_LOOK`/`SIT`: no target selection at all -- these are stationary
+##   by definition; `target` is left at [member current_cell].
+##
+## A resolved `target` equal to [member current_cell] (a stationary pick, OR
+## a `WALK`/`BED_DRIFT` pick that degenerated to the current cell -- this
+## story's AC31/Edge Case 8: the flood-fill returned only the current cell)
+## is a pure no-op: [member _state] stays `State.WANDERING`, nothing paths
+## anywhere, [method _tick_wandering]'s own counter simply re-fires next
+## interval. Otherwise, [method start_traveling] is called with arrival state
+## `State.WANDERING` -- the SAME travel/abandon/redirect machinery every
+## other target-selection story already wired (see this class's own doc
+## comment's villager-ai-019 paragraph for why this needs zero new
+## abandon-handling code).
+func _perform_wander_pick() -> void:
+	var flood_cells: Array[Vector3i] = VillagerWanderSelector.flood_fill(
+		self, current_cell, config.wander_radius
+	)
+	var rng: RandomNumberGenerator = _get_wander_rng()
+	var behavior: VillagerWanderSelector.MicroBehavior = VillagerWanderSelector.select_micro_behavior(
+		rng, _has_owned_bed
+	)
+	_last_micro_behavior = behavior
+	var target: Vector3i = current_cell
+	match behavior:
+		VillagerWanderSelector.MicroBehavior.BED_DRIFT:
+			target = VillagerWanderSelector.select_bed_drift_target(flood_cells, _owned_bed_cell)
+		VillagerWanderSelector.MicroBehavior.WALK:
+			target = VillagerWanderSelector.select_wander_target(flood_cells, rng)
+		_:
+			pass
+	if target == current_cell:
+		return
+	start_traveling(target, State.WANDERING)
+
+
+## Lazily-defaulted accessor for [member wander_rng] (Story villager-ai-019)
+## -- see that field's own doc comment for the full DI/determinism contract.
+## Constructs and seeds one, deterministically from [member villager_id],
+## the first time this is ever called for a villager nobody wired a
+## generator onto directly; a test (or a future population assembler) that
+## assigns [member wander_rng] BEFORE this is ever called always wins --
+## this branch never overwrites an already-present generator.
+func _get_wander_rng() -> RandomNumberGenerator:
+	if wander_rng == null:
+		wander_rng = RandomNumberGenerator.new()
+		wander_rng.seed = villager_id
+	return wander_rng
 
 
 # =============================================================================

@@ -363,8 +363,16 @@ func test_tick_state_dispatches_without_error_for_every_state() -> void:
 	# no-op case that leaves state unchanged, exactly like every other
 	# still-a-stub branch here; the BUILT/revoked-transition branches are
 	# `build_job_cycle_test.gd`'s own scope, not this structural-dispatch
-	# test's.
+	# test's. Story villager-ai-019 gives the `State.WANDERING` branch real
+	# behaviour too ([method VillagerAi._tick_wandering]), which reads
+	# [member VillagerAi.config]'s own `wander_interval` knob unconditionally,
+	# every call -- unlike `State.DECIDING`'s gated body, nothing shields this
+	# branch from running for real the moment `_state` is set to `WANDERING`
+	# above. `config` is wired here for that reason, a real
+	# [VillagerAIConfig] with its own literal defaults, never a
+	# story-019-specific mock.
 	var villager: VillagerAi = auto_free(VillagerAi.new())
+	villager.config = VillagerAIConfig.new()
 	villager.scheduler = VillagerDecidingScheduler.new()
 	villager._claimed_blueprint_cell = BlueprintCell.new(
 		Vector3i(0, 0, 0), BlueprintCell.MicroState.UNDER_CONSTRUCTION

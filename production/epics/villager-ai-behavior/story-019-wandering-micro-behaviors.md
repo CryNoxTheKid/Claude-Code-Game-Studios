@@ -1,7 +1,7 @@
 # Story 019: Wandering & idle micro-behaviors (F3)
 
 > **Epic**: Villager AI & Behavior
-> **Status**: Ready
+> **Status: Complete (2026-07-27 — 1437/1437 suite green 0 orphans, parent-verified; unblocks presentation-001 Sub-B)
 > **Layer**: Core
 > **Type**: Logic
 > **Estimate**: ~1 agent-day
