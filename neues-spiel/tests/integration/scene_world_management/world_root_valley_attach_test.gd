@@ -189,7 +189,10 @@ func test_hosted_building_system_and_villager_ai_modules_are_children_of_valley(
 	# (14 -> 22). [BuildProjectRegistry]/[ConstructionJobQueue]/[RemovalTool]/
 	# [PlanOnlyUndoGate]/[FurnitureRegistry]/[FurnitureBedProvider] are
 	# `RefCounted` collaborators, not scene children -- they do not affect
-	# this count.
+	# this count. Story cam-013 (Camera hosting in the shipped scene) adds TWO
+	# more -- [ValleyCamera]/[CameraMirror] (22 -> 24) -- updated consciously,
+	# not incidentally, per that story's own dev-story instructions to flag
+	# this file.
 	var world: GameWorld = auto_free(GameWorld.new())
 	var database: MockResourceItemDatabase = auto_free(MockResourceItemDatabase.new())
 	database.configure_ready_immediately()
@@ -201,7 +204,7 @@ func test_hosted_building_system_and_villager_ai_modules_are_children_of_valley(
 
 	# Assert
 	var valley: Valley = world.get_valley() as Valley
-	assert_int(valley.get_child_count()).is_equal(22)
+	assert_int(valley.get_child_count()).is_equal(24)
 	assert_object(valley.get_voxel_world_mesher()).is_not_null()
 	assert_object(valley.get_voxel_world_mesh_streamer()).is_not_null()
 	assert_object(valley.get_tool_state_machine()).is_not_null()
@@ -230,6 +233,12 @@ func test_hosted_building_system_and_villager_ai_modules_are_children_of_valley(
 	assert_object(valley.get_construction_job_queue()).is_not_null()
 	assert_object(valley.get_removal_tool()).is_not_null()
 	assert_object(valley.get_plan_only_undo_gate()).is_not_null()
+	# Story cam-013 (Camera hosting in the shipped scene) adds TWO more hosted
+	# children -- ValleyCamera (a plain Camera3D) and CameraMirror (the driver
+	# module) -- (22 -> 24). Updated consciously, not incidentally, per that
+	# story's own dev-story instructions to flag this file.
+	assert_object(valley.get_valley_camera()).is_not_null()
+	assert_object(valley.get_camera_mirror()).is_not_null()
 	assert_object(valley.get_furniture_registry()).is_not_null()
 	assert_object(valley.get_furniture_bed_provider()).is_not_null()
 

@@ -32,6 +32,7 @@
 [ext_resource type="Resource" path="res://data/config/ghost_preview_config.tres" id="28_ghostpreviewcfg"]
 [ext_resource type="Script" path="res://src/building_system/undo_redo_stack.gd" id="29_undoredostack"]
 [ext_resource type="Resource" path="res://data/config/undo_redo_stack_config.tres" id="30_undoredostackcfg"]
+[ext_resource type="Script" path="res://src/camera_input/camera_mirror.gd" id="31_cameramirror"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_torchindicator"]
 shading_mode = 0
@@ -60,6 +61,12 @@ script = ExtResource("6b_meshstreamer")
 [node name="CameraInput" type="Node" parent="."]
 script = ExtResource("4_camerainput")
 config = ExtResource("5_cameracfg")
+
+[node name="ValleyCamera" type="Camera3D" parent="."]
+current = true
+
+[node name="CameraMirror" type="Node" parent="."]
+script = ExtResource("31_cameramirror")
 
 [node name="ToolStateMachine" type="Node" parent="."]
 script = ExtResource("7_toolsm")

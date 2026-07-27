@@ -40,6 +40,17 @@
 ##   `drain_pending_async_reads(` nor `wait_for_async_residency_idle(` appears
 ##   inside any `_process`/`_physics_process` function body anywhere under
 ##   `neues-spiel/src/`.
+## - **AC1/AC6 (camera-input story cam-013)**: the boot-invariant assertion
+##   block's own growth mechanism (`production/sprints/sprint-10.md`'s
+##   process finding, this project's countermeasure for "ship-green-and-
+##   uncalled") -- one line added per landed system. The real boot hosts
+##   exactly one `Camera3D` under `Valley`, and it is `current`. The richer
+##   AC2/AC3/AC4/AC5 claims (mirrors CameraInput one-way, target near the
+##   settlement not the origin, no new input handler) have their own
+##   dedicated file, `camera_hosting_test.gd`, per this story's own Test
+##   Evidence note -- mirroring `villager_need_seeding_boot_test.gd`'s own
+##   established "independent cluster large enough for its own file"
+##   precedent.
 class_name WorldGenesisBootTest
 extends GdUnitTestSuite
 
@@ -114,6 +125,16 @@ func _drive_residency_until_settled(grid: VoxelWorldGrid, focus: Vector3i, ceili
 		previous_resident_count = resident_count
 		if (Time.get_ticks_usec() - start_usec) >= ceiling_usec:
 			return
+
+
+## Recursive Camera3D count, mirroring `tools/settlement_overview_capture.gd`'s
+## own `_count_cameras` helper -- used by the AC1/AC6 (story cam-013)
+## boot-invariant assertion below.
+func _count_camera3d_nodes(node: Node) -> int:
+	var count: int = 1 if node is Camera3D else 0
+	for child: Node in node.get_children():
+		count += _count_camera3d_nodes(child)
+	return count
 
 
 func _small_config(seed_value: int, suffix: String) -> VoxelWorldConfig:
@@ -203,6 +224,16 @@ func test_real_boot_genesis_produces_a_populated_active_world() -> void:
 	assert_bool(nav_graph.is_built()).is_true()
 	var path: Array[Vector3i] = nav_graph.find_path(pillar_a, pillar_b)
 	assert_bool(path.size() > 0).is_true()
+
+	# AC1/AC6 (camera-input story cam-013, the boot-invariant assertion block's
+	# own growth mechanism -- one line added per landed system): exactly one
+	# Camera3D is hosted under Valley, and it is current. Before this story
+	# the shipped scene chain hosted zero Camera3D nodes at all.
+	var camera_count: int = _count_camera3d_nodes(valley)
+	assert_int(camera_count).is_equal(1)
+	var valley_camera: Camera3D = valley.get_valley_camera()
+	assert_object(valley_camera).is_not_null()
+	assert_bool(valley_camera.current).is_true()
 
 
 func test_real_boot_failed_rid_never_attaches_valley_so_genesis_cannot_have_run() -> void:

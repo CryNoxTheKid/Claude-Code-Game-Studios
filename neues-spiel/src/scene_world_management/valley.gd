@@ -350,6 +350,33 @@
 ## NeedsMood.is_set_up] first (AC-SEED-AFTER-SETUP: seeding must read
 ## POST-validate/clamp config, never pre-`setup()` state) -- a
 ## code-enforced ordering guarantee, not merely a documented one.
+##
+## Story cam-013 (Camera hosting in the shipped scene -- the sixth instance
+## of ship-green-and-uncalled this project has hit, and the most visible:
+## before this story `game_world.tscn` -> `Valley.tscn` hosted ZERO
+## [Camera3D] nodes, so a human launching the real game saw nothing at all,
+## despite `CameraInput`'s own orbit/pan/zoom math being fully landed and
+## tested). Hosts [member _valley_camera] (a plain, scripted-nowhere
+## [Camera3D], `current = true` authored directly in `Valley.tscn`) and
+## [member _camera_mirror] (the real injected-tier module that drives it) --
+## structural hosting + code-assigned cross-sibling DI, on the SAME
+## established precedent as every other pairing above (see e.g. [member
+## _torch_flicker] / [member _ambient_torch_light]). [CameraInput] ITSELF is
+## completely UNTOUCHED by this story (AC3) -- its own class doc comment's
+## "why no live Camera3D" rationale stays true; the mirroring lives here, in
+## the hosting layer, via [CameraMirror]'s own one-way read-from-CameraInput/
+## write-to-Camera3D relationship (see that class's own doc comment for the
+## full rationale, including the frame-ordering hazard it fixes with its own
+## [member Node.process_priority] -- deliberately scoped to ONLY that small
+## driver node, leaving THIS class's own [method _process] -- the unrelated,
+## pre-existing vox-018 residency/mesh-window drive -- completely untouched).
+## No new `_input()`/`_unhandled_input()` handler is introduced anywhere by
+## this story (AC5) -- [CameraMirror] reads no [InputEvent] at all. Because
+## [method _run_world_genesis] (story scene-005) already calls [method
+## CameraInput.set_target] with the roster's own world-center start-focus
+## cell BEFORE this class's very first rendered frame, the hosted camera is
+## already framed on the starting roster's neighbourhood the instant boot
+## reaches ACTIVE (AC4) -- no additional target-setting call was needed here.
 class_name Valley
 extends Node3D
 
@@ -367,6 +394,24 @@ extends Node3D
 ## `camera-input` epic, already-landed story cam-001/002). Structural child
 ## only -- see [member _voxel_world]'s doc comment.
 @onready var _camera_input: CameraInput = $CameraInput
+
+## Hosted, passive [Camera3D] the shipped scene chain actually renders
+## through (Story cam-013 -- "Camera hosting in the shipped scene"; before
+## this story, `game_world.tscn` -> `Valley.tscn` hosted zero [Camera3D]
+## nodes at all). Owns no config/script of its own -- [member _camera_mirror]
+## is the real injected-tier module that drives its transform every frame;
+## `current = true` is authored directly on this node in `Valley.tscn`
+## (there is exactly one [Camera3D] anywhere in this scene's own subtree, so
+## no runtime arbitration is needed for it to become the active camera).
+@onready var _valley_camera: Camera3D = $ValleyCamera
+
+## Hosted [CameraMirror] instance (Story cam-013). Structural child --
+## [member CameraMirror.camera]/[member CameraMirror.camera_input] are
+## code-assigned Node-typed cross-references in [method _wire_hosted_modules],
+## mirroring every other hosted cross-sibling wiring on this class. See that
+## class's own doc comment for the full one-way mirror + frame-ordering
+## rationale (AC2/AC3).
+@onready var _camera_mirror: CameraMirror = $CameraMirror
 
 ## Hosted Voxel World mesh view-window streamer instance (ADR-0001
 ## injected-tier module; `voxel-world` epic, story vox-015 landed the
@@ -629,6 +674,10 @@ func _wire_hosted_modules() -> void:
 	_villager_roster_provider = _ValleyRosterProvider.new(self)
 	_villager_body_presenter.roster_provider = _villager_roster_provider
 
+	# Story cam-013: the camera-mirror driver's two Node-typed cross-refs.
+	_camera_mirror.camera = _valley_camera
+	_camera_mirror.camera_input = _camera_input
+
 	# Story scene-007: the build-tool tier's cross-sibling Node references +
 	# the armed-tool -> resolver router. See class doc comment's own Story
 	# scene-007 paragraphs for the full rationale.
@@ -808,6 +857,17 @@ func get_voxel_world_mesher() -> VoxelWorldMesher:
 ## Returns the hosted Camera & Input instance.
 func get_camera_input() -> CameraInput:
 	return _camera_input
+
+
+## Returns the hosted, passive [Camera3D] the shipped scene chain actually
+## renders through (Story cam-013).
+func get_valley_camera() -> Camera3D:
+	return _valley_camera
+
+
+## Returns the hosted [CameraMirror] instance (Story cam-013).
+func get_camera_mirror() -> CameraMirror:
+	return _camera_mirror
 
 
 ## Returns the hosted Voxel World mesh view-window streamer instance
@@ -1140,4 +1200,5 @@ func get_injected_tier_modules() -> Array[Node]:
 		_villager_ai,
 		_torch_flicker,
 		_villager_body_presenter,
+		_camera_mirror,
 	]

@@ -1,7 +1,7 @@
 # Story 013: Camera hosting — the shipped game has no camera
 
 > **Epic**: Camera & Input
-> **Status**: Ready
+> **Status**: Complete (2026-07-27 — 1493/1493 suite green, 0 orphans, parent-verified; live scene tree now reports 'Camera3D nodes hosted by the shipped Valley: 1')
 > **Layer**: Core
 > **Type**: Integration
 > **Estimate**: 1 day
@@ -46,21 +46,21 @@ person can look at and one they cannot.
 
 ## Acceptance Criteria
 
-- [ ] AC1: The shipped scene chain (`game_world.tscn` → `Valley.tscn`) hosts exactly one
+- [x] AC1: The shipped scene chain (`game_world.tscn` → `Valley.tscn`) hosts exactly one
       `Camera3D`, and it is `current` once boot reaches ACTIVE.
-- [ ] AC2: That camera's transform is driven every frame from the hosted `CameraInput`'s
+- [x] AC2: That camera's transform is driven every frame from the hosted `CameraInput`'s
       own `get_camera_position()` / `get_target()` — the camera mirrors the module, the
       module never reads back from the camera (no ordering hazard; this is exactly the
       relationship `camera_input.gd`'s class doc already specifies and `camera_sandbox.gd`
       already implements).
-- [ ] AC3: `CameraInput` is not modified to hold a camera. The mirroring lives in the
+- [x] AC3: `CameraInput` is not modified to hold a camera. The mirroring lives in the
       hosting layer, so the "why no live Camera3D" rationale in its class doc stays true.
-- [ ] AC4: On boot the camera is framed on the starting roster's actual location, not on
+- [x] AC4: On boot the camera is framed on the starting roster's actual location, not on
       the world origin — a player must see their settlement without touching the mouse.
-- [ ] AC5: Input arbitration is unchanged (ADR-0010): the camera consumes only what
+- [x] AC5: Input arbitration is unchanged (ADR-0010): the camera consumes only what
       `CameraInput` already owns; no new `_input`/`_unhandled_input` handler is introduced
       outside it.
-- [ ] AC6: A boot-invariant assertion is added to Valley's existing block: exactly one
+- [x] AC6: A boot-invariant assertion is added to Valley's existing block: exactly one
       `Camera3D` is hosted and current after boot. This is the anti-regression lever —
       the invariant that would have caught this in the first place.
 

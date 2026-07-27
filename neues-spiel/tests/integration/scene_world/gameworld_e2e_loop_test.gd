@@ -131,6 +131,8 @@ func test_ac_assembly_gameworld_wires_all_tier_modules_into_valley_and_boots_act
 	assert_object(valley.get_furniture_tool()).is_not_null()
 	assert_object(valley.get_ghost_preview()).is_not_null()
 	assert_object(valley.get_undo_redo_stack()).is_not_null()
+	# Camera hosting (Story cam-013 -- "Camera hosting in the shipped scene")
+	assert_object(valley.get_camera_mirror()).is_not_null()
 
 	# The assembly seam (GameWorld._gather_valley_tier_modules) fed exactly
 	# these twelve (story vox-018 added the mesh streamer as a ninth; M01
@@ -146,9 +148,12 @@ func test_ac_assembly_gameworld_wires_all_tier_modules_into_valley_and_boots_act
 	# ALL EIGHT actually expose `setup()` and are therefore ALL EIGHT appended
 	# to Valley.get_injected_tier_modules() (12 -> 20), not merely five --
 	# corrected count, not the sprint plan's own pre-authoring guess of "20"
-	# which happened to already assume this.
+	# which happened to already assume this. Story cam-013 (Camera hosting in
+	# the shipped scene) adds ONE further injected-tier module, CameraMirror
+	# (20 -> 21) -- updated consciously, not incidentally, per that story's
+	# own dev-story instructions to flag this file.
 	assert_array(world.injected_tier_modules).contains_exactly(valley.get_injected_tier_modules())
-	assert_int(world.injected_tier_modules.size()).is_equal(20)
+	assert_int(world.injected_tier_modules.size()).is_equal(21)
 
 
 func test_ac_assembly_hosted_modules_ran_through_boot_gated_setup_never_their_own_ready() -> void:
