@@ -46,11 +46,22 @@
 ##    single normal completion as "trapping" (standing exactly where solid
 ##    content is about to appear always fails standability), which is
 ##    plainly not what Rule 16 intends -- so this specific pairing is
-##    exempted BEFORE the trap check ever runs, at the cost of the villager
-##    ending up standing inside now-solid content, cleaned up later by the
-##    Unstuck Watchdog's own rescue (Story villager-ai-015) once it notices
-##    `current_cell` fails standability, on ITS normal schedule. This class
-##    performs no rescue of any kind itself.
+##    exempted BEFORE the trap check ever runs. **Story villager-ai-024
+##    fix**: this branch now ALSO calls [method
+##    VillagerAi.climb_onto_self_sealed_cell] on its way out -- pre-fix, the
+##    villager was simply left standing inside the now-solid content until
+##    the Unstuck Watchdog's own rescue (Story villager-ai-015) eventually
+##    noticed `current_cell` failed standability and teleported it away
+##    (usually sideways/down, per that search's own lexicographic tie-break --
+##    never back onto the column it was building), which is THE reason a
+##    wall's third layer and above could never be reached by job selection at
+##    all (see that method's own doc comment for the full root-cause/fix
+##    rationale). The exemption's own logic is completely unchanged -- still
+##    unconditional, still ahead of the trap check/`abandon_count` -- only the
+##    villager's resulting POSITION is now correct instead of embedded. This
+##    class still performs no rescue/trap-check of its own for this branch;
+##    the Unstuck Watchdog remains the fallback for the rare case the bumped
+##    cell itself is not standable.
 ## 2. **Livelock escape** (GDD Rule 16b, F6, AC56): once `abandon_count`
 ##    reaches `seal_prevention_abandon_limit` for a (job, villager) pair
 ##    whose builder stands SOMEWHERE ELSE (not on its own job cell -- e.g. a
@@ -164,6 +175,18 @@ func _evaluate(
 	if worker == null:
 		return true
 	if worker.get_current_cell() == cell:
+		# Story villager-ai-024 fix (the wall-plateau defect): a self-seal no
+		# longer just entombs the builder for the Watchdog to clean up later
+		# -- it steps the villager UP onto the surface it is about to create,
+		# via the SAME synchronous call, so the very next Deciding pass finds
+		# it standing exactly on this column's next blueprint cell (see
+		# [method VillagerAi.climb_onto_self_sealed_cell]'s own doc comment
+		# for the full root-cause/fix rationale). The exemption itself is
+		# UNCHANGED -- still unconditional, still checked before
+		# `abandon_count`/[method VillagerAi.would_trap_builder] are ever
+		# consulted -- only what happens to the villager's OWN position as a
+		# result is new.
+		worker.climb_onto_self_sealed_cell(cell)
 		return true
 	var count: int = _abandon_counts.get(cell, 0)
 	if count >= _config.seal_prevention_abandon_limit:

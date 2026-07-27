@@ -2218,10 +2218,18 @@ func _tick_working() -> void:
 ## comment), so this villager must release its OWN claim explicitly here, or
 ## a future claim attempt would wrongly find this villager still "holding a
 ## claim" -- before re-entering Deciding.
+##
+## Story villager-ai-024 addition: [method _relocate_if_marooned] runs BEFORE
+## [method request_deciding_pass] -- if this completion left the villager
+## standing somewhere the nav graph cannot reach FROM anywhere else (a wall
+## column's topmost layer, once finished, is exactly this), it is relocated
+## to the nearest reachable standable cell right here, so the very next
+## Deciding pass never has to reason about an unreachable starting position.
 func _complete_claimed_job() -> void:
 	_release_job_claim()
 	_pursued_activity = PursuedActivity.NONE
 	_state = State.DECIDING
+	_relocate_if_marooned()
 	request_deciding_pass()
 
 
@@ -2233,10 +2241,16 @@ func _complete_claimed_job() -> void:
 ## the revocation itself"); calling either again here would be, at best,
 ## redundant, and at worst would wrongly report a legitimate revocation as
 ## an unreachable-job PATHING failure (Rule 6), which it is not.
+##
+## Story villager-ai-024 addition: [method _relocate_if_marooned] runs here
+## too, for the SAME reason as [method _complete_claimed_job]'s own identical
+## addition -- a revocation can leave this villager marooned exactly as a
+## completion can.
 func _abandon_claimed_job() -> void:
 	_claimed_blueprint_cell = null
 	_pursued_activity = PursuedActivity.NONE
 	_state = State.DECIDING
+	_relocate_if_marooned()
 	request_deciding_pass()
 
 
@@ -2415,10 +2429,22 @@ func request_vacate(requester_cell: Vector3i) -> bool:
 ## RESCUE-TARGET eligibility filter, a distinct concern from "is this
 ## villager stuck").
 func _has_any_legal_step_from_current_cell() -> bool:
+	return _has_any_legal_step_from(current_cell)
+
+
+## General twin of [method _has_any_legal_step_from_current_cell] -- the SAME
+## check against an ARBITRARY [param from_cell], not only [member
+## current_cell] (Story villager-ai-024 addition: [method
+## _relocate_if_marooned]'s own candidate-usefulness filter needs to ask this
+## about a rescue-search CANDIDATE cell, never the villager's own current
+## position). Extracted rather than duplicated -- [method
+## _has_any_legal_step_from_current_cell] is now a one-line delegation to
+## this, byte-for-byte the same check it always was.
+func _has_any_legal_step_from(from_cell: Vector3i) -> bool:
 	for offset: Vector2i in VillagerNavGraph.HORIZONTAL_FULL_OFFSETS:
 		for dy: int in VillagerNavGraph.VERTICAL_STEP_OFFSETS:
-			var neighbor: Vector3i = current_cell + Vector3i(offset.x, dy, offset.y)
-			if is_standable(neighbor) and is_step_legal(current_cell, neighbor):
+			var neighbor: Vector3i = from_cell + Vector3i(offset.x, dy, offset.y)
+			if is_standable(neighbor) and is_step_legal(from_cell, neighbor):
 				return true
 	return false
 
@@ -2452,10 +2478,59 @@ func _is_self_sealed_at_current_cell() -> bool:
 ## is_standable] inline a second time (this is a pure refactor of this
 ## method's OWN body -- its return value is byte-for-byte unchanged from
 ## before the M01 closure fix).
+##
+## **Story villager-ai-024 fix, second half.** [method
+## climb_onto_self_sealed_cell] means a WORKING villager now routinely stands
+## on a wall column's 3rd-and-higher layer -- a cell [VillagerNavGraph]
+## structurally never connects to anything (see that method's own doc
+## comment) -- for the ENTIRE duration it takes to build that layer, not just
+## the instant of completion. Read literally, the "zero legal step" half of
+## this predicate would count every one of those ticks as "stuck" too,
+## accumulating toward an [member VillagerAIConfig.unstuck_watchdog_threshold_ticks]
+## rescue that ABANDONS a job that is not stuck at all -- it is progressing
+## completely normally, exactly like every job below layer 3 always has.
+## [method _is_actively_building_on_own_claimed_site] exempts EXACTLY that
+## one case (mirrors [VillagerSealPreventionGate]'s own self-seal
+## exemption's reasoning: "the ordinary, common case... not a rare edge
+## case," applied here to the no-legal-step half instead of the
+## self-sealed half) -- a villager genuinely mid-progress on its OWN,
+## currently-`UNDER_CONSTRUCTION` claimed cell has nowhere it NEEDS to step
+## to; it is stationary and productive by design, not stranded. This
+## exemption can only ever suppress the no-legal-step half, only while
+## `State.WORKING`, only for a cell that is this SAME villager's own live
+## claim -- self-seal detection above is completely unaffected (still
+## unconditional, still fires in every state), `TRAVELING`'s no-legal-step
+## check is completely unaffected (a genuinely stranded mid-route villager is
+## exactly as stuck as before), and the instant the job completes or is
+## revoked this exemption stops applying on its own (the claim is gone, or
+## the cell is no longer `UNDER_CONSTRUCTION`) -- no separate reset needed.
 func _is_stuck_at_current_cell() -> bool:
 	if _is_self_sealed_at_current_cell():
 		return true
-	return not _has_any_legal_step_from_current_cell()
+	if _has_any_legal_step_from_current_cell():
+		return false
+	return not _is_actively_building_on_own_claimed_site()
+
+
+## See [method _is_stuck_at_current_cell]'s own "Story villager-ai-024 fix,
+## second half" doc comment paragraph. `true` iff this villager is `State.
+## WORKING` on a [BlueprintCell] it currently holds the claim on
+## ([member _claimed_blueprint_cell]), that cell's own address equals [member
+## current_cell] (the ordinary on-site case every claimed job already
+## requires, Rule 5), AND that cell's [member BlueprintCell.state] still
+## reads [constant BlueprintCell.MicroState.UNDER_CONSTRUCTION] (genuinely
+## still in progress -- a `BUILT` cell means this villager is now self-sealed
+## instead, already covered by the FIRST half of [method
+## _is_stuck_at_current_cell] above; a revoked/canceled cell means [method
+## _tick_working] is about to abandon it next, at which point this exemption
+## correctly stops applying).
+func _is_actively_building_on_own_claimed_site() -> bool:
+	return (
+		_state == State.WORKING
+		and _claimed_blueprint_cell != null
+		and _claimed_blueprint_cell.cell == current_cell
+		and _claimed_blueprint_cell.state == BlueprintCell.MicroState.UNDER_CONSTRUCTION
+	)
 
 
 ## The Unstuck Watchdog's own per-tick entry point (Story villager-ai-015;
@@ -2748,6 +2823,258 @@ func _is_passable_after_write(cell: Vector3i, written_cell: Vector3i) -> bool:
 	if cell == written_cell:
 		return false
 	return _is_passable(cell)
+
+
+## Story villager-ai-024 fix (the wall-plateau defect) -- ONE generalized
+## rule, realized as TWO directional call sites sharing ONE mutation
+## primitive ([method _snap_current_cell_to] below): **when this villager's
+## own construction work leaves it standing somewhere [VillagerNavGraph]
+## cannot reach from anywhere else, move it to the nearest standable cell
+## that IS reachable.** Together with an Unstuck Watchdog rescue (Story
+## villager-ai-015) and tick-boundary travel arrival (Story villager-ai-004),
+## this is ADR-0009's amended set of sanctioned discrete [member current_cell]
+## mutations (see that ADR's own "Story villager-ai-024" addendum) -- never
+## from anywhere else, never interpolated, always paired with a
+## [member _visual_position] snap (no lerp).
+##
+## **Why two call sites, not one search reused twice.** The two moments this
+## rule fires need OPPOSITE guarantees a single search cannot give both at
+## once:
+## - **Climbing UP** (this method, called by [VillagerSealPreventionGate] at
+##   the exact instant its self-seal exemption fires -- `worker.
+##   get_current_cell() == cell`, that class's own doc comment point 1) MUST
+##   land EXACTLY on `sealed_cell + Vector3i(0, 1, 0)` -- the column's own
+##   NEXT blueprint cell, if the column continues -- so the very next Deciding
+##   pass finds it there at Chebyshev distance 0 and claims it immediately,
+##   chaining up any `wall_height` with zero wasted ticks. A generic
+##   nearest-standable-cell BFS ([VillagerRescueTargetSearch], reused
+##   verbatim below for the OTHER direction) would NOT give this guarantee:
+##   its own lexicographic `(y, x, z)` tie-break always prefers a
+##   lower/same-height neighbor (e.g. the adjacent floor) over climbing
+##   straight up -- confirmed directly, this is THE reason the Watchdog's
+##   own pre-existing rescue never once climbed a column on its own, which is
+##   THE reason a wall's third layer and above plateaued forever (root cause,
+##   this story's own AC2 write-up): nothing ever put the villager exactly
+##   there for job selection's true-path check to find. So this direction
+##   stays a cheap, deterministic `+1` -- no search, no ambiguity.
+## - **Climbing/stepping back DOWN** ([method _relocate_if_marooned] below,
+##   called by [method _complete_claimed_job]/[method _abandon_claimed_job]
+##   the instant a job finishes or is revoked) has no single correct fixed
+##   offset -- the ground a column was originally approached from could be in
+##   any horizontal direction, at any distance, and every cell of the column
+##   itself is now solid rock underfoot, so a straight-down retrace is
+##   impossible by construction. This direction genuinely needs a search --
+##   reusing [VillagerRescueTargetSearch.find_rescue_target] VERBATIM (the
+##   SAME BFS/tie-break the Watchdog already trusts, never a second
+##   independently-written search) is exactly right here, since "prefer the
+##   nearest LOWER standable neighbor" is precisely "climb back down to the
+##   ground," the correct resolution for this direction.
+##
+## Both share [method _snap_current_cell_to] for the actual mutation --
+## ONE accounting point for "this is a sanctioned discrete jump," not two
+## independently-written field-assignment blocks.
+func climb_onto_self_sealed_cell(sealed_cell: Vector3i) -> void:
+	_snap_current_cell_to(sealed_cell + Vector3i(0, 1, 0))
+
+
+## See [method climb_onto_self_sealed_cell]'s own doc comment for the full
+## "one generalized rule, two directions" rationale -- this is the DOWNWARD
+## direction. Called only from [method _complete_claimed_job]/[method
+## _abandon_claimed_job], both immediately after clearing this villager's own
+## claim bookkeeping and setting [member _state] to `State.DECIDING`, BEFORE
+## [method request_deciding_pass] re-enters the queue -- so a relocation here
+## is always visible to the very first Deciding pass that follows, never a
+## tick late.
+##
+## A no-op in every case where relocating would be WRONG or unnecessary,
+## checked in order:
+## 1. Self-sealed at [member current_cell] -- [method
+##    climb_onto_self_sealed_cell] already owns this moment; this method
+##    never duplicates or second-guesses that call.
+## 2. **[method _has_available_job_at_current_cell] is true** -- this is the
+##    load-bearing exclusion that keeps [method climb_onto_self_sealed_cell]'s
+##    own chaining intact: standing at an isolated column cell with a REAL
+##    next layer still queued there (mid-column, e.g. just arrived at layer 3
+##    of a 6-tall wall) must NEVER be treated as "marooned" -- the very next
+##    Deciding pass is SUPPOSED to claim and build exactly this cell. Skipping
+##    this check would undo every climb the instant it happened, before the
+##    next layer could ever be claimed.
+## 3. [method _can_still_reach_available_work] is true -- deliberately NOT
+##    "has any legal step to some neighbor": two adjacent finished columns'
+##    own tops can be legally connected to EACH OTHER (an ordinary horizontal
+##    step, same height) while that whole little island remains completely
+##    cut off from every OTHER job site and the ground -- confirmed directly
+##    against a real multi-segment room (a villager that finished two
+##    adjacent columns wandered forever between their two tops, each always
+##    reading "has a legal step," never reaching any of the other eight
+##    still-queued columns). A true-path check against every CURRENTLY
+##    available job (never a mere neighbor-count) is the only test that
+##    actually answers "can this villager still do anything from here" --
+##    see that method's own doc comment.
+## Only once all three are false -- genuinely topped out or cut off, no
+## reachable job anywhere, no legal walk out -- does this method search
+## ([VillagerRescueTargetSearch.find_rescue_target], this villager's own
+## [member config]-supplied `unstuck_rescue_search_radius`/`_max_radius`
+## knobs, the SAME ones the Watchdog uses -- no new tuning knob) for a
+## candidate, then VERIFIES it before committing (see [method
+## _is_useful_relocation_candidate]'s own doc comment for why a raw search
+## result cannot be trusted blindly): a real multi-segment room proved that
+## search alone can return the top of a DIFFERENT already-finished, equally
+## dead-end column (nearer, in pure Chebyshev terms, than the actual ground)
+## -- a "rescue" that trades one isolated perch for another. A failing
+## candidate is excluded (passed back into the NEXT search attempt's own
+## occupant list, so the ring walk cannot return it again) and the search
+## retries, up to [constant MAROONED_RELOCATE_MAX_ATTEMPTS] times -- bounded,
+## deterministic, never an unbounded loop. Exhausting the attempts, or the
+## search itself ever returning no candidate at all (an exceptionally sparse
+## world), leaves the villager exactly where it is -- never relocates to
+## nowhere; the pre-existing Unstuck Watchdog remains the fallback exactly as
+## before this story for that residual case.
+##
+## **Never fires for Edge Case 2's protected scenario** (GDD Rule 15's own
+## "a walled-in Idle/Wandering villager stays put, never rescued," Story
+## villager-ai-019's own deliberate design -- the Unstuck Watchdog's own
+## `stuck_tick_count` counter is STILL never widened to `State.WANDERING` by
+## this story, exactly as directed): this method is reachable ONLY through a
+## just-finished/just-revoked CONSTRUCTION claim, never through any Wandering
+## re-entry into Deciding. A villager that becomes boxed in while idly
+## wandering (unrelated to its own work) never passes through [method
+## _complete_claimed_job]/[method _abandon_claimed_job] at all, so it is
+## structurally unreachable by this method -- indistinguishable-by-flood-fill
+## situations are resolved by WHICH CALL SITE reaches this method, never by
+## re-inspecting `_state` after the fact.
+func _relocate_if_marooned() -> void:
+	if _is_self_sealed_at_current_cell():
+		return
+	if _has_available_job_at_current_cell():
+		return
+	if _can_still_reach_available_work():
+		return
+	var excluded_candidates: Array[Vector3i] = []
+	for _attempt in range(MAROONED_RELOCATE_MAX_ATTEMPTS):
+		var other_cells: Array[Vector3i] = _get_other_villager_cells() + excluded_candidates
+		var result: RescueSearchResult = VillagerRescueTargetSearch.find_rescue_target(
+			current_cell,
+			self,
+			other_cells,
+			config.unstuck_rescue_search_radius,
+			config.unstuck_rescue_max_radius,
+		)
+		if not result.has_target():
+			return
+		if _is_useful_relocation_candidate(result.cell):
+			_snap_current_cell_to(result.cell)
+			return
+		excluded_candidates.append(result.cell)
+
+
+## Bounded retry cap for [method _relocate_if_marooned]'s own
+## search-then-verify loop -- generous relative to the handful of
+## already-finished, adjacent dead-end columns a single small room can
+## plausibly present as false leads, while still a hard, deterministic
+## ceiling (never an unbounded search).
+const MAROONED_RELOCATE_MAX_ATTEMPTS: int = 8
+
+
+## [method _relocate_if_marooned]'s own candidate-usefulness filter.
+## [VillagerRescueTargetSearch.find_rescue_target] answers ONLY "standable
+## and unoccupied," the SAME general-purpose contract the Unstuck Watchdog
+## already relies on -- it has no notion of "and can this villager actually
+## DO anything from there," because for the Watchdog's own use (a genuinely
+## walled-in-but-otherwise-normal villager) any standable neighbor already
+## implies exactly that. This story's own new scenario breaks that implicit
+## assumption TWICE over, both confirmed directly against a real
+## multi-segment room:
+## 1. The top of one just-finished, isolated column can be the NEAREST
+##    standable-and-unoccupied cell to the top of ANOTHER just-finished,
+##    isolated column -- both equally dead ends.
+## 2. Two such dead-end tops are typically also a LEGAL STEP away from EACH
+##    OTHER (an ordinary same-height horizontal move) -- so a naive
+##    "has any legal step" check ([method _has_any_legal_step_from], correct
+##    for [member current_cell] in [method _can_still_reach_available_work]'s
+##    OWN "am I still stuck at all" question, which only needs a boolean, not
+##    a destination) is NOT enough to VET a specific candidate destination:
+##    it would accept "the other equally-isolated top" as a false pass.
+## While [param candidate_cell] is standable (the search already guarantees
+## that), the only way to actually tell "useful" from "another false lead" is
+## the SAME true-path check F2 job selection itself uses: `true` iff [param
+## candidate_cell] is EITHER itself a currently-claimable job ([method
+## _get_available_jobs] -- landing exactly on the next thing to build is
+## always useful) OR [VillagerNavGraph.find_path] can reach at least one
+## currently-available job FROM it. When [method _get_available_jobs] is
+## itself empty (nothing left to build anywhere -- the whole project just
+## finished), there is no job to path-check against at all; this falls back
+## to [method _has_any_legal_step_from] instead -- weaker, but harmless here,
+## since [method _relocate_if_marooned]'s own bounded retry-and-exclude loop
+## converges past a small handful of finished-column false leads onto real,
+## ordinary ground within its attempt cap regardless of which of two
+## equally-pointless dead ends is rejected first.
+func _is_useful_relocation_candidate(candidate_cell: Vector3i) -> bool:
+	var available_jobs: Array[BlueprintCell] = _get_available_jobs()
+	if available_jobs.is_empty():
+		return _has_any_legal_step_from(candidate_cell)
+	for job: BlueprintCell in available_jobs:
+		if job.cell == candidate_cell:
+			return true
+		if nav_graph != null and not nav_graph.find_path(candidate_cell, job.cell).is_empty():
+			return true
+	return false
+
+
+## Whether [param job_queue]'s CURRENT available-jobs snapshot names [member
+## current_cell] itself as a claimable [BlueprintCell] -- [method
+## _relocate_if_marooned]'s own load-bearing "a real next job sits exactly
+## here, do not relocate" exclusion (see that method's own doc comment, point
+## 2). Reuses [method _get_available_jobs] (the SAME nil-safe read every
+## other tier-2 query already goes through) rather than a second query
+## shape -- a small linear scan, mirroring [method
+## ConstructionJobQueue._find_eligible_cell]'s own established "scan the
+## small available-jobs list directly" precedent.
+func _has_available_job_at_current_cell() -> bool:
+	for job: BlueprintCell in _get_available_jobs():
+		if job.cell == current_cell:
+			return true
+	return false
+
+
+## [method _relocate_if_marooned]'s own true-path reachability check (see
+## that method's own doc comment, point 3, for why a mere neighbor-count is
+## not enough): `true` iff [member nav_graph] can path from [member
+## current_cell] to AT LEAST ONE cell [method _get_available_jobs] currently
+## names -- the SAME [method VillagerNavGraph.find_path] true-path check F2
+## job selection itself uses, never a second, re-derived reachability
+## formula. An EMPTY available-jobs list (nothing left to build anywhere)
+## returns `false` -- vacuously "cannot reach any work," matching this
+## story's own "climb back down once there is nothing left to do up there"
+## framing, never treated as "trivially fine, stay put." A `null` [member
+## nav_graph] (a lighter test fixture that never wires one) falls back to
+## [method _has_any_legal_step_from_current_cell] -- the pre-this-story
+## heuristic -- rather than crashing; every REAL production villager has
+## [member nav_graph] wired well before this method can ever run (a claim can
+## only exist after a real F2 selection already required it).
+func _can_still_reach_available_work() -> bool:
+	if nav_graph == null:
+		return _has_any_legal_step_from_current_cell()
+	var available_jobs: Array[BlueprintCell] = _get_available_jobs()
+	for job: BlueprintCell in available_jobs:
+		if not nav_graph.find_path(current_cell, job.cell).is_empty():
+			return true
+	return false
+
+
+## The ONE shared mutation primitive both directions of this story's fix
+## funnel through (see [method climb_onto_self_sealed_cell]'s own doc
+## comment) -- also mirrors [method _perform_watchdog_rescue]'s own
+## established "atomic jump + snapped visual, no lerp, cleared travel state"
+## shape exactly, applied here as a named, reusable step rather than a third
+## independently-written copy of the same five field assignments.
+func _snap_current_cell_to(target: Vector3i) -> void:
+	current_cell = target
+	_from_cell = target
+	_to_cell = target
+	_travel_remaining_path = []
+	_intra_tick_progress = 0.0
+	_visual_position = VoxelWorldGrid.cell_to_world(target)
 
 
 # =============================================================================

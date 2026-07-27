@@ -1,7 +1,7 @@
 # Story 024: A villager cannot finish a wall
 
 > **Epic**: Villager AI & Behavior
-> **Status**: Ready — BLOCKING. This breaks the game's core promise.
+> **Status**: Complete (2026-07-27 — 1580/1580 suite green, 0 orphans, parent-verified; a room drawn through the hosted WallTool now reaches full enclosure)
 > **Layer**: Core
 > **Type**: Logic
 > **Estimate**: 2 days (1 day spike + 1 day fix; the spike may re-scope the fix)
@@ -74,13 +74,13 @@ Two independent reasons the demo's bed has never been sheltered.
 
 ## Acceptance Criteria
 
-- [ ] AC1: A single villager, given a drawn room of `WallToolConfig.wall_height` and any
+- [x] AC1: A single villager, given a drawn room of `WallToolConfig.wall_height` and any
       reasonable footprint, completes **every** wall cell — no plateau at the top layer.
-- [ ] AC2: The root cause is named in the story before the fix lands: state precisely
+- [x] AC2: The root cause is named in the story before the fix lands: state precisely
       which reachability/job-selection rule excluded the cells, with the evidence.
-- [ ] AC3: The fix does not weaken seal prevention. A villager must still refuse a write
+- [x] AC3: The fix does not weaken seal prevention. A villager must still refuse a write
       that would trap it, and `villager-ai-016`'s livelock escape must still be reachable.
-- [ ] AC4: Determinism survives (ADR-0009): same world, same villager, same job order.
+- [x] AC4: Determinism survives (ADR-0009): same world, same villager, same job order.
 - [ ] AC5: `tools/payoff_loop_demo.gd` builds a **roof** as well as walls, so a finished
       room is actually Room-classifiable and its bed can be sheltered.
 - [ ] AC6: The demo reaches a fully enclosed, roofed room with one villager, and says so
@@ -115,3 +115,74 @@ size tried, so it cannot pass vacuously. Record the observed plateau — cell co
 **AC5/AC6 — the demo builds a real room**
 - Given: `tools/payoff_loop_demo.tscn` run end to end.
 - Then: walls AND roof complete, the interior classifies as a Room, and the report says so.
+
+---
+
+## AC2 — the actual rule, confirmed empirically (2026-07-27)
+
+`VillagerNavGraph` never connects two cells in the SAME COLUMN. A step is
+defined as inherently horizontal — `HORIZONTAL_HALF_OFFSETS` /
+`HORIZONTAL_FULL_OFFSETS` never contain `(0, 0)`, with `|Δy| <= 1` riding along.
+And `VillagerWalkabilityRules.is_standable(cell)` requires the cell BELOW to be
+solid, so two stacked cells can never both be standable graph points at once. A
+same-column vertical edge is therefore not merely missing — it is impossible by
+construction.
+
+Consequence for a wall column:
+- Layer 2 is reachable directly from always-standable ground: one combined
+  horizontal + vertical step. It always completes.
+- Layer 3 needs a SECOND such extension. Its only same-column neighbour at the
+  required height is layer 2's own cell — which goes solid and leaves the graph
+  in the SAME `patch_cells` call that adds layer 3 as a point. Layer 3 therefore
+  enters the graph as an ISOLATED point with zero edges to anywhere a villager
+  can stand.
+
+Confirmed directly, not inferred: `has_point == true`, and `find_path` from every
+occupied cell returns `[]`, on every tick up to 5000. `VillagerJobSelector`'s
+true-path check can never succeed, so the cell is excluded from selection before
+any claim — which is exactly why `state == PLANNED`, `claimed_by == -1` and
+`abandon_count == 0`.
+
+The Unstuck Watchdog does list the cell above a self-sealed villager as a ring-1
+candidate, but its lexicographic `(y, x, z)` tie-break always prefers a
+lower-or-equal standable neighbour, and the adjacent floor always qualifies — so
+it never placed the villager on the isolated node either.
+
+### Verbatim pre-change plateau
+
+    PLATEAU-CHECK cell=(2, 1, 3) state=2 claimed_by=1  abandon_count=0   BUILT
+    PLATEAU-CHECK cell=(2, 2, 3) state=2 claimed_by=1  abandon_count=0   BUILT
+    PLATEAU-CHECK cell=(2, 3, 3) state=0 claimed_by=-1 abandon_count=0   PLANNED
+
+### The fix
+
+A builder standing where the graph cannot reach is moved, discretely, at the two
+moments it can happen: climbing ONTO the self-sealed cell when the seal-prevention
+exemption fires, and stepping back DOWN once the column is finished and it is left
+on a zero-edge point. Symmetric by design — the coordinator rejected the obvious
+alternative of widening stuck detection into WANDERING, because
+`villager-ai-019` deliberately makes a genuinely walled-in wanderer STAY PUT
+(Edge Case 2), and a walled-in villager is indistinguishable from a stranded one
+by flood-fill alone. It reads as what a real builder does: climb up, lay the top
+course, climb down.
+
+ADR-0009's "two sanctioned mutation points" is amended accordingly, and
+`control-manifest.md` follows.
+
+AC3 verified intact: `seal_prevention_test.gd` 13/13 and `unstuck_watchdog_test.gd`
+12/12, both unchanged. The fix is structural, not height-specific — a 6-layer
+column completes too.
+
+### Still owed (AC5/AC6 partially)
+
+`tools/payoff_loop_demo.gd` gained a roof stage but has NOT been run end to end
+since, so it is not yet proven that the demo reaches a roofed, Room-classifiable
+enclosure. Named as a debt rather than claimed.
+
+### A defect of my own, found and fixed here
+
+`payoff_loop_demo.gd` did not PARSE, and had not since commit 6ddb153 — two
+`while true:` helpers with no trailing return, which GDScript's analyser rejects.
+They were written by the scene-009 attempt and committed without the tool ever
+being `load()`-ed once. The tool that exists to catch "shipped but never run" was
+itself shipped but never run. Fixed, with the reason recorded at both sites.

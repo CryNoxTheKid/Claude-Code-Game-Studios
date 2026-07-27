@@ -68,6 +68,19 @@
 ## above: a stage that does not reach its own real condition inside its wait
 ## cap prints why and skips its screenshot.
 ##
+## Story villager-ai-024 ("A villager cannot finish a wall") fixes TWO
+## independent reasons this demo's bed had never been sheltered: (1) job
+## selection could not reach a wall's 3rd layer and above at all (fixed in
+## [VillagerAi]/[VillagerSealPreventionGate], out of THIS file's own scope);
+## (2) this demo built walls only, never a roof, so even completed walls
+## could never classify as a Room (`CandidateCellRules.
+## is_candidate_interior_cell` requires a roofed cell). This revision adds
+## [method _attempt_roof_stage] — a `04b-roofed` stage, driven through the
+## SAME real [RoofTool] -> [CommitPipeline] -> [ConstructionTickLoop] chain
+## every other stage already uses — and reports the REAL hosted
+## [BuildValidation]'s own Room-classification verdict for the interior,
+## rather than assuming "walls + roof both finished" implies it.
+##
 ## Run WINDOWED (a real viewport is required):
 ##   Godot_v4.7-stable_win64_console.exe --path neues-spiel res://tools/payoff_loop_demo.tscn
 extends Node3D
@@ -94,18 +107,25 @@ const SETTLE_SEC := 2.0
 ## tool deliberately never fakes a faster outcome, but bounded so the process
 ## always exits on its own. Story scene-009 raised this from 480 -> 780 to
 ## cover its own two new stages' wait caps below on top of the five that
-## already existed — a change to the OVERALL safety net, never to
-## [constant WALL_WAIT_CAP_SEC]/[constant FURNITURE_WAIT_CAP_SEC] themselves
-## (Sprint 12 plan: a stalled construction plateau is a finding for
-## `spike-plateau` to diagnose, never a cap this tool quietly raises to route
-## around it).
-const SAFETY_CAP_SEC := 780.0
+## already existed. Story villager-ai-024 raises this again, 780 -> 900, to
+## cover its own new [constant ROOF_WAIT_CAP_SEC] stage — a change to the
+## OVERALL safety net, never to [constant WALL_WAIT_CAP_SEC]/[constant
+## FURNITURE_WAIT_CAP_SEC]/[constant ROOF_WAIT_CAP_SEC] themselves (Sprint 12
+## plan: a stalled construction plateau is a finding for `spike-plateau` to
+## diagnose, never a cap this tool quietly raises to route around it).
+const SAFETY_CAP_SEC := 900.0
 
 ## Sub-caps for the two tick-driven waits (walls, then the bed) — bounded
 ## independently of the overall cap so a stalled wall build cannot silently
 ## eat the bed stage's entire budget.
 const WALL_WAIT_CAP_SEC := 220.0
 const FURNITURE_WAIT_CAP_SEC := 120.0
+
+## Story villager-ai-024 (AC5/AC6) — wall-clock cap for the ROOF stage. A
+## flat roof over this demo's small 3x4 footprint is 12 cells (identical
+## shape/order-of-magnitude to the wall run itself), so this mirrors
+## [constant FURNITURE_WAIT_CAP_SEC] rather than the larger wall cap.
+const ROOF_WAIT_CAP_SEC := 120.0
 
 ## Story scene-009 — wall-clock cap for the CLAIM stage: how long this run
 ## waits for the villager's OWN real Rest need to reach urgency (driven
@@ -315,6 +335,15 @@ func _run_demo() -> void:
 		print("payoff_loop_demo: REPORT — real VoxelWorldGrid solid cell count after construction: %d (this is the ONLY write path used — ConstructionTickLoop's own batched bulk_write, never this tool)" % solid_cell_count)
 	await _shoot_through_game_camera("04-built")
 
+	# ---- Roof: close the room over, so it can actually classify as a Room ----
+	# (Story villager-ai-024, AC5/AC6): walls alone never roof the interior --
+	# CandidateCellRules.is_candidate_interior_cell requires a cell to be
+	# ROOFED (solid within max_room_height directly above) before it is even a
+	# Room candidate. This stage builds the roof through the SAME real
+	# RoofTool -> CommitPipeline -> ConstructionTickLoop chain the walls just
+	# went through -- never a direct VoxelWorldGrid write.
+	await _attempt_roof_stage(valley, anchor, wall_height, villager, build_editor_mode, commit_pipeline, placement_pick, build_project_registry)
+
 	# BuildValidation prominent finding — printed here because this is
 	# exactly the moment a human would ask "is the room sheltered now?"
 	_report_build_validation_gap()
@@ -502,6 +531,82 @@ func _attempt_furniture_stage(
 
 
 # ---------------------------------------------------------------------------
+# Story villager-ai-024 (AC5/AC6) — the roof: without it, the finished walls
+# can never classify as a Room (CandidateCellRules.is_candidate_interior_cell
+# requires a roofed cell, `max_room_height` directly above), so
+# is_bed_sheltered() could never read true no matter how honest the wall
+# construction above is. Driven through the SAME real
+# RoofTool -> CommitPipeline -> ConstructionTickLoop chain as the walls —
+# never a direct VoxelWorldGrid write, per this file's own honesty rules.
+# ---------------------------------------------------------------------------
+
+## Builds a flat roof ([enum RoofTool.Formation.FLAT], this sprint's only
+## built formation) over the room's FULL outer footprint — one plane above
+## the finished walls' own top layer ([method RoofTool.flat_roof_cell_set]'s
+## own "press_cell.y + 1" rule, so passing the wall top's Y as the roof's
+## `press_cell.y` lands it exactly one cell above the last wall layer,
+## closing the walls in too, not merely capping the interior). Reports
+## whether the interior now classifies as a Room via the REAL hosted
+## [BuildValidation]'s own verdict (AC6) — never assumed from "the walls and
+## roof both finished," always the actual classifier's own answer.
+func _attempt_roof_stage(
+	valley: Node,
+	anchor: Vector3i,
+	wall_height: int,
+	villager: VillagerAi,
+	build_editor_mode: BuildEditorMode,
+	commit_pipeline: CommitPipeline,
+	placement_pick: PlacementPick,
+	build_project_registry: BuildProjectRegistry
+) -> void:
+	var roof_tool: RoofTool = valley.get_roof_tool()
+	var roof_base: Vector3i = anchor + Vector3i(0, wall_height - 1, 0)
+	var roof_far: Vector3i = roof_base + Vector3i(2, 0, 3)
+
+	build_editor_mode.arm_tool(ToolStateMachine.TOOL_ID_ROOF)
+	commit_pipeline.set_selected_item(WALL_MATERIAL_ID)
+	placement_pick.resolve_pick(VoxelWorldGrid.cell_to_world(roof_base) + Vector3(0.0, 60.0, 0.0), Vector3.DOWN)
+	if not placement_pick.get_current_pick().hit:
+		print("payoff_loop_demo: REPORT — stage roof UNREACHABLE this run: no placement pick hit above the roof base %s." % str(roof_base))
+		return
+
+	var roof_candidate_cells: Array[Vector3i] = roof_tool.resolve_cell_set(true, roof_base, roof_far)
+	var roof_cells: Array[BlueprintCell] = _commit_with_report(commit_pipeline, roof_candidate_cells)
+	if roof_cells.is_empty():
+		print("payoff_loop_demo: REPORT — stage roof UNREACHABLE this run: CommitPipeline.commit rejected the roof at %s (see the REJECTED line above for the exact reason). Not faking a roof." % str(roof_base))
+		return
+
+	print("payoff_loop_demo: REPORT — roof drafted: %d/%d cells on the plane one above the finished walls (y=%d)" % [
+		roof_cells.size(), roof_candidate_cells.size(), roof_base.y + 1,
+	])
+	var released_ids: Array[int] = _release_projects_for(roof_cells, build_project_registry)
+	print("payoff_loop_demo: REPORT — roof project(s) released: %s" % str(released_ids))
+
+	await _wait_for_built(roof_cells, ROOF_WAIT_CAP_SEC, "roof", valley, villager)
+	var built_roof_count: int = _count_built(roof_cells)
+	print("payoff_loop_demo: REPORT — roof construction result: %d / %d cells reached BUILT" % [built_roof_count, roof_cells.size()])
+
+	if built_roof_count == roof_cells.size():
+		await _shoot_through_game_camera("04b-roofed")
+	else:
+		print("payoff_loop_demo: REPORT — stage roof screenshot skipped: the roof did not finish inside its wait cap, so '04b-roofed' would not actually show a roofed room. Honesty over a picture.")
+
+	# AC6: the demo's own report of whether the finished room actually
+	# classifies as a Room now — the real hosted BuildValidation's own
+	# verdict, never assumed from "walls + roof both finished."
+	var build_validation: BuildValidation = valley.get_build_validation()
+	if build_validation == null:
+		print("payoff_loop_demo: REPORT — AC6: cannot check Room classification — BuildValidation is not hosted this run.")
+		return
+	var interior_cell: Vector3i = anchor + Vector3i(1, 0, 1)
+	var verdict: BuildValidationReachability.Verdict = build_validation.get_region_status(interior_cell)
+	var is_room: bool = verdict == BuildValidationReachability.Verdict.ROOM
+	print("payoff_loop_demo: REPORT — AC6: interior cell %s classifies as a Room = %s (BuildValidation verdict = %s)." % [
+		str(interior_cell), str(is_room), BuildValidationReachability.Verdict.keys()[verdict],
+	])
+
+
+# ---------------------------------------------------------------------------
 # Story scene-009 — the payoff loop's last step: claim the bed, then sleep
 # in it. Both stages are driven ENTIRELY by the villager's own real Rest
 # need and the real, hosted FurnitureBedProvider/BuildValidation chain — this
@@ -634,6 +739,11 @@ func _wait_for_claim(valley: Node, villager: VillagerAi, cap_sec: float) -> Vari
 				(now_usec - start_usec) / 1000000.0, str(villager.get_state()),
 			])
 		await get_tree().process_frame
+	# Unreachable: the loop above only exits via return. GDScript's static
+	# analyser does not treat that as exhaustive, so without this line the
+	# whole script fails to PARSE — which is how this tool sat broken in the
+	# repo, committed but never once load()-ed.
+	return null
 
 
 ## Waits until [param villager] reads [constant VillagerAi.State.SLEEPING] AT
@@ -657,6 +767,8 @@ func _wait_for_sleeping_at(valley: Node, villager: VillagerAi, claimed_cell: Vec
 		if Time.get_ticks_usec() >= deadline_usec:
 			return false
 		await get_tree().process_frame
+	# Unreachable, same reason as _wait_for_claim above.
+	return false
 
 
 ## Samples the REAL, per-tick credited recovery rate by connecting a temporary
