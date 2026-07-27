@@ -172,7 +172,7 @@ func test_ac_assembly_gameworld_wires_all_tier_modules_into_valley_and_boots_act
 	assert_object(valley.get_loop_payoff_adapter()).is_not_null()
 	assert_object(valley.get_furniture_presenter()).is_not_null()
 	assert_array(world.injected_tier_modules).contains_exactly(valley.get_injected_tier_modules())
-	assert_int(world.injected_tier_modules.size()).is_equal(26)
+	assert_int(world.injected_tier_modules.size()).is_equal(27)  # +1: ScaffoldPresentation (building-034 occupancy tier)
 
 
 func test_ac_assembly_hosted_modules_ran_through_boot_gated_setup_never_their_own_ready() -> void:

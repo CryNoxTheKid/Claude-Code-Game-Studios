@@ -70,13 +70,18 @@ func _on_job_reported_unreachable(cell: Vector3i) -> void:
 	var owning_project: BuildProject = build_project_registry.get_project(owning_id)
 	if owning_project == null or owning_project.kind != BuildProject.Kind.BUILD:
 		return
-	_served_cells[cell] = true
 	var plan: ScaffoldPlan = ScaffoldErectionPlanner.plan_for_target(
 		voxel_world, scaffold_registry, build_project_registry, furniture_registry,
 		cell, config.scaffold_max_cantilever_cells
 	)
 	if not plan.has_plan():
+		# Deliberately NOT latched. `_served_cells` used to be written before
+		# this check, so a cell whose plan failed ONCE was suppressed forever —
+		# even after the world changed and a plan became possible. A failed plan
+		# is a "not yet", never a "never": the report seam re-fires on its own
+		# throttle, and the next attempt sees a different world.
 		return
+	_served_cells[cell] = true
 	_erect(plan, owning_id)
 
 

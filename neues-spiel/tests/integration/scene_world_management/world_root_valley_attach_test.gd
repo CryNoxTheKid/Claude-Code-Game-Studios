@@ -225,7 +225,7 @@ func test_hosted_building_system_and_villager_ai_modules_are_children_of_valley(
 
 	# Assert
 	var valley: Valley = world.get_valley() as Valley
-	assert_int(valley.get_child_count()).is_equal(30)
+	assert_int(valley.get_child_count()).is_equal(31)  # +1: ScaffoldPresentation (building-034 occupancy tier)
 	assert_object(valley.get_voxel_world_mesher()).is_not_null()
 	assert_object(valley.get_voxel_world_mesh_streamer()).is_not_null()
 	assert_object(valley.get_tool_state_machine()).is_not_null()

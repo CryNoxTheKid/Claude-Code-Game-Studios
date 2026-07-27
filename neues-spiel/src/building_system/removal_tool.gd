@@ -98,6 +98,17 @@
 class_name RemovalTool
 extends RefCounted
 
+## Story `building-034` addition (TD ruling D4) -- fires whenever branch 1
+## ([method _cancel_not_yet_built_cell]) cancels [param project]'s LAST
+## tracked cell and drops it from [member _registry] entirely (the moment a
+## whole project is genuinely "cancelled," not merely one of its cells).
+## Carries [param kind] so a listener ([ScaffoldDismantleCoordinator]) can
+## filter to `BUILD`-kind projects only, exactly like every other scaffold
+## seam in this codebase (Out of Scope: "Build projects only"). This class
+## does not itself know anything about scaffolding -- see class doc comment,
+## unchanged by this addition.
+signal project_canceled(project_id: int, kind: BuildProject.Kind)
+
 ## The project registry this tool resolves a target cell's owning
 ## [BuildProject] through (the reverse index, [method
 ## BuildProjectRegistry.project_at_cell]) and keeps consistent on cancel via
@@ -163,9 +174,12 @@ func _cancel_not_yet_built_cell(project: BuildProject, blueprint_cell: Blueprint
 		return false
 	_registry.unregister_cell(blueprint_cell.cell)
 	if project.is_empty():
+		var project_id: int = project.id
+		var project_kind: BuildProject.Kind = project.kind
 		_registry.remove_project(project)
 		if _job_queue != null:
 			_job_queue.remove_project(project)
+		project_canceled.emit(project_id, project_kind)
 	return true
 
 

@@ -1,4 +1,4 @@
-[gd_scene load_steps=45 format=3]
+[gd_scene load_steps=47 format=3]
 
 [ext_resource type="Script" path="res://src/scene_world_management/valley.gd" id="1_valley"]
 [ext_resource type="Script" path="res://src/voxel_world/voxel_world_grid.gd" id="2_voxelgrid"]
@@ -42,6 +42,8 @@
 [ext_resource type="Script" path="res://src/voxel_world/block_appearance_config.gd" id="38_blockappearance"]
 [ext_resource type="Resource" path="res://data/config/block_appearance_config.tres" id="39_blockappearancecfg"]
 [ext_resource type="Script" path="res://src/presentation/furniture_presenter.gd" id="40_furniturepresenter"]
+[ext_resource type="Script" path="res://src/building_system/scaffold_presentation.gd" id="41_scaffoldpresentation"]
+[ext_resource type="Resource" path="res://data/config/scaffold_config.tres" id="42_scaffoldcfg"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_torchindicator"]
 shading_mode = 0
@@ -56,6 +58,7 @@ height = 0.4
 [node name="Valley" type="Node3D"]
 script = ExtResource("1_valley")
 villager_ai_config = ExtResource("14_villagercfg")
+scaffold_config = ExtResource("42_scaffoldcfg")
 
 [node name="VoxelWorldGrid" type="Node" parent="."]
 script = ExtResource("2_voxelgrid")
@@ -123,6 +126,9 @@ script = ExtResource("19_villagerbodypresenter")
 
 [node name="FurniturePresenter" type="Node3D" parent="."]
 script = ExtResource("40_furniturepresenter")
+
+[node name="ScaffoldPresentation" type="Node3D" parent="."]
+script = ExtResource("41_scaffoldpresentation")
 
 [node name="BuildEditorMode" type="Node" parent="."]
 script = ExtResource("20_buildeditormode")
