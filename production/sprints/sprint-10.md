@@ -507,3 +507,26 @@ this now blocks S11 scheduling of `nm-009`, not just tidiness.**
   **author `presentation-003`'s story file from VB-1/VB-2 first**. Then start `nm-005` (lane B),
   `villager-ai-018` (lane A) and `building-028` (lane C) **in parallel on day one**; all three are
   blocked on nothing and all three feed the crown.
+
+
+---
+
+## Sprint Result — CLOSED 2026-07-27
+
+**16/16 scheduled stories complete** (15 planned + scene-006, authored mid-sprint). Suite grew 1264 -> 1383, green with 0 orphans on every story commit.
+
+**THE CROWN LANDED: milestone M02 criterion #5 is met.** A villager gets tired, polls its own need (proven with the signal deliberately disconnected), walks to a bed it claims as its own, sleeps in a room the real Build Validation calls sheltered, and recovers at exactly the full rate — while the same villager in an unsheltered bed recovers at 0.7x. That difference is why a player builds a roof.
+
+Also landed this sprint:
+- **Villagers became visible and clickable** (presentation-003) — until now they were pure logic with no body at all. The hit proxy rides the visual position, so clicks land where the player sees them. It also wrote the `_visual_position` single-source-of-truth guard, which had lived only in prose across three documents and was enforced nowhere.
+- **The payoff loop can actually start in production** (scene-006). needs-mood-006 shipped `initialize_villager` green and uncalled; without it F1 decay iterates nothing, so a villager never gets tired and the crown's loop could never begin in the shipped game. Its probe is demonstrably non-vacuous — the obvious assertion would have passed on the broken build, so the test measures time instead and was shown to FAIL with the production call removed.
+- Furniture as a registry rather than voxels (028), a bed as one entity across two cells (016), bed claiming with ground-sleep fallbacks (villager-ai-018), the full needs system (mood, interruption, spawn init, why-strings, determinism), plan-only undo (011), and room-recognition pacing + warning tiers (bv-007/008).
+
+**Process findings recorded:**
+- **Third occurrence of ship-green-and-uncalled** (after generate_terrain and spawn_starting_roster). Countermeasure chosen: a growing boot-invariant assertion block, plus the planning habit that every story adding a public API needs a caller story in the same sprint.
+- **A parent misdiagnosis, corrected in the record**: an early wiring attempt was reverted citing 18 errors; the producer re-applied the identical change and measured green. The red run had another lane's half-finished work in the same tree. Lesson: never judge a change by a suite run containing foreign intermediate state.
+- The recurring fixture trap (sealing with a solid block creates a legal step-up that reopens the escape) bit a fourth agent, who recognized it from the briefing.
+
+**Blocked by missing content, not by code:** `res://data/items/` has no bed resource, so bv-006's shelter classification and bv-008's warning tiers cannot fire end-to-end for a real bed, and the crown runs on mocked beds. RID content authoring (rid-008/009) is in no sprint — it belongs in Sprint 11.
+
+Carried to Sprint 11: the C1 demolition chain (009 -> 011 -> 012 -> 015) as the opener per decision D8, RID content authoring, bv-009, building-009, the Cluster D UI epics, and the multi-cell furniture redo limitation.
