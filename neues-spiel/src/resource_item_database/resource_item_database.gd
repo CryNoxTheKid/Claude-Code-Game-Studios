@@ -67,6 +67,29 @@
 ## runtime code path -- see `footprint_validation_test.gd`'s regression
 ## test for the proof, mirroring this class's own tier non-integer note.
 ##
+## Story rid-007 scope note: this story adds the built-in `missing_item`
+## fallback resolution (GDD Edge Case 1, TR-resource-item-database-038) via
+## the new [method resolve_or_missing] entry point -- distinct from [method
+## get_by_id] (Story 003), whose `null`-on-unknown-id contract is unchanged;
+## callers that must resolve to something renderable (e.g. world loading
+## reconstructing a stored cell/save id) use [method resolve_or_missing]
+## instead. The fallback [ItemDefinitionResource] ([method
+## _build_missing_item_resource]) is built once per instance, entirely in
+## code -- never authored as a `.tres` (Story 005 already rejects that id/
+## category) and never inserted into [member _definitions], which is
+## exactly what keeps it excluded from every listing query (GDD AC27,
+## TR-resource-item-database-033) BY CONSTRUCTION rather than by a dedicated
+## exclusion check -- the listing methods below iterate [member
+## _definitions] only, and this resource never lives there. Each distinct
+## missing id is logged exactly once per [method resolve_or_missing]
+## instance (tracked via [member _logged_missing_ids]), which already
+## matches "once per load event" (GDD Edge Case 1) since an instance's
+## lifetime IS one load event under the existing load-once guard ([method
+## setup] rejects a second call on the same instance); cross-load-instance
+## dedup (a NEW instance per save-file load, GDD AC9b) is explicitly
+## deferred to the Save/Load & World Persistence GDD, per this story's Out
+## of Scope.
+##
 ## Engine note (verified via a headless load probe against this exact
 ## script during rid-004 implementation): [member ItemDefinitionResource.tier]
 ## is a statically `int`-typed [code]@export[/code] field, so Godot's
@@ -158,6 +181,20 @@ const _KNOWN_MATERIAL_FAMILIES: Array[StringName] = [&"wood", &"stone", &"thatch
 ## addition never silently changes the coverage requirement.
 const _TIER0_COVERAGE_FAMILIES: Array[StringName] = [&"wood", &"stone", &"thatch"]
 
+## Reserved built-in fallback id (Story 007, GDD Edge Case 1 / TR-038) --
+## never authorable (Story 005's [constant CHECK_RESERVED_ID] rejects any
+## entry using it); the sole id [method resolve_or_missing] resolves any
+## unknown id to.
+const MISSING_ITEM_ID: StringName = &"missing_item"
+
+## Reserved, non-authorable sixth category (GDD Core Rule 5) -- the built-in
+## `missing_item` fallback's own category. Deliberately excluded from
+## [constant _KNOWN_CATEGORIES] below; an authored entry using it is
+## rejected earlier via [constant CHECK_RESERVED_CATEGORY] (Story 005),
+## which the `elif` chain in [method _validate_single_entry] short-circuits
+## before that whitelist is ever consulted for this value.
+const MISSING_ITEM_CATEGORY: StringName = &"missing"
+
 ## Violated-check identifiers -- the `"check"` value of a structured issue
 ## record (see [method _make_issue]). Exposed as constants (mirroring
 ## [enum BootState]'s exposure pattern) so tests reference the exact
@@ -208,6 +245,19 @@ var _definitions: Dictionary[StringName, ItemDefinitionResource] = {}
 ## never overwrites this -- it keeps reflecting the session's one real
 ## resolution, matching the load-once guarantee.
 var _last_validation_result: Dictionary = {"success": false, "issues": []}
+
+## Built-in, code-defined fallback definition returned by [method
+## resolve_or_missing] for any id not present in [member _definitions] (GDD
+## Edge Case 1, TR-resource-item-database-038). Built once per instance via
+## [method _build_missing_item_resource] -- see this class's Story rid-007
+## scope note for why it is never inserted into [member _definitions] itself.
+var _missing_item_resource: ItemDefinitionResource = _build_missing_item_resource()
+
+## Tracks which distinct missing/unknown ids [method resolve_or_missing] has
+## already logged THIS instance's lifetime -- see this class's Story rid-007
+## scope note for why an instance's lifetime already matches GDD Edge Case
+## 1's "once per load event."
+var _logged_missing_ids: Dictionary[StringName, bool] = {}
 
 
 func _ready() -> void:
@@ -302,6 +352,40 @@ func get_by_id(id: StringName) -> ItemDefinition:
 		)
 		return null
 	return ItemDefinition.new(source)
+
+
+## Resolves [param id] to its stored definition, or the built-in, fully
+## inert [constant MISSING_ITEM_ID] fallback if [param id] is unknown (GDD
+## Edge Case 1 / AC9a, TR-resource-item-database-038). Distinct from
+## [method get_by_id] (Story 003), whose `null`-on-unknown-id contract is
+## unchanged -- callers that MUST resolve to something renderable (e.g.
+## world loading reconstructing a stored cell/save id) use this method
+## instead, since a `null` result is never safe to render.
+##
+## Same non-Ready guard as [method get_by_id]: outside Ready [member
+## _definitions] is empty (class invariant, see that member's doc comment),
+## so every id resolves to the fallback there too -- an explicit, inert
+## result, never a partial read (TR-resource-item-database-034).
+##
+## Each distinct missing id is logged exactly once per load event -- see
+## [member _logged_missing_ids] and this class's Story rid-007 scope note.
+func resolve_or_missing(id: StringName) -> ItemDefinition:
+	var source: ItemDefinitionResource = null
+	if _state == BootState.READY:
+		source = _definitions.get(id)
+	if source != null:
+		return ItemDefinition.new(source)
+
+	if not _logged_missing_ids.has(id):
+		_logged_missing_ids[id] = true
+		push_warning(
+			(
+				"ResourceItemDatabase.resolve_or_missing(): unknown/retired id "
+				+ "'%s' resolved to the built-in missing_item fallback (GDD "
+				+ "Edge Case 1) -- logged once per load event"
+			) % String(id)
+		)
+	return ItemDefinition.new(_missing_item_resource)
 
 
 ## Returns the id of every entry whose [member ItemDefinitionResource.category]
@@ -496,7 +580,7 @@ func _validate_single_entry(
 		# built-in fallback (Story 007). Exclusive with the format check
 		# below since `missing_item` is itself valid snake_case; reporting
 		# both would double-report the same root cause.
-		if id == &"missing_item":
+		if id == MISSING_ITEM_ID:
 			issues.append(_make_issue(id, source_file, CHECK_RESERVED_ID, &"id"))
 		elif not _is_valid_snake_case(String(id)):
 			issues.append(_make_issue(id, source_file, CHECK_INVALID_ID_FORMAT, &"id"))
@@ -512,7 +596,7 @@ func _validate_single_entry(
 
 	if String(resource.category) == "":
 		issues.append(_make_issue(id, source_file, CHECK_MISSING_REQUIRED_FIELD, &"category"))
-	elif resource.category == &"missing":
+	elif resource.category == MISSING_ITEM_CATEGORY:
 		# --- reserved category (GDD AC10b / TR-030) -------------------------
 		# `missing` is reserved for the built-in fallback (Story 007) --
 		# exclusive with the unknown-category check below since `missing`
@@ -683,3 +767,46 @@ static func _is_valid_snake_case(value: String) -> bool:
 	if value.contains(" ") or value.contains("-"):
 		return false
 	return true
+
+
+## Builds the fully inert, code-defined [constant MISSING_ITEM_ID] fallback
+## definition (Story 007) -- every field matches GDD Edge Case 1 exactly:
+## category [constant MISSING_ITEM_CATEGORY] (the reserved, non-authorable
+## sixth category), `material_family: none`, `tier: 0`, non-stackable
+## (`max_stack_size: 1`), non-haulable, `storage_category: none`, the
+## schema's own implicit `(1, 1)` footprint ([constant MISSING_ITEM_CATEGORY]
+## is not `furniture_fixture`, so Story 008's category<->footprint pairing
+## rule requires exactly this value), a deliberately conspicuous magenta
+## placeholder visual ([method _build_missing_item_visual]), display name
+## "Missing Item". Never authored as a `.tres` (Story 005 rejects that) and
+## never routed through [method _load_definitions] -- constructed directly
+## in code, once per instance (see [member _missing_item_resource]).
+static func _build_missing_item_resource() -> ItemDefinitionResource:
+	var resource: ItemDefinitionResource = ItemDefinitionResource.new()
+	resource.id = MISSING_ITEM_ID
+	resource.display_name = "Missing Item"
+	resource.category = MISSING_ITEM_CATEGORY
+	resource.material_family = &"none"
+	resource.tier = 0
+	resource.visual_asset = _build_missing_item_visual()
+	resource.stackable = false
+	resource.max_stack_size = 1
+	resource.haulable = false
+	resource.storage_category = &"none"
+	resource.footprint = Vector2i(1, 1)
+	return resource
+
+
+## Builds the deliberately conspicuous magenta placeholder [Mesh] for
+## [method _build_missing_item_resource] (GDD Edge Case 1 -- "same approach
+## as Minecraft's missing-texture handling") -- a code-defined, unshaded
+## magenta [BoxMesh], not an authored asset. This fallback visual is
+## independent of Story 009's content pipeline (which authors the real MVP
+## meshes) and must never depend on it.
+static func _build_missing_item_visual() -> Mesh:
+	var mesh: BoxMesh = BoxMesh.new()
+	var material: StandardMaterial3D = StandardMaterial3D.new()
+	material.albedo_color = Color(1.0, 0.0, 1.0)
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mesh.material = material
+	return mesh

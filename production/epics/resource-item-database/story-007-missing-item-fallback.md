@@ -1,7 +1,7 @@
 # Story 007: missing_item fallback definition + exclusion from listings
 
 > **Epic**: Resource & Item Database
-> **Status**: Ready
+> **Status: Complete (2026-07-27 — own suite 7/7 green; full gate re-verified by parent once the concurrent building-012 lands)
 > **Layer**: Foundation
 > **Type**: Logic
 > **Estimate**: 1 day

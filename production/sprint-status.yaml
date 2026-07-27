@@ -107,7 +107,7 @@ stories:
     name: "missing_item fallback definition + exclusion from listings — day one, parallel to rid-008"
     file: "production/epics/resource-item-database/story-007-missing-item-fallback.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete
     owner: "godot-gdscript-specialist"
     estimate_days: 1.0
     blocker: "START DAY ONE, fully parallel to rid-008 — its own header depends on rid-003 + rid-005, both Complete. Scheduled because rid-009's Dependencies NAME IT (finding F1: rid-009 claims it is DONE; it reads Status: Ready on disk). Dedicated fallback path (resolve_or_missing) DISTINCT from get_by_id's not-found result; missing_item is a CODE-DEFINED BUILT-IN, never an authored .tres (rid-005 already rejects an authored one); each distinct missing id logged EXACTLY ONCE per load event; missing_item NEVER appears in ANY listing query (category / family / tier / list-all) — reachable only by direct get-by-id. AC9b's save round-trip stays deferred (VS-tier)."
