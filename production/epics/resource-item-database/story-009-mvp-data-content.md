@@ -1,7 +1,7 @@
 # Story 009: MVP data content (tier-0 set + bed) + content smoke checks
 
 > **Epic**: Resource & Item Database
-> **Status**: Ready
+> **Status: Complete (2026-07-27 — 1418/1418 suite green 0 orphans, parent-verified; three-condition green proven, AC29 palette legibility deferred as advisory)
 > **Layer**: Foundation
 > **Type**: Config/Data
 > **Estimate**: 1 day

@@ -388,14 +388,18 @@ func test_need_functional_item_ids_default_contains_bed() -> void:
 
 
 func test_is_need_functional_unknown_id_returns_false_without_error() -> void:
-	# Documented limitation: no `res://data/items/` fixture exists yet in this
-	# repo (`building-028` has not landed), so ResourceItemDatabase's global
-	# autoload resolves this id to null -- the fail-safe path this method's
-	# own contract requires. This proves the safe default, not the "true"
-	# branch (which needs real RID content story 008 will supply).
+	# FLIPPED (rid-009): res://data/items/bed.tres now ships as real MVP
+	# content, so ResourceItemDatabase's global Autoload resolves &"bed" via
+	# the REAL production data set -- is_need_functional(&"bed") is TRUE
+	# against real content, never a test-local mock (this is the exact
+	# BLOCKING DoD line Sprint 10's sign-off named as unmet, §4.1/§4.4
+	# condition #2 -- closed here). The false branch for a genuinely unknown
+	# id is retained as its own real, useful assertion -- the fail-safe
+	# default this method's own contract requires for an id nothing has ever
+	# authored.
 	var config := BuildValidationConfig.new()
-	assert_bool(config.is_need_functional(&"bed")).is_false()
 	assert_bool(config.is_need_functional(&"totally_unknown_item")).is_false()
+	assert_bool(config.is_need_functional(&"bed")).is_true()
 
 
 func test_no_hardcoded_bed_literal_in_shelter_classification_predicate_logic() -> void:

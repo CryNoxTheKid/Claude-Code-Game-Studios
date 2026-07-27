@@ -2,18 +2,26 @@
 ## (Warning/Info tiers, exclusivity, and load-pass emissions; ADR-0007
 ## primary, ADR-0011 as the downstream UI contract).
 ##
-## **KNOWN GAP, flagged rather than faked** (mirrors bv-006's own
-## `test_is_need_functional_unknown_id_returns_false_without_error`
-## precedent): no `res://data/items/` fixture exists yet in this repo
-## (`building-028`-adjacent RID content for "bed" has not landed), so
-## `ResourceItemDatabase.get_by_id(&"bed")` resolves `null` and
-## [method BuildValidationConfig.is_need_functional] is `false` for the
-## WHOLE real pipeline today, for every item id including `&"bed"` --
-## `ResourceItemDatabase` is Autoload-tier (ADR-0001: never injected, resolved
-## exactly once at process boot, its `setup()` rejects a second call), so no
-## test in THIS process can make it resolve differently, and authoring real
-## `res://data/items/` content is outside this story's own file scope
-## (`src/build_validation/`, `data/config/`, and this test file only).
+## **KNOWN GAP, CLOSED by rid-009** (mirrors bv-006's own
+## `test_is_need_functional_unknown_id_returns_false_without_error` --
+## flipped the same sprint): `res://data/items/bed.tres` now ships as real
+## MVP content (Sprint 11), so `ResourceItemDatabase.get_by_id(&"bed")`
+## resolves the real, authored entry and
+## [method BuildValidationConfig.is_need_functional] is `true` for `&"bed"`
+## against the REAL Autoload-tier `ResourceItemDatabase` singleton (ADR-0001)
+## -- never a test-local mock. The two dedicated tests that PINNED today's
+## honest zero-emission behavior as a documented, named limitation
+## (`test_documented_limitation_bed_in_sealed_region_emits_zero_warning_
+## pending_rid_content`, `test_documented_limitation_bed_unsheltered_open_
+## emits_zero_info_pending_rid_content`) are renamed and rewritten below into
+## genuine two-branch tests, each in ONE connected scenario: the real,
+## now-authored `&"bed"` id drives an actual `sealed_space_warning`/
+## `unsheltered_furniture_info` EMISSION through the full pipeline (the
+## flipped TRUE branch), while a decorative (non-functional) item in the
+## SAME scenario still contributes zero (the retained FALSE branch -- not
+## lost, proven side-by-side rather than in isolation). See this story's
+## flip-evidence doc (`production/qa/evidence/rid-009-bed-functional-flip-
+## evidence.md`) for the exact quoted pre/post assertions and suite counts.
 ## Consequently this suite proves the Warning/Info tier contract on TWO
 ## levels:
 ## 1. **[BuildValidationTierClassifier], directly** -- its own
@@ -22,20 +30,17 @@
 ##    exclusivity, the crawlspace no-region case, level-triggered
 ##    re-evaluation, a live tier swap) is fully provable, deterministic, and
 ##    independent of RID content.
-## 2. **[BuildValidation]'s own signal-emission plumbing** -- what IS provable
-##    today without a resolvable need-functional item (AC34's zero-furniture
-##    case, AC35's decorative-item case, the four-signal contract, the
-##    load pass's silence over `room_recognized`/`shelter_status_changed`,
-##    and the private grouping helper in isolation) is tested directly
-##    against the real module. What is NOT provable today (an actual
-##    `sealed_space_warning`/`unsheltered_furniture_info` EMISSION through
-##    the full pipeline for a real bed) is instead PINNED as a documented,
-##    named limitation -- two dedicated tests assert TODAY's honest zero-
-##    emission behavior and must be revisited (flipped to expect real
-##    emissions) the day RID content for "bed" ships -- plus a source-level
-##    structural proof that the two signals' `emit()` call sites are never
-##    gated by `silent` the way `shelter_status_changed`'s own is (AC31's
-##    "these two DO fire on the load pass" half).
+## 2. **[BuildValidation]'s own signal-emission plumbing** -- the
+##    zero-furniture case (AC34), the decorative-item case (AC35), the
+##    four-signal contract, the load pass's silence over
+##    `room_recognized`/`shelter_status_changed`, the private grouping helper
+##    in isolation, AND (as of rid-009) a real end-to-end `sealed_space_
+##    warning`/`unsheltered_furniture_info` emission for the real, authored
+##    `&"bed"` id -- all tested directly against the real module, the real
+##    Autoload RID, and the real shipped `res://data/items/` content. Plus a
+##    source-level structural proof that the two signals' `emit()` call
+##    sites are never gated by `silent` the way `shelter_status_changed`'s
+##    own is (AC31's "these two DO fire on the load pass" half).
 class_name BuildValidationWarningInfoTiersTest
 extends GdUnitTestSuite
 
@@ -502,13 +507,23 @@ func test_reclassify_all_furniture_warning_info_emits_are_not_silent_gated() -> 
 
 
 # ---------------------------------------------------------------------------
-# Documented, honest limitations — pin TODAY's real end-to-end behavior;
-# revisit (flip to expect a real emission) once RID content for "bed" ships.
+# FLIPPED by rid-009 — real end-to-end emissions for the real, authored
+# "bed" id, each proven alongside the retained false/zero branch in ONE
+# connected scenario (renamed from the pre-rid-009
+# `test_documented_limitation_..._pending_rid_content` pins; see class doc
+# comment + `production/qa/evidence/rid-009-bed-functional-flip-evidence.md`
+# for the exact quoted pre/post assertions).
 # ---------------------------------------------------------------------------
 
-## KNOWN GAP (see class doc comment): the real pipeline's Warning tier cannot
-## be exercised today because `ResourceItemDatabase` has no "bed" entry.
-func test_documented_limitation_bed_in_sealed_region_emits_zero_warning_pending_rid_content() -> void:
+## Sealed-region half (AC3/AC17's Warning tier). Renamed from
+## `test_documented_limitation_bed_in_sealed_region_emits_zero_warning_
+## pending_rid_content` -- pre-rid-009 this function asserted
+## `bv.config.is_need_functional(&"bed") == false` and `warnings.size() == 0`
+## (the KNOWN GAP). Now: a real, authored `bed` in a Sealed region emits a
+## real `sealed_space_warning` (the flipped TRUE branch) while a decorative
+## item in the SAME sealed region still contributes zero (the retained
+## FALSE/zero branch, proven side-by-side rather than in isolation).
+func test_bed_in_sealed_region_emits_sealed_space_warning_rid_content_flipped() -> void:
 	var grid: VoxelWorldGrid = _make_grid()
 	var registry := _StubFurnitureRegistry.new()
 	var cell_a := Vector3i(200, 1, 200)
@@ -516,28 +531,49 @@ func test_documented_limitation_bed_in_sealed_region_emits_zero_warning_pending_
 	_build_sealed_region(grid, cell_a, cell_b)
 
 	var bv: BuildValidation = _make_bv(grid, registry)
-	assert_bool(bv.config.is_need_functional(&"bed")).is_false()  # pins the gap itself.
+	assert_bool(bv.config.is_need_functional(&"bed")).is_true()  # the flip itself.
+	assert_bool(bv.config.is_need_functional(&"decorative_rug")).is_false()  # retained false branch.
 
 	var warnings: Array = []
 	_record_sealed_space_warning(bv, warnings)
-	registry.place("bed_1", &"bed", [cell_a])
+	registry.place("rug_1", &"decorative_rug", [cell_b])  # sealed but NOT need-functional -- joins no group.
+	registry.place("bed_1", &"bed", [cell_a])  # sealed AND need-functional -- joins the warning group.
 
-	assert_bool(bv.get_shelter_status("bed_1")).is_false()  # correctly unsheltered regardless.
-	assert_int(warnings.size()).is_equal(0)  # KNOWN GAP -- see class doc comment.
+	assert_bool(bv.get_shelter_status("bed_1")).is_false()  # correctly unsheltered.
+	assert_int(warnings.size()).is_equal(1)  # FLIPPED -- was 0 pre-rid-009.
+	var warning: Dictionary = warnings[0]
+	assert_bool((warning["item_ids"] as Array).has("bed_1")).is_true()
+	assert_bool((warning["item_ids"] as Array).has("rug_1")).is_false()  # false branch held.
 
 
-## KNOWN GAP (see class doc comment): the real pipeline's Info tier cannot be
-## exercised today for the same reason.
-func test_documented_limitation_bed_unsheltered_open_emits_zero_info_pending_rid_content() -> void:
+## Open/unsheltered half (AC17's Info tier). Renamed from
+## `test_documented_limitation_bed_unsheltered_open_emits_zero_info_
+## pending_rid_content` -- pre-rid-009 this function asserted
+## `infos.size() == 0` (the KNOWN GAP; `is_need_functional` was not even
+## asserted here since it was proven redundantly by the sealed-region test).
+## Now: a real, authored `bed` unsheltered in the open emits a real
+## `unsheltered_furniture_info` (the flipped TRUE branch) while a decorative
+## item in the SAME open scenario still contributes zero (the retained
+## FALSE/zero branch).
+func test_bed_unsheltered_open_emits_unsheltered_furniture_info_rid_content_flipped() -> void:
 	var grid: VoxelWorldGrid = _make_grid()
 	var registry := _StubFurnitureRegistry.new()
 	var open_cell := Vector3i(210, 1, 210)
-	grid.bulk_write({open_cell + Vector3i(0, -1, 0): _solid_contents()})
+	var decorative_cell := Vector3i(211, 1, 210)
+	grid.bulk_write({
+		open_cell + Vector3i(0, -1, 0): _solid_contents(),
+		decorative_cell + Vector3i(0, -1, 0): _solid_contents(),
+	})
 
 	var bv: BuildValidation = _make_bv(grid, registry)
+	assert_bool(bv.config.is_need_functional(&"bed")).is_true()  # the flip itself.
+	assert_bool(bv.config.is_need_functional(&"decorative_rug")).is_false()  # retained false branch.
+
 	var infos: Array = []
 	_record_unsheltered_furniture_info(bv, infos)
-	registry.place("bed_2", &"bed", [open_cell])
+	registry.place("rug_2", &"decorative_rug", [decorative_cell])  # open but NOT need-functional -- no Info.
+	registry.place("bed_2", &"bed", [open_cell])  # open AND need-functional -- Info fires.
 
 	assert_bool(bv.get_shelter_status("bed_2")).is_false()
-	assert_int(infos.size()).is_equal(0)  # KNOWN GAP -- see class doc comment.
+	assert_int(infos.size()).is_equal(1)  # FLIPPED -- was 0 pre-rid-009.
+	assert_str(String(infos[0]["item_id"])).is_equal("bed_2")  # false branch (rug_2) never appears.

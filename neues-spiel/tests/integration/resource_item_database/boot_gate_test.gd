@@ -213,9 +213,9 @@ func test_validation_complete_fires_exactly_once_for_a_connect_one_shot_listener
 # ---------------------------------------------------------------------------
 # Autoload registration sanity (mirrors TimeTickSystem's own AC-4 test) —
 # proves the real registered singleton is reachable and already resolved
-# (Ready, zero definitions — res://data/items/ has no content until Story
-# 009) by the time any test executes, matching ADR-0005's documented
-# Autoload-before-Main-Scene ordering.
+# (Ready — populated with the real MVP content story rid-009 shipped to
+# res://data/items/) by the time any test executes, matching ADR-0005's
+# documented Autoload-before-Main-Scene ordering.
 # ---------------------------------------------------------------------------
 
 func test_resource_item_database_autoload_registered_and_ready_before_test_execution() -> void:
