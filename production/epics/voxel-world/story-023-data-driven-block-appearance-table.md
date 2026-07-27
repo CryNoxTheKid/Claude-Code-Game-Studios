@@ -1,7 +1,7 @@
 # Story 023: Block appearance becomes DATA — the palette owner can change a colour by editing data and nothing else
 
 > **Epic**: Voxel World / Grid Data
-> **Status**: Ready
+> **Status**: Complete (2026-07-27 — 1577/1577 suite green, 0 orphans, parent-verified; the shipped game renders four distinct terrain colours)
 > **Layer**: Presentation (the mesher's appearance tier) → consumes Foundation (`vox-022`'s ids)
 > **Type**: Logic
 > **Estimate**: **1.0 day** *(relative-complexity anchor, not a calendar prediction — sprint-09.md sizing convention)*. Authored at gate G2 of Sprint 12; the sprint anchored 1.0 and authoring did **not** move it, but authoring did add a **third** lever the sprint had not named (§ Anti-Vacuity Lever 3) — the sprint's own deepest rule applied to this story's exact shape.
@@ -170,7 +170,7 @@ commit body** — this is a small implementer/TD call, not a silent one.
 
 ## Acceptance Criteria
 
-- [ ] **AC-APPEARANCE-IS-A-CONFIG-RESOURCE**: `voxel_world_mesher.gd`'s
+- [x] **AC-APPEARANCE-IS-A-CONFIG-RESOURCE**: `voxel_world_mesher.gd`'s
       `const DEBUG_BLOCK_COLORS` is **gone**, replaced by a `Resource`-derived config class
       extending `ConfigResource`, with a matching **text** `.tres` at
       `res://data/config/` — the `world_lighting_config.gd` / `world_lighting_config.tres`
@@ -178,14 +178,14 @@ commit body** — this is a small implementer/TD call, not a silent one.
       it as a typed `@export`, Inspector-wired on `Valley.tscn` like every other
       injected-tier dependency, read in `setup()` and **never** in `_ready()`.
       [ADR-0002, ADR-0001, CONTRACTS.md §1/§2]
-- [ ] **AC-VALIDATE-RUNS-ONCE-AND-BLOCKS**: the config exposes
+- [x] **AC-VALIDATE-RUNS-ONCE-AND-BLOCKS**: the config exposes
       `func validate() -> Array[String]`, called exactly once from the mesher's `setup()`.
       Structural defects — duplicate id, id outside `0–255`, malformed colour, mismatched
       parallel-array lengths, an empty table — return a `ConfigResource.format_blocking()`
       issue and halt boot through the **existing terminal path** (`GameWorld` → `HALTED` +
       `boot_halted`), never a new severity model and never a silent clamp.
       [ADR-0002 two-tier policy, CONTRACTS.md §5]
-- [ ] **AC-NEVER-OPTIONAL-AND-CONSEQUENTIAL** ⚑ *the sprint's deepest rule, and this story's
+- [x] **AC-NEVER-OPTIONAL-AND-CONSEQUENTIAL** ⚑ *the sprint's deepest rule, and this story's
       named shape*: there is **no fallback appearance table anywhere in code**. The mesher's
       `setup()` asserts the appearance config is wired — the same shape as the two asserts
       already in that method — **and** the wiring appears in `Valley`'s boot-invariant block
@@ -193,43 +193,43 @@ commit body** — this is a small implementer/TD call, not a silent one.
       `_assert_build_validation_gates_boot_invariant()` /
       `_assert_loop_payoff_wiring_boot_invariant()`. **An unwired appearance config is a loud
       boot failure, never a correct-looking render.** Proven by Lever 3's deletion probe.
-- [ ] **AC-VISIBLE-FAIL-SURVIVES**: the magenta unknown-colour path is **retained** and
+- [x] **AC-VISIBLE-FAIL-SURVIVES**: the magenta unknown-colour path is **retained** and
       **still reachable**. An id with no entry in the table renders `Color(1, 0, 0, 1)`-loud
       magenta exactly as today, and a test drives an unmapped id through the real mesher and
       asserts magenta faces are produced. ⚑ **A visible-fail path with no test is dead code
       wearing a safety net's uniform.** Renaming the constant is allowed; changing its
       behaviour is not.
-- [ ] **AC-DATA-ONLY-CHANGE-CHANGES-THE-WORLD** ⚑ *the user's own requirement, made
+- [x] **AC-DATA-ONLY-CHANGE-CHANGES-THE-WORLD** ⚑ *the user's own requirement, made
       testable*: editing a colour value in the `.tres` — **and touching no `.gd` file, no
       scene, and no test** — changes the vertex colour the mesher emits for that id. Asserted
       by loading a second `.tres` fixture with different values and observing the produced
       `Mesh.ARRAY_COLOR` change. **The palette owner's loop is: edit one number, see one
       colour move.**
-- [ ] **AC-SHIPPED-VALUES-ARE-THE-ART-BIBLE'S**: the shipped `.tres` carries the art bible
+- [x] **AC-SHIPPED-VALUES-ARE-THE-ART-BIBLE'S**: the shipped `.tres` carries the art bible
       §4.3 band hexes verbatim — Lowland `#9CAD6E`, Midland `#A98F5E`, Highland `#7C818A`,
       Peak `#C9D3D8` — keyed to the ids `vox-022` ratified, with id **1 = Lowland**
       (`vox-022`'s AC-ID-1-STAYS-LOWLAND compatibility constraint). ⚑ **No producer-invented
       colour enters this file.** If `vox-022` shipped fewer than four bands, the table carries
       exactly the ids that exist and no speculative rows.
-- [ ] **AC-COVERS-EVERY-ID-VOX-022-CAN-EMIT** ⚑ *the cross-story seam, driven from data and
+- [x] **AC-COVERS-EVERY-ID-VOX-022-CAN-EMIT** ⚑ *the cross-story seam, driven from data and
       never from a literal list*: for **every** id the ratified band rule can produce, the
       table has an entry. The test reads the id set from `vox-022`'s band configuration —
       **it does not paste a list** — so the two stories cannot drift apart in a later tuning
       pass. [see Lever 2]
-- [ ] **AC-NO-STATE-COLOUR-ON-WORLD-GEOMETRY**: the appearance table carries **material**
+- [x] **AC-NO-STATE-COLOUR-ON-WORLD-GEOMETRY**: the appearance table carries **material**
       colour only. No draft / released / paused / done / validity colouring enters it, and
       none is baked into committed-block vertex colours — build-state colouring stays on
       ghost/overlay presentation and the Projects Panel. *(Control manifest, Presentation
       Layer Rules: "State colors never render on world geometry", source ADR-0014 + ADR-0016.)*
-- [ ] **AC-MESHER-CONTRACTS-UNCHANGED**: CW winding, backface culling **ENABLED**, and the
+- [x] **AC-MESHER-CONTRACTS-UNCHANGED**: CW winding, backface culling **ENABLED**, and the
       **one shared `ShaderMaterial`** constructed exactly once are all untouched
       (TR-voxel-world-052, ADR-0014 §2). The existing winding-conformance test still passes
       unmodified. This story changes which colour a vertex carries and nothing else about how
       geometry is built.
-- [ ] **AC-NO-APPEARANCE-IN-THE-DATA-TIER**: `voxel_world_grid.gd` gains **zero** knowledge of
+- [x] **AC-NO-APPEARANCE-IN-THE-DATA-TIER**: `voxel_world_grid.gd` gains **zero** knowledge of
       colour or material appearance — the seam between the two stories remains the opaque
       integer (TR-voxel-world-028).
-- [ ] **AC-SUITE-GREEN-AND-DIAGNOSED**: the full blocking suite is green headless, 0 orphans,
+- [x] **AC-SUITE-GREEN-AND-DIAGNOSED**: the full blocking suite is green headless, 0 orphans,
       exit 0, both checked explicitly. Any pre-existing test that changes is **named
       individually in the commit body with its reason** — a test that changes because the
       colour now comes from data is legitimate; a test that changes because it was asserting
@@ -449,3 +449,45 @@ Test Evidence table)
   windowed capture honest. Take the terrain captures **after** it lands, not before.
 </content>
 </invoke>
+
+---
+
+## Closure Note (2026-07-27) — and one thing the story did NOT settle
+
+Landed. The mesher's hardcoded colour dict is gone; appearance is
+`data/config/block_appearance_config.tres`, and changing a hex there changes
+exactly one colour in the built mesh — asserted, not assumed. Magenta survives
+as the visible-fail path for an unmapped id, with an inverse test proving nobody
+quietly deleted it.
+
+Lever 3 is worth recording in full because it is the shape Sprint 12's risk table
+demands: unwiring the `.tres` on `Valley.tscn` produced **296 errors**, the
+assertion `VoxelWorldMesher.appearance not wired` repeated, and exit code 100 —
+a loud, unmissable failure rather than a correct-looking render. Never both
+optional and consequential.
+
+### AESTHETIC FINDING, owed to the art director / user — NOT a defect
+
+The world now renders four colours, and it does not look like a valley. Grey
+Highland and pale Peak dominate; Lowland olive survives only in patches. The
+cause is decision D11's band anchoring, taken provisionally while the user was
+away: bands anchored to the ACHIEVABLE terrain range put the boundaries at
+[2, 4, 5] in a world whose columns top out between y = 1 and y = 7, so the
+material changes every one to two blocks. That satisfies vox-022's lever (four
+bands genuinely appear) while reading as stripes rather than terrain.
+
+Two remedies, both data, neither taken here because both are composition calls:
+ 1. Widen the boundaries so Lowland owns the valley floor and Highland/Peak are
+    reserved for genuine crests. Costs nothing; may make band 4 rare or absent
+    again, which is what D11 was avoiding.
+ 2. Raise `max_y` so the bands have real vertical room. Doubles chunk payload
+    against ADR-0015's residency budget — a TD question, not only a taste one.
+
+Evidence: `production/qa/evidence/settlement-overview-eyelevel-3.png` and
+`-topdown-2.png`, captured through the shipped camera with the tool supplying
+no lighting of its own.
+
+THIS MUST BE SETTLED BEFORE presentation-004's AC3 lighting sign-off, which
+Sprint 12 already sequences after these two stories — signing off exposure
+against striped terrain would repeat the exact mistake AC3's ordering exists to
+prevent.

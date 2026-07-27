@@ -517,6 +517,17 @@
 ## dependencies must be wired (never left `null`, mirroring [method
 ## _assert_build_validation_gates_boot_invariant]'s own shape for
 ## [FurnitureBedProvider.build_validation]).
+## Story vox-023 ("Block appearance becomes DATA") wires [VoxelWorldMesher]'s
+## new [member VoxelWorldMesher.appearance] dependency
+## (`res://data/config/block_appearance_config.tres`) via this scene's
+## Inspector -- the same "a Resource export resolves fine from a
+## hand-authored `.tscn`" precedent every other config field on this scene
+## already uses (class doc comment above). [method
+## _assert_block_appearance_boot_invariant] extends this class's own "fail
+## loudly, not silently" boot-invariant block a fourth time: an unwired
+## appearance config must halt boot loudly, never render a plausible-looking
+## (but actually hardcoded) world -- sprint-12's own deepest rule, named
+## against this exact shape.
 class_name Valley
 extends Node3D
 
@@ -854,6 +865,7 @@ func _ready() -> void:
 	_assert_lighting_boot_invariant()
 	_assert_build_validation_gates_boot_invariant()
 	_assert_loop_payoff_wiring_boot_invariant()
+	_assert_block_appearance_boot_invariant()
 
 
 ## Code-assigned DI for the Node-typed cross-references between hosted
@@ -965,6 +977,24 @@ func _assert_lighting_boot_invariant() -> void:
 	assert(
 		environment_count == 1,
 		"Valley must host exactly one WorldEnvironment, found %d" % environment_count
+	)
+
+
+## Boot invariant (Story vox-023, AC-NEVER-OPTIONAL-AND-CONSEQUENTIAL, Lever 3)
+## -- asserts the hosted [VoxelWorldMesher]'s [member VoxelWorldMesher.appearance]
+## config is wired, mirroring [method _assert_lighting_boot_invariant]'s own
+## "fail loudly, not silently" convention. Sprint-12's own deepest rule, named
+## explicitly against this exact shape (S11's worst finding: both villager
+## gates defaulted PERMISSIVE when unwired, making criterion #5 inert in the
+## product while green in test) -- an unwired appearance config must be a
+## loud boot failure, never a correct-looking render. This is a SECOND,
+## independent catch alongside [method VoxelWorldMesher.setup]'s own identical
+## assert -- belt-and-suspenders, not a replacement for it.
+func _assert_block_appearance_boot_invariant() -> void:
+	assert(
+		_voxel_world_mesher.appearance != null,
+		"Valley must wire VoxelWorldMesher.appearance (block appearance config) -- an unwired" +
+		" appearance config must be a loud boot failure, never a correct-looking render"
 	)
 
 

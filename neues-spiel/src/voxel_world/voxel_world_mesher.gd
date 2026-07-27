@@ -74,16 +74,28 @@
 ##
 ## Texturing (deliberately deferred, not this story's scope): no atlas story
 ## exists yet anywhere in `production/epics/voxel-world/` as of this story --
-## [constant DEBUG_BLOCK_COLORS] stubs a flat per-block-type placeholder
-## color (art-bible SS4.3's height-band hex values) as the mesh's per-vertex
-## COLOR, sampled by the shared shader as plain unlit-texture ALBEDO.
-## Vertex-AO and the vertical slice's `y_cut` slice-view uniform are ALSO
-## deferred -- neither is required by this story's acceptance criteria. ONE
-## shared [ShaderMaterial] ([member _material],
-## `res://assets/shaders/terrain_chunk.gdshader`) is still the canonical
-## single-material contract (art-bible SS8.9.1) specifically so later
-## atlas/AO/y_cut stories extend this SAME material/shader file in place,
-## never introduce a second one (art-bible SS8.9.11 Reject-If gate #1).
+## per-vertex COLOR is still a flat per-block-type placeholder, sampled by the
+## shared shader as plain unlit-texture ALBEDO. Vertex-AO and the vertical
+## slice's `y_cut` slice-view uniform are ALSO deferred -- neither is required
+## by this story's acceptance criteria. ONE shared [ShaderMaterial]
+## ([member _material], `res://assets/shaders/terrain_chunk.gdshader`) is
+## still the canonical single-material contract (art-bible SS8.9.1)
+## specifically so later atlas/AO/y_cut stories extend this SAME
+## material/shader file in place, never introduce a second one (art-bible
+## SS8.9.11 Reject-If gate #1).
+##
+## Story vox-023 ("Block appearance becomes DATA"): the placeholder colour is
+## no longer a hardcoded `const DEBUG_BLOCK_COLORS` dictionary -- it is read
+## from [member appearance], a [BlockAppearanceConfig] injected exactly like
+## [member grid] (ADR-0001/0002). [constant DEBUG_UNKNOWN_COLOR] is RETAINED,
+## unchanged, as the visible-fail path for an id [member appearance] has no
+## entry for -- this project's "visible fail, never silent" rule. See
+## [BlockAppearanceConfig]'s own class doc comment for the storage-shape
+## rationale and [method setup]/[method build_chunk] for the
+## never-optional-and-consequential wiring discipline (sprint-12's own
+## deepest rule): there is NO fallback appearance table anywhere in this file
+## -- an unwired [member appearance] is a loud assert failure, never a
+## correct-looking render.
 class_name VoxelWorldMesher
 extends Node3D
 
@@ -137,15 +149,13 @@ const FACE_CORNERS: Array[Array] = [
 	[Vector3i(0, 0, 0), Vector3i(1, 0, 0), Vector3i(1, 1, 0), Vector3i(0, 1, 0)],
 ]
 
-## Placeholder flat per-block-type color (art-bible SS4.3 height-band hex
-## values -- the design-authoritative source, not the reference slice) -- see
-## class doc comment's Texturing note. Keyed by [CellContents.block_type_id];
-## [constant DEBUG_UNKNOWN_COLOR] is a visibly-wrong magenta for any id this
-## table doesn't recognize yet (this project's established "visible fail,
-## never silent" precedent) -- a placeholder, not a real atlas lookup.
-const DEBUG_BLOCK_COLORS: Dictionary[int, Color] = {
-	1: Color("9CAD6E"),  # art-bible SS4.3 Lowland band -- Story 006's only terrain block-type id today
-}
+## Visibly-wrong magenta for any block-type id [member appearance] does not
+## recognize (this project's established "visible fail, never silent"
+## precedent) -- the ONE permitted `Color(...)` construction in
+## `src/voxel_world/` (grep-guarded, `data_driven_block_appearance_test.gd`),
+## RETAINED unchanged by Story vox-023: a "sensible fallback colour" here
+## would be the exact class of defect this project hunts -- a permissive
+## default that lets a missing appearance mapping ship unnoticed.
 const DEBUG_UNKNOWN_COLOR: Color = Color(1.0, 0.0, 1.0)
 
 ## Voxel World / Grid Data dependency (ADR-0001 injected-tier). Wired via a
@@ -153,8 +163,30 @@ const DEBUG_UNKNOWN_COLOR: Color = Color(1.0, 0.0, 1.0)
 ## test/tool -- never read inside `_ready()` (see [method setup]).
 @export var grid: VoxelWorldGrid
 
+## Block-appearance config (ADR-0001/0002 injected-tier; Story vox-023) --
+## resolves a [CellContents.block_type_id] to a [Color] from DATA, replacing
+## the old `const DEBUG_BLOCK_COLORS` dictionary. Wired via `Valley.tscn`'s
+## Inspector in production (`res://data/config/block_appearance_config.tres`),
+## or assigned directly in a headless test/tool -- never read inside
+## `_ready()` (see [method setup]). ⚑ AC-NEVER-OPTIONAL-AND-CONSEQUENTIAL:
+## there is NO fallback table if this is left unwired -- [method setup] and
+## [method build_chunk] both assert it non-null, the same shape as the
+## existing `grid`/`grid.config` asserts, and `Valley`'s own boot-invariant
+## block asserts the wiring a second time (belt-and-suspenders, mirroring
+## [WorldLightingConfig]'s landed precedent).
+@export var appearance: BlockAppearanceConfig
+
 ## True once [method setup] has completed.
 var _is_set_up: bool = false
+
+## The BLOCKING-tagged subset of the most recent `appearance.validate()`
+## result, if any (Story vox-023, ADR-0002). Populated by [method setup]; read
+## by [GameWorld]'s boot gate via [method get_boot_blocking_issues]. Every
+## issue [method BlockAppearanceConfig.validate] can return is already
+## BLOCKING-tagged (that config's own class doc comment -- its field shape has
+## no clamp-and-warn tier), so this is simply that call's raw result, never
+## filtered.
+var _boot_blocking_issues: Array[String] = []
 
 ## ONE shared [ShaderMaterial] instance for every chunk this mesher ever
 ## builds (art-bible SS8.9.1 canonical contract, ADR-0014 Decision Section
@@ -181,14 +213,20 @@ var _dirty_chunks: Dictionary[Vector2i, bool] = {}
 
 
 ## Explicitly callable wiring entry point (ADR-0001). Asserts [member grid]
-## (and its wired [VoxelWorldConfig]) are present, then subscribes to all
-## three of [VoxelWorldGrid]'s change/residency signals so an already-[method
-## build_chunk]'d chunk is marked dirty on any write inside (or bordering) it,
-## or the instant its data pages in (TR-voxel-world-025/053) -- a chunk never
-## asked for is left alone (Scope note).
+## (and its wired [VoxelWorldConfig]) and [member appearance] are present
+## (Story vox-023, AC-NEVER-OPTIONAL-AND-CONSEQUENTIAL -- the SAME assert
+## shape as the two pre-existing ones, never a nullable fallback), applies
+## ADR-0002's `validate()` discipline to [member appearance] exactly once,
+## then subscribes to all three of [VoxelWorldGrid]'s change/residency signals
+## so an already-[method build_chunk]'d chunk is marked dirty on any write
+## inside (or bordering) it, or the instant its data pages in
+## (TR-voxel-world-025/053) -- a chunk never asked for is left alone (Scope
+## note).
 func setup() -> void:
 	assert(grid != null, "VoxelWorldMesher.grid not wired")
 	assert(grid.config != null, "VoxelWorldMesher.grid.config not wired")
+	assert(appearance != null, "VoxelWorldMesher.appearance not wired")
+	_boot_blocking_issues = appearance.validate()
 	grid.cell_changed.connect(_on_cell_changed)
 	grid.cells_changed_batch.connect(_on_cells_changed_batch)
 	grid.chunk_became_resident.connect(_on_chunk_became_resident)
@@ -198,6 +236,15 @@ func setup() -> void:
 ## Returns whether [method setup] has completed.
 func is_set_up() -> bool:
 	return _is_set_up
+
+
+## Returns the BLOCKING-tagged issues (if any) found in the most recent
+## `appearance.validate()` call (Story vox-023, ADR-0002). [GameWorld]'s boot
+## gate duck-types this method on every injected-tier module after calling
+## `setup()` -- a non-empty result triggers the same terminal boot-halt path
+## used for every other config's blocking invariant, no new severity model.
+func get_boot_blocking_issues() -> Array[String]:
+	return _boot_blocking_issues
 
 
 ## Builds (or rebuilds) the whole-chunk [ArrayMesh] for [param chunk_coord]
@@ -212,6 +259,7 @@ func is_set_up() -> bool:
 func build_chunk(chunk_coord: Vector2i) -> void:
 	assert(grid != null, "VoxelWorldMesher.grid not wired")
 	assert(grid.config != null, "VoxelWorldMesher.grid.config not wired")
+	assert(appearance != null, "VoxelWorldMesher.appearance not wired")
 	var arrays: Array = _build_chunk_arrays(chunk_coord)
 	var mesh_instance: MeshInstance3D = _get_or_create_chunk_node(chunk_coord)
 	if arrays.is_empty():
@@ -445,7 +493,7 @@ func _build_chunk_arrays(chunk_coord: Vector2i) -> Array:
 					continue
 				var global_y: int = snapshot.min_y + local_y
 				var cell := Vector3i(global_x, global_y, global_z)
-				var color: Color = DEBUG_BLOCK_COLORS.get(block_type_id, DEBUG_UNKNOWN_COLOR)
+				var color: Color = appearance.get_color(block_type_id, DEBUG_UNKNOWN_COLOR)
 				for face_index in FACE_NORMALS.size():
 					if _is_chunk_local_air(snapshot, block_type_ids, chunk_size, local_x, local_y, local_z, cell, face_index):
 						_append_face(verts, normals, colors, indices, cell, face_index, color)

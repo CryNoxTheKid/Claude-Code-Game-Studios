@@ -39,6 +39,8 @@
 [ext_resource type="Resource" path="res://data/config/build_validation_config.tres" id="35_buildvalidationcfg"]
 [ext_resource type="Script" path="res://src/presentation/loop_payoff_signal_surface.gd" id="36_looppayoffsurface"]
 [ext_resource type="Script" path="res://src/presentation/loop_payoff_adapter.gd" id="37_looppayoffadapter"]
+[ext_resource type="Script" path="res://src/voxel_world/block_appearance_config.gd" id="38_blockappearance"]
+[ext_resource type="Resource" path="res://data/config/block_appearance_config.tres" id="39_blockappearancecfg"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_torchindicator"]
 shading_mode = 0
@@ -60,6 +62,7 @@ config = ExtResource("3_voxelcfg")
 
 [node name="VoxelWorldMesher" type="Node3D" parent="."]
 script = ExtResource("6_mesher")
+appearance = ExtResource("39_blockappearancecfg")
 
 [node name="VoxelWorldMeshStreamer" type="Node" parent="."]
 script = ExtResource("6b_meshstreamer")

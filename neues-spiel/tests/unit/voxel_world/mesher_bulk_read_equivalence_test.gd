@@ -12,8 +12,11 @@
 ## `src/voxel_world/`, so the OLD algorithm's reference implementation lives
 ## ONLY in this test file, hand-reconstructed from the exact pre-vox-019
 ## source (same loop order, same [VoxelWorldMesher.FACE_NORMALS]/
-## [VoxelWorldMesher.FACE_CORNERS]/[VoxelWorldMesher.DEBUG_BLOCK_COLORS]
-## tables, same fan-triangulation) -- never re-derived or approximated.
+## [VoxelWorldMesher.FACE_CORNERS] tables, same fan-triangulation) -- never
+## re-derived or approximated. Story vox-023: the colour source is now the
+## SAME [BlockAppearanceConfig] instance the mesher under test was wired
+## with (see [method _legacy_build_chunk_arrays]), not the retired
+## `DEBUG_BLOCK_COLORS` constant.
 ##
 ## Fixture (AC2's own requirement): a 2-chunk-wide, 1-chunk-deep grid with
 ## mixed solid/air, terrain height variation ACROSS the chunk-0/chunk-1
@@ -84,6 +87,10 @@ func _make_fixture_grid() -> VoxelWorldGrid:
 func _make_mesher(grid: VoxelWorldGrid) -> VoxelWorldMesher:
 	var mesher: VoxelWorldMesher = auto_free(VoxelWorldMesher.new())
 	mesher.grid = grid
+	# Story vox-023: VoxelWorldMesher.setup() now asserts appearance is wired
+	# (AC-NEVER-OPTIONAL-AND-CONSEQUENTIAL) -- a fresh, valid config satisfies
+	# that assert without affecting this file's own equivalence assertions.
+	mesher.appearance = BlockAppearanceConfig.new()
 	mesher.setup()
 	return mesher
 
@@ -92,10 +99,15 @@ func _make_mesher(grid: VoxelWorldGrid) -> VoxelWorldMesher:
 ## VoxelWorldMesher._build_chunk_arrays] -- see this file's own class doc
 ## comment for why this lives here rather than as a second production code
 ## path. Identical loop order/triangulation to the pre-optimization source,
-## reusing [VoxelWorldMesher]'s own public winding/color tables so no magic
-## number is duplicated (the ONLY thing under test is the READ mechanism,
-## get_cell-per-cell here vs. the bulk snapshot in production).
-func _legacy_build_chunk_arrays(grid: VoxelWorldGrid, chunk_coord: Vector2i) -> Array:
+## reusing [VoxelWorldMesher]'s own public winding tables so no magic number
+## is duplicated (the ONLY thing under test is the READ mechanism,
+## get_cell-per-cell here vs. the bulk snapshot in production). Story vox-023:
+## the colour source is now [param appearance] (the SAME config instance the
+## production mesher under test was wired with, via [param appearance]) rather
+## than the retired `DEBUG_BLOCK_COLORS` constant -- both algorithms must read
+## the SAME colour source for this test's byte-identity comparison to remain
+## meaningful.
+func _legacy_build_chunk_arrays(grid: VoxelWorldGrid, chunk_coord: Vector2i, appearance: BlockAppearanceConfig) -> Array:
 	var chunk_size: int = VoxelWorldGrid.CHUNK_SIZE
 	var verts := PackedVector3Array()
 	var normals := PackedVector3Array()
@@ -110,7 +122,7 @@ func _legacy_build_chunk_arrays(grid: VoxelWorldGrid, chunk_coord: Vector2i) -> 
 				var contents: CellContents = grid.get_cell(cell)
 				if contents == null or contents.is_empty():
 					continue
-				var color: Color = VoxelWorldMesher.DEBUG_BLOCK_COLORS.get(contents.block_type_id, VoxelWorldMesher.DEBUG_UNKNOWN_COLOR)
+				var color: Color = appearance.get_color(contents.block_type_id, VoxelWorldMesher.DEBUG_UNKNOWN_COLOR)
 				for face_index in VoxelWorldMesher.FACE_NORMALS.size():
 					var neighbor: Vector3i = cell + VoxelWorldMesher.FACE_NORMALS[face_index]
 					var neighbor_contents: CellContents = grid.get_cell(neighbor)
@@ -157,7 +169,7 @@ func test_optimized_path_matches_legacy_path_for_chunk_with_interior_air_pocket(
 
 	# Act
 	var optimized: Array = mesher._build_chunk_arrays(Vector2i(0, 0))
-	var legacy: Array = _legacy_build_chunk_arrays(grid, Vector2i(0, 0))
+	var legacy: Array = _legacy_build_chunk_arrays(grid, Vector2i(0, 0), mesher.appearance)
 
 	# Assert -- byte-identical, element-wise, for every emitted array.
 	assert_bool(optimized.is_empty()).is_false()
@@ -178,7 +190,7 @@ func test_optimized_path_matches_legacy_path_for_neighbor_chunk_across_the_borde
 
 	# Act
 	var optimized: Array = mesher._build_chunk_arrays(Vector2i(1, 0))
-	var legacy: Array = _legacy_build_chunk_arrays(grid, Vector2i(1, 0))
+	var legacy: Array = _legacy_build_chunk_arrays(grid, Vector2i(1, 0), mesher.appearance)
 
 	# Assert
 	assert_bool(optimized.is_empty()).is_false()
@@ -197,7 +209,7 @@ func test_optimized_path_for_never_touched_chunk_returns_empty_array_matching_le
 
 	# Act
 	var optimized: Array = mesher._build_chunk_arrays(Vector2i(5, 5))
-	var legacy: Array = _legacy_build_chunk_arrays(grid, Vector2i(5, 5))
+	var legacy: Array = _legacy_build_chunk_arrays(grid, Vector2i(5, 5), mesher.appearance)
 
 	# Assert -- both the empty-Array contract (not a populated-but-empty one).
 	assert_int(optimized.size()).is_equal(0)

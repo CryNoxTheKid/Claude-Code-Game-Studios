@@ -36,6 +36,10 @@ func _make_grid() -> VoxelWorldGrid:
 func _make_mesher(grid: VoxelWorldGrid) -> VoxelWorldMesher:
 	var mesher: VoxelWorldMesher = auto_free(VoxelWorldMesher.new())
 	mesher.grid = grid
+	# Story vox-023: VoxelWorldMesher.setup() now asserts appearance is wired
+	# (AC-NEVER-OPTIONAL-AND-CONSEQUENTIAL) -- a fresh, valid config satisfies
+	# that assert without affecting this file's own face-culling assertions.
+	mesher.appearance = BlockAppearanceConfig.new()
 	mesher.setup()
 	return mesher
 

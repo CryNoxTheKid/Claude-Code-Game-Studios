@@ -114,6 +114,10 @@ func _make_grid(world_size: int = 512) -> VoxelWorldGrid:
 func _make_mesher(grid: VoxelWorldGrid) -> VoxelWorldMesher:
 	var mesher: VoxelWorldMesher = auto_free(VoxelWorldMesher.new())
 	mesher.grid = grid
+	# Story vox-023: VoxelWorldMesher.setup() now asserts appearance is wired
+	# (AC-NEVER-OPTIONAL-AND-CONSEQUENTIAL) -- a fresh, valid config satisfies
+	# that assert without affecting this file's own dirty-set assertions.
+	mesher.appearance = BlockAppearanceConfig.new()
 	mesher.setup()
 	return mesher
 
@@ -121,6 +125,7 @@ func _make_mesher(grid: VoxelWorldGrid) -> VoxelWorldMesher:
 func _make_instrumented_mesher(grid: VoxelWorldGrid) -> _InstrumentedMesher:
 	var mesher: _InstrumentedMesher = auto_free(_InstrumentedMesher.new())
 	mesher.grid = grid
+	mesher.appearance = BlockAppearanceConfig.new()
 	mesher.setup()
 	return mesher
 
