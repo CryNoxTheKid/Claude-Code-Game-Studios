@@ -224,7 +224,7 @@ stories:
     name: "Nudge-aside / vacate (F4) — the CD's named pull-forward trigger"
     file: "production/epics/villager-ai-behavior/story-013-nudge-aside-vacate-f4.md"
     priority: nice-to-have
-    status: backlog
+    status: complete
     owner: "ai-programmer"
     estimate_days: 0.5
     blocker: "Its own header depends on villager-ai-004 + 006, both Complete — blocked on nothing. FIRST TRIM CANDIDATE: pure cost this sprint, no in-sprint consumer (villager-ai-020, the breather beat, depends on it and is S12). A blocked villager asks the occupant to STEP ASIDE rather than re-pathing or freezing; deterministic ordering per ADR-0009. The CD named the 013+019 seam as precisely the moment the settlement stops reading as mechanical, which is why it is scheduled at all alongside 019."

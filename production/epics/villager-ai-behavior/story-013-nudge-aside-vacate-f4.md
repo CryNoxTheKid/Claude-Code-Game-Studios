@@ -1,7 +1,7 @@
 # Story 013: Nudge-aside vacate (F4 target selection)
 
 > **Epic**: Villager AI & Behavior
-> **Status**: Ready
+> **Status**: Complete (2026-07-27 — 1488/1488 suite green, 0 orphans, parent-verified on a clean single run)
 > **Layer**: Core
 > **Type**: Logic
 > **Estimate**: ~1 agent-day

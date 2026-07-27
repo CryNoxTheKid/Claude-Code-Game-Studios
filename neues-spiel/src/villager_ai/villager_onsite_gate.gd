@@ -26,10 +26,21 @@
 ## 2. **Occupied-cell defer** (Building System Edge Case 6/AC36, this
 ##    story's own AC40b): if any OTHER registered villager currently stands
 ##    exactly on the target cell, the assigned worker's own progress is
-##    deferred until that occupant vacates (F4, Story villager-ai-013 --
-##    the vacate REQUEST/step mechanics themselves are that story's own
-##    scope; this class only reads whoever's [method VillagerAi.
-##    get_current_cell] currently equals the cell).
+##    deferred until that occupant vacates. **Story villager-ai-013 (this
+##    revision)**: the actual vacate REQUEST is now wired here too -- [method
+##    _is_blocked] calls [method VillagerAi.request_vacate] on the occupant
+##    ("the builder requests a vacate," GDD Rule 7's own wording) as a
+##    side effect of detecting the occupied cell, passing the assigned
+##    worker's own on-site position as the F4 "requester" [VillagerAi.
+##    request_vacate] steps the occupant away from. That method is itself a
+##    no-op unless the occupant is `State.WANDERING` (Rule 7's "idle or
+##    wandering... mid-activity NOT interrupted" contrast) -- a `WORKING`/
+##    `SLEEPING` occupant is therefore left entirely untouched, exactly this
+##    method's own return value already implied on its own (`true`, deferred)
+##    before this revision. The request is safely re-issued every tick the
+##    cell stays occupied: [method VillagerAi.request_vacate] itself is
+##    idempotent once a vacate step is under way (see that method's own doc
+##    comment), so this call site needs no once-only guard of its own.
 ##
 ## Connection ordering is NOT this class's concern (see [VillagerAi]'s own
 ## `_tick_working` doc comment, and [ConstructionTickLoop]'s class doc
@@ -97,7 +108,9 @@ func _is_blocked(cell: Vector3i) -> bool:
 	for id: int in _villagers:
 		if id == worker.get_villager_id():
 			continue
-		if _villagers[id].get_current_cell() == cell:
+		var occupant: VillagerAi = _villagers[id]
+		if occupant.get_current_cell() == cell:
+			occupant.request_vacate(worker.get_current_cell())
 			return true
 	return false
 

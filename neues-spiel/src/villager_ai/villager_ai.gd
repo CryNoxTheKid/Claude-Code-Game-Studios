@@ -393,6 +393,32 @@
 ## villagers still draw independently-varied sequences (different
 ## `villager_id` seeds), so the population does not read as one synchronized
 ## clock.
+##
+## Story villager-ai-013 (this revision) implements F4's nudge-aside target
+## selection and the actual vacate REQUEST/step [VillagerOnSiteGate]'s own
+## doc comment reserved for this story (GDD Rule 7 / F4,
+## [TR-villager-ai-behavior-056]/[TR-villager-ai-behavior-079]/
+## [TR-villager-ai-behavior-034]): [method request_vacate] is the entry point
+## [VillagerOnSiteGate]'s own occupancy predicate now calls whenever it finds
+## an occupied builder target cell (see that class's own doc comment update),
+## delegating the actual target algorithm to the new stateless
+## [VillagerNudgeAsideSelector] (mirrors [VillagerWanderSelector]'s own
+## "separate stateless algorithm library" precedent exactly). Eligible ONLY
+## while `State.WANDERING` -- this FSM has no separate "Idle" state (the
+## GDD's own States table names Wandering's Entry as "Decided Idle"), so "an
+## idle or wandering occupant" (Rule 7) maps 1:1 onto that one state; every
+## other state (`WORKING`/`SLEEPING` -- Rule 7's own explicit "mid-activity...
+## NOT interrupted"; `BREATHER` -- a deliberate, settled rest beat, not "idle
+## standing"; `TRAVELING` -- already mid-step toward its own destination; and
+## `DECIDING` -- instantaneous, same-tick) is a no-op, deferring exactly as
+## [VillagerOnSiteGate]'s own occupancy predicate already does independently
+## (this story's own interpretation, the narrowest reading that satisfies
+## AC34/AC42's explicit Idle-vacates-vs-Working/Sleeping-deferred contrast).
+## Reuses [method start_traveling] wholesale (arrival state `WANDERING`, the
+## SAME "resume Wandering after this walk" pattern [method
+## _perform_wander_pick]'s own WALK/BED_DRIFT picks already establish) -- a
+## repeated request while already mid-vacate-step finds `_state != WANDERING`
+## and is a harmless no-op, no re-selection, no redundant travel restart.
 class_name VillagerAi
 extends Node
 
@@ -2301,6 +2327,72 @@ func _get_wander_rng() -> RandomNumberGenerator:
 		wander_rng = RandomNumberGenerator.new()
 		wander_rng.seed = villager_id
 	return wander_rng
+
+
+# =============================================================================
+# Story villager-ai-013 -- Nudge-aside vacate (F4 target selection)
+# =============================================================================
+
+## Nudge-aside vacate request entry point (Story villager-ai-013, GDD Rule 7
+## / F4, [TR-villager-ai-behavior-056]/[TR-villager-ai-behavior-079]/
+## [TR-villager-ai-behavior-034]). Called by [VillagerOnSiteGate] (Story
+## villager-ai-012's own reserved seam, see that class's own doc comment)
+## whenever a builder's on-site target cell is currently occupied by THIS
+## villager -- "the builder requests a vacate," GDD Rule 7's own wording.
+## [param requester_cell] is the requesting builder's own discrete
+## [method get_current_cell] -- the point
+## [VillagerNudgeAsideSelector.select_vacate_target] steps this villager AWAY
+## from (F4: "the occupant steps AWAY from the requesting builder — never
+## toward it").
+##
+## Eligible ONLY while `State.WANDERING` -- see this class's own doc
+## comment's villager-ai-013 paragraph for the full "idle or wandering maps
+## 1:1 onto this one state" rationale. Every OTHER state returns `false`
+## immediately with ZERO side effects (no state read/write beyond the single
+## comparison below) -- a `WORKING`/`SLEEPING` occupant's held claim is never
+## touched (AC42: "the occupant's claim is never revoked"), and the builder's
+## cell simply stays deferred exactly as [VillagerOnSiteGate]'s own
+## occupancy predicate already enforces independently of this method's
+## return value.
+##
+## Idempotent against repeated calls while already mid-vacate-step: the
+## FIRST eligible call flips [member _state] to `State.TRAVELING` (via
+## [method start_traveling] below) the SAME tick it fires (this story's own
+## QA wording: "steps to the F4 target within one tick"); every SUBSEQUENT
+## call during the same stuck episode (e.g. [VillagerOnSiteGate]'s predicate
+## re-evaluating every tick while the cell stays occupied) finds
+## `_state != WANDERING` and is a harmless no-op -- no re-selection, no
+## redundant travel restart.
+##
+## Reuses [method start_traveling] wholesale (arrival state `WANDERING`, the
+## SAME "resume Wandering after this walk" pattern [method
+## _perform_wander_pick]'s own WALK/BED_DRIFT picks already establish) --
+## every existing abandon/redirect/re-path mechanism (GDD Rule 10b, this
+## class's own [method _abandon_travel] `NONE` branch) already covers a
+## vacate step for free, with zero new travel machinery. [method
+## start_traveling]'s own F1 step-interpolation ("a normal walking step at
+## `move_speed`," never a teleport) is exactly the step semantics F4's own
+## "no timing promise tied to tick length" wording requires
+## ([TR-villager-ai-behavior-034]).
+##
+## Returns `true` iff a vacate step was actually initiated (eligible state
+## AND [VillagerNudgeAsideSelector.select_vacate_target] found a candidate
+## AND [method start_traveling] itself succeeded); `false` otherwise
+## (ineligible state, or no adjacent standable cell -- GDD Rule 7's own "if
+## no adjacent standable cell exists, the vacate request fails and the
+## builder's cell stays deferred," which [VillagerOnSiteGate]'s own
+## already-live occupancy predicate enforces on its own regardless of this
+## return value; it exists for direct-call test assertions and future
+## callers).
+func request_vacate(requester_cell: Vector3i) -> bool:
+	if _state != State.WANDERING:
+		return false
+	var target: Variant = VillagerNudgeAsideSelector.select_vacate_target(
+		self, current_cell, requester_cell
+	)
+	if target == null:
+		return false
+	return start_traveling(target, State.WANDERING)
 
 
 # =============================================================================
