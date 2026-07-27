@@ -222,3 +222,24 @@ it built until the villager can stay awake long enough to finish the room.
 
 `06-claimed.png` and `07-sleeping.png` do not exist, correctly: the tool refuses
 to photograph a stage it did not reach.
+
+---
+
+## CORRECTION (2026-07-27, user-caught) — the demo stalled from STRANDING, not pacing
+
+The AC5/AC6 note above blames D10 pacing for the 27/30 stall. That is wrong.
+
+The sleep coordinates were y=9 and y=10, against a build site at y=6 with walls
+to y=8 — every one of them ON TOP of the structure, with `state=5` (WANDERING).
+The demo's "GROUND sleep" label means "no bed owned", not "on the ground"; I read
+it literally and mis-attributed the cause.
+
+The villager climbed up, could not get down, wandered on the roof plane and slept
+there. That is this story's own stranded-on-an-isolated-point case — and it shows
+the symmetric descend fix does NOT cover this path: it fires when a column
+completes, not when a builder is left stranded on a finished structure.
+
+D10 is therefore NOT blocking scene-009 or presentation-005's open AC. Stranding
+is. The user's scaffolding proposal (see session state, four rulings taken) is the
+proper fix, and this story's climb-up/climb-down mutation should be retired once
+it lands.
