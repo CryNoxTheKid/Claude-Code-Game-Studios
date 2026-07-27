@@ -45,6 +45,28 @@
 ## every issue without short-circuiting; Story 005 only raises the
 ## regression proof from rid-004's own 2-class fixture to 3.
 ##
+## Story rid-008 scope note: this story adds the category<->footprint
+## pairing/presence validation the rid-004 note above deferred (GDD Core
+## Rule 10, Edge Cases 10/11, TR-resource-item-database-052/053/054): a
+## `furniture_fixture` entry must carry a `footprint` with both dimensions
+## >= 1 (see [method _validate_single_entry]'s new block, [constant
+## CHECK_INVALID_FOOTPRINT] -- one structured issue PER offending dimension
+## so an entry invalid on both names both, never just the first); every
+## other category must carry the schema's own implicit `Vector2i(1, 1)`
+## value and never an authored footprint ([constant
+## CHECK_CATEGORY_FOOTPRINT_PAIRING]). Engine fact (same shape as the
+## `tier` coercion note below): a `furniture_fixture` entry that OMITS
+## `footprint` entirely (GDD sub-case 31a) is structurally indistinguishable
+## from one that explicitly authors the schema-default `(1, 1)` value --
+## [ItemDefinitionResource]'s `@export var footprint: Vector2i = Vector2i(1,
+## 1)` (Story 001) means an absent property in the `.tres` deserializes to
+## that SAME default, which already satisfies "both dims >= 1"; the two
+## cases are also behaviorally identical (both describe a one-cell
+## footprint), so both correctly succeed. Only the reachable sub-case (an
+## explicitly-authored non-positive dimension, 31b) has an observable
+## runtime code path -- see `footprint_validation_test.gd`'s regression
+## test for the proof, mirroring this class's own tier non-integer note.
+##
 ## Engine note (verified via a headless load probe against this exact
 ## script during rid-004 implementation): [member ItemDefinitionResource.tier]
 ## is a statically `int`-typed [code]@export[/code] field, so Godot's
@@ -153,6 +175,8 @@ const CHECK_RESERVED_ID: StringName = &"reserved_id"
 const CHECK_RESERVED_CATEGORY: StringName = &"reserved_category"
 const CHECK_RETIRED_ID_CONFLICT: StringName = &"retired_id_conflict"
 const CHECK_TIER0_COVERAGE_GAP: StringName = &"tier0_coverage_gap"
+const CHECK_INVALID_FOOTPRINT: StringName = &"invalid_footprint"
+const CHECK_CATEGORY_FOOTPRINT_PAIRING: StringName = &"category_footprint_pairing"
 
 ## Directory this instance scans at [method setup]. Production leaves this
 ## at [constant DEFAULT_DATA_DIR]; a headless test assigns a fixture
@@ -527,6 +551,33 @@ func _validate_single_entry(
 	# NOT checked at all here -- ignored silently, per Edge Case 7.
 	if resource.stackable and resource.max_stack_size < 1:
 		issues.append(_make_issue(id, source_file, CHECK_INVALID_MAX_STACK_SIZE, &"max_stack_size"))
+
+	# --- category<->footprint pairing (GDD Core Rule 10 / AC30-32 / -------
+	# TR-resource-item-database-052/053/054, Story rid-008): furniture_fixture
+	# requires an explicit footprint with both dimensions >= 1 -- one issue
+	# PER offending dimension, so an entry invalid on both (e.g. `(0, -1)`)
+	# names both rather than only the first. Every other category must carry
+	# the schema's own implicit `(1, 1)` value and never an authored
+	# footprint (Edge Case 10 / AC32). See this script's class doc comment
+	# (Story rid-008 scope note) for the engine fact making GDD sub-case 31a
+	# ("missing footprint") structurally unreachable as a distinct check.
+	if resource.category == &"furniture_fixture":
+		if resource.footprint.x < 1:
+			issues.append(
+				_make_issue(
+					id, source_file, CHECK_INVALID_FOOTPRINT, &"footprint",
+					{"dimension": &"width_cells"}
+				)
+			)
+		if resource.footprint.y < 1:
+			issues.append(
+				_make_issue(
+					id, source_file, CHECK_INVALID_FOOTPRINT, &"footprint",
+					{"dimension": &"depth_cells"}
+				)
+			)
+	elif resource.footprint != Vector2i(1, 1):
+		issues.append(_make_issue(id, source_file, CHECK_CATEGORY_FOOTPRINT_PAIRING, &"footprint"))
 
 	return issues
 

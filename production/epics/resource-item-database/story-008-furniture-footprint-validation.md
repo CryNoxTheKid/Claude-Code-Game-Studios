@@ -1,7 +1,7 @@
 # Story 008: Furniture footprint field + boot validation
 
 > **Epic**: Resource & Item Database
-> **Status**: Ready
+> **Status: Complete (2026-07-27 — 1391/1391 suite green 0 orphans, agent-verified; AC31a documented as structurally unreachable)
 > **Layer**: Foundation
 > **Type**: Logic
 > **Estimate**: 1 day

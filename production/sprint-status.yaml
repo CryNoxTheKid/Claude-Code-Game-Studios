@@ -98,7 +98,7 @@ stories:
     name: "Furniture footprint field + boot validation — day one on lane R, it gates the crown"
     file: "production/epics/resource-item-database/story-008-furniture-footprint-validation.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete
     owner: "godot-gdscript-specialist"
     estimate_days: 1.0
     blocker: "START DAY ONE on lane R — its own header depends on rid-001 + rid-004, both Complete; blocked on nothing. ⚑ READ THE LANDED FIELD BEFORE WRITING THE CHECK: @export var footprint: Vector2i = Vector2i(1, 1) ALREADY EXISTS on ItemDefinitionResource with an ItemDefinition.get_footprint() getter (verified in src/resource_item_database/). This story adds the TWO VALIDATION CHECKS, not the field: (a) furniture_fixture requires footprint present with both dims >= 1 — a missing field (31a) or a <= 0 dimension (31b) halts boot NAMING THE ENTRY AND THE OFFENDING DIMENSION; (b) any non-furniture_fixture entry carrying an authored footprint halts boot (category<->footprint pairing). The bed's (1,2) value is authored in rid-009, NEVER here."
