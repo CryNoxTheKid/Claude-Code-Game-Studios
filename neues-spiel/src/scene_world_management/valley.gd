@@ -204,6 +204,27 @@
 ## via [method get_injected_tier_modules] below; this class never calls a
 ## hosted child's `setup()` itself, per the class doc comment's opening
 ## hosting-vs-DI distinction).
+##
+## Story scene-006 (Villager need seeding in the boot sequence, ADR-0005
+## primary) closes `needs-mood-006`'s own "uncalled in `src/`" gap: [method
+## NeedsMood.initialize_villager] is now driven from exactly two call sites,
+## both on this class. [method spawn_starting_roster] seeds each villager it
+## creates, inline, right where it already assigns `needs_provider`
+## (already legal under ADR-0005 -- that method is only ever reached from
+## [method GameWorld._run_world_genesis], strictly after every hosted
+## module's `setup()` has run). [member _villager_ai] (villager_id 0) needed
+## a NEW home: its provider ASSIGNMENT stays in [method
+## _wire_villager_population], which [method _ready] calls -- seeding there
+## would violate `needs-mood-006`'s own Control Manifest rule ("never in
+## `_ready()`"). [method seed_default_villager_needs] is that new home: an
+## explicitly-callable method reached ONLY from [method
+## GameWorld._run_world_genesis] (duck-typed, mirroring [method
+## build_villager_nav_graph]/[method spawn_starting_roster]'s own call-site
+## shape) -- [method _ready]/[method _wire_villager_population] remain
+## completely UNCHANGED by this story. Both call sites assert [method
+## NeedsMood.is_set_up] first (AC-SEED-AFTER-SETUP: seeding must read
+## POST-validate/clamp config, never pre-`setup()` state) -- a
+## code-enforced ordering guarantee, not merely a documented one.
 class_name Valley
 extends Node3D
 
@@ -515,6 +536,32 @@ func build_villager_nav_graph(region_center: Vector3i) -> void:
 	_villager_nav_graph.build(_voxel_world, _villager_ai, region_center, region_size)
 
 
+## Seeds [member _villager_ai] (villager_id 0, the always-present default)
+## through [method NeedsMood.initialize_villager] -- Story scene-006's own
+## new home for this call, since the provider ASSIGNMENT for this villager
+## stays in [method _wire_villager_population] (unchanged, still [method
+## _ready]'s own call graph) while the SEEDING moves here: an explicitly-
+## callable method reached ONLY from [method GameWorld._run_world_genesis]
+## (duck-typed, mirroring [method build_villager_nav_graph]/[method
+## spawn_starting_roster]'s own call-site shape) -- never from [method
+## _ready] (AC-SEED-NOT-FROM-READY, ADR-0005, `needs-mood-006`'s own Control
+## Manifest "never in `_ready()`"). Asserts [method NeedsMood.is_set_up]
+## first (AC-SEED-AFTER-SETUP) -- [method GameWorld._run_world_genesis] only
+## ever runs after [method GameWorld._setup_injected_tier]'s own `setup()`
+## sweep has already completed, so this assert should never trip in
+## production; it exists to make the ordering constraint fail LOUDLY rather
+## than silently seed from unvalidated config if a future call site ever
+## violates it. Idempotent by [method NeedsMood.initialize_villager]'s own
+## landed contract -- calling this twice never resets an already-decayed
+## value.
+func seed_default_villager_needs() -> void:
+	assert(
+		_needs_mood.is_set_up(),
+		"Valley.seed_default_villager_needs called before NeedsMood.setup() has completed"
+	)
+	_needs_mood.initialize_villager(_villager_ai.villager_id)
+
+
 ## Returns every hosted [VillagerAi] instance (Story villager-ai-021) --
 ## [member _villager_ai] (the always-present default, villager_id 0) first,
 ## then any members [method spawn_starting_roster] has added so far, in the
@@ -551,6 +598,15 @@ func get_villagers() -> Array[VillagerAi]:
 ## VillagerRosterSpawner.MAX_SEARCH_RADIUS] (never a crash, never a partial/
 ## inconsistent villager).
 func spawn_starting_roster() -> Array[VillagerAi]:
+	# Story scene-006 (AC-SEED-AFTER-SETUP): checked FIRST, before any
+	# placement/assembly work runs -- a villager is never even constructed
+	# (let alone left as an unhosted orphan node) if this guard trips. Makes
+	# the ordering constraint fail loudly rather than silently seed from
+	# unvalidated config if a future call site ever violates it.
+	assert(
+		_needs_mood.is_set_up(),
+		"Valley.spawn_starting_roster seeding a villager before NeedsMood.setup() has completed"
+	)
 	var center_cell: Vector3i = VillagerRosterSpawner.world_center_cell(_voxel_world.config)
 	var count: int = 1
 	if villager_ai_config != null:
@@ -570,6 +626,16 @@ func spawn_starting_roster() -> Array[VillagerAi]:
 	)
 	for villager: VillagerAi in new_villagers:
 		villager.needs_provider = _needs_mood
+		# Story scene-006 (AC-SEED-EVERY-ROSTER-MEMBER): seed this villager's
+		# needs through the landed [method NeedsMood.initialize_villager]
+		# surface, right where its provider is assigned -- already legal here
+		# (this method is only ever reached from [method
+		# GameWorld._run_world_genesis], strictly after every hosted module's
+		# `setup()` has run; see [method seed_default_villager_needs]'s own
+		# doc comment for why villager_id 0 needed a DIFFERENT call site
+		# instead of this one). The ordering guard already ran above, before
+		# any villager in this loop was even assembled.
+		_needs_mood.initialize_villager(villager.villager_id)
 		add_child(villager)
 		villager.setup()
 		_spawned_villagers.append(villager)

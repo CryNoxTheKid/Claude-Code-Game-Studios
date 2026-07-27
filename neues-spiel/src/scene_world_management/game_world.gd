@@ -410,9 +410,12 @@ func _build_initial_voxel_mesh_window() -> void:
 ## window on the SAME cell genesis anchors everything else on,
 ## AC-ONE-START-FOCUS), THEN the boot-window residency drive (terrain
 ## resident), THEN the grid's GENERATED lifecycle marker, THEN the nav graph
-## build, THEN the roster spawn -- the nav graph's predicate walk and the
-## roster's standable-cell search both read the grid and are silently empty
-## if run before real terrain is resident.
+## build, THEN Story scene-006's default-villager need seeding (needs no
+## terrain -- placed here, right before the roster spawn it reads
+## naturally alongside), THEN the roster spawn (which now ALSO seeds each
+## new villager it creates, inline) -- the nav graph's predicate walk and
+## the roster's standable-cell search both read the grid and are silently
+## empty if run before real terrain is resident.
 func _run_world_genesis() -> void:
 	if _valley == null:
 		return
@@ -448,6 +451,15 @@ func _run_world_genesis() -> void:
 	if _valley.has_method(&"build_villager_nav_graph"):
 		@warning_ignore("unsafe_method_access")
 		_valley.build_villager_nav_graph(start_focus)
+
+	# Story scene-006 (AC-SEED-NOT-FROM-READY, AC-SEED-AFTER-SETUP): the
+	# always-present default villager's need seeding -- deliberately NOT
+	# reachable from Valley._ready()/_wire_villager_population(), reached
+	# ONLY from here, strictly after _setup_injected_tier()'s own setup()
+	# sweep (above this method in _on_database_settled) has already run.
+	if _valley.has_method(&"seed_default_villager_needs"):
+		@warning_ignore("unsafe_method_access")
+		_valley.seed_default_villager_needs()
 
 	if _valley.has_method(&"spawn_starting_roster"):
 		@warning_ignore("unsafe_method_access")

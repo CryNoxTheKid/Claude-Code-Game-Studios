@@ -1,7 +1,7 @@
 # Story 006: Villager need seeding in the boot sequence — a spawned villager carries REAL need records before ACTIVE
 
 > **Epic**: Scene / World Management
-> **Status**: Ready
+> **Status: Complete (2026-07-27 — 1330/1330 suite green 0 orphans, parent-verified; non-vacuity demonstrated)
 > **Layer**: Foundation (boot sequencing) → drives Core (Needs & Mood spawn state)
 > **Type**: Integration
 > **Estimate**: 0.5 days *(relative-complexity anchor, not a calendar prediction — sprint-09.md sizing convention)*; **+0.5 contingency** reserved against the unreproduced failure recorded below
@@ -140,14 +140,14 @@ guard is proposed below rather than left to vigilance.
 
 ## Acceptance Criteria
 
-- [ ] **AC-SEED-BEFORE-ACTIVE**: At the instant `GameWorld`'s boot state first reads `BootState.ACTIVE`,
+- [x] **AC-SEED-BEFORE-ACTIVE**: At the instant `GameWorld`'s boot state first reads `BootState.ACTIVE`,
       **every** villager reported by `Valley.get_villagers()` — the always-present villager 0 *and* every
       member `spawn_starting_roster()` created — has a real, tracked `sleep` need record and a real mood
       record in the hosted `NeedsMood` instance. Asserted headlessly, non-vacuously (see
       AC-PROBE-IS-NON-VACUOUS). A boot that HALTs (RID Failed, or a BLOCKING config invariant) never reaches
       seeding — existing halt semantics unchanged and still terminal. [TR-needs-mood-system-056,
       TR-scene-world-management-004]
-- [ ] **AC-SEED-NOT-FROM-READY**: The seeding call is **not** reachable from `Valley._ready()`. Specifically,
+- [x] **AC-SEED-NOT-FROM-READY**: The seeding call is **not** reachable from `Valley._ready()`. Specifically,
       `_wire_villager_population()` — which `_ready()` calls — must not gain an `initialize_villager` call;
       villager 0's seeding moves to an explicitly-callable method reached from `GameWorld`'s boot
       orchestration (the existing `_run_world_genesis()` phase is the natural home; **the exact method shape
@@ -155,19 +155,19 @@ guard is proposed below rather than left to vigilance.
       established non-writer-guard precedent: zero `initialize_villager` occurrences inside
       `_wire_villager_population`'s body or any `_ready`/`_process`/`_physics_process` call graph.
       [ADR-0005; `needs-mood-006` Control Manifest "never in `_ready()`"]
-- [ ] **AC-SEED-AFTER-SETUP**: Seeding runs strictly **after** `NeedsMood.setup()` has completed
+- [x] **AC-SEED-AFTER-SETUP**: Seeding runs strictly **after** `NeedsMood.setup()` has completed
       (`is_set_up()` reads `true` at the moment of the first seeding call). Rationale, recorded in-file:
       `set_need_value` derives `NeedState` from `config.urgency_threshold`, and `setup()` is where
       `config.validate()`'s two-tier clamp/BLOCKING policy is applied — seeding first would derive spawn
       state from **unvalidated, unclamped** config values. Asserted by ordering, not by reading the code.
       [ADR-0002, ADR-0005]
-- [ ] **AC-SEED-EVERY-ROSTER-MEMBER**: `spawn_starting_roster()` seeds **each villager it creates**, exactly
+- [x] **AC-SEED-EVERY-ROSTER-MEMBER**: `spawn_starting_roster()` seeds **each villager it creates**, exactly
       once, at the same point it already assigns `needs_provider`. With `starting_villager_count = 3` in a
       test config, all three spawned villagers plus villager 0 hold records (4 total). A partial or zero
       placement remains a valid, deterministic outcome — the villagers that *were* placed are seeded, and
       no record is created for a villager that was not.
       [TR-villager-ai-behavior-065]
-- [ ] **AC-PROBE-IS-NON-VACUOUS**: The test proving AC-SEED-BEFORE-ACTIVE **fails when the production
+- [x] **AC-PROBE-IS-NON-VACUOUS**: The test proving AC-SEED-BEFORE-ACTIVE **fails when the production
       seeding call is removed**, and this is demonstrated, not asserted — the story's commit body records the
       observed failure output from one deliberate removal run. ⚑ **The obvious assertion is vacuous and must
       not be used**: `get_need_value(id, &"sleep") == 100.0` passes on today's *unseeded* build, because the
@@ -180,16 +180,16 @@ guard is proposed below rather than left to vigilance.
       **(b) an additive read-only observability accessor** on `NeedsMood` (e.g. a tracked-record predicate or
       count) — if this route is taken, keep it minimal and additive, name it in the commit body, and do not
       expose `_need_records` itself.
-- [ ] **AC-SEED-IS-IDEMPOTENT-AT-BOOT**: Seeding a villager that already holds records does not reset live
+- [x] **AC-SEED-IS-IDEMPOTENT-AT-BOOT**: Seeding a villager that already holds records does not reset live
       values. Calling `spawn_starting_roster()` a second time (its own already-tested "no growth bookkeeping"
       shape) re-seeds nobody's live values, and a villager whose `sleep` has already decayed keeps the decayed
       value. This is `initialize_villager`'s own landed guarantee — this AC proves it survives *through the
       boot path*, it does not re-test the module. [`needs-mood-006` idempotence AC; `needs-mood-012` AC24]
-- [ ] **AC-NO-BOOT-EVENTS**: A full boot emits **zero** `need_urgent`, `need_satisfied` and
+- [x] **AC-NO-BOOT-EVENTS**: A full boot emits **zero** `need_urgent`, `need_satisfied` and
       `mood_band_changed` signals. A villager born at 100 has crossed nothing; the first legitimate event is
       the urgency cross ~1072 ticks later (`(100 − 25) / 0.07` at the shipped config). Asserted by a listener
       connected before boot. [`needs-mood-006` "no spawn events" AC]
-- [ ] **AC-SUITE-GREEN-AND-DIAGNOSED**: The full suite is green at the story's close (currently
+- [x] **AC-SUITE-GREEN-AND-DIAGNOSED**: The full suite is green at the story's close (currently
       1307 blocking cases, 0 orphans). **If the reported 18-errors/1-failure result resurfaces, the failure is
       diagnosed and its cause recorded in the commit body — it is not worked around by reverting the wiring
       or by relaxing an AC above.** Any pre-existing test that must change to accommodate correct production
@@ -291,7 +291,35 @@ guard is proposed below rather than left to vigilance.
   `_find_files_assigning` helper is the closest existing shape and can be reused).
 - The AC-PROBE-IS-NON-VACUOUS negative-control result, recorded in the commit body — not a separate artifact.
 
-**Status**: [ ] Not yet created
+**Status**: [x] Created — chose the NEW file
+(`neues-spiel/tests/integration/scene_world/villager_need_seeding_boot_test.gd`), not an extension of
+`world_genesis_boot_test.gd`: that file already bundles one expensive real 2000x2000 production boot into a
+single test to avoid re-paying its cost, and this story's 7 ACs are an independent-enough cluster (10 test
+functions) to make it unwieldy, exactly as this section's own named alternative anticipated.
+`world_genesis_boot_test.gd` was NOT modified. Grep-guard test:
+`test_ac_seed_not_from_ready_zero_initialize_villager_calls_in_ready_or_wire_or_process` (generalizes
+`world_genesis_boot_test.gd`'s own `_extract_process_function_bodies` shape to an arbitrary named function).
+
+**AC-PROBE-IS-NON-VACUOUS negative-control result (recorded 2026-07-27, per this AC's own requirement):**
+chosen form is **(a) the time probe** (drives 1 real tick through the actual global `TimeTickSystem`
+Autoload singleton — never a mock — and asserts every villager's `sleep` has strictly decayed below 100.0).
+Demonstration: the `_valley.seed_default_villager_needs()` call in `GameWorld._run_world_genesis()` was
+commented out; `test_ac_seed_before_active_real_boot_every_villager_decays_below_100_after_one_real_tick`
+was re-run in isolation and **FAILED** (1 test cases | 0 errors | 1 failures | 0 orphans, exit code 100) —
+villager 0's `sleep` stayed at exactly `100.0` after the tick (never seeded, never entered F1 decay's
+iteration), while the roster-spawned villager (seeded via the OTHER, unaffected call site in
+`Valley.spawn_starting_roster()`) correctly read below 100.0, so the test failed on villager 0's own
+assertion specifically — not a syntax/harness error. The call was then restored verbatim
+(`git diff` against `game_world.gd` confirmed a clean, comment-free restore), the class cache was rebuilt,
+and the same test was re-run green. This is the demonstration AC-PROBE-IS-NON-VACUOUS requires: the
+assertion is not vacuous, because it provably fails when the production seeding call it depends on is
+removed.
+
+**Full suite at story close**: `res://tests/unit` + `res://tests/integration` — **1330 test cases · 0
+errors · 0 failures · 0 flaky · 0 skipped · 0 orphans · exit 0** (up from the pre-story 1307/1307 baseline
+— the 23 new cases are this story's own `villager_need_seeding_boot_test.gd`). The previously-reported
+18-errors/1-failure result did **not** resurface (consistent with the 2026-07-27 producer measurement
+already recorded above in Context) — no diagnosis was required beyond what that section already recorded.
 
 ---
 
