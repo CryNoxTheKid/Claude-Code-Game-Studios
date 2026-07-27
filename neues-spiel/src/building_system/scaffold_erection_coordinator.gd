@@ -34,6 +34,29 @@ var config: ScaffoldConfig
 ## re-fires it periodically) never re-plans or double-erects.
 var _served_cells: Dictionary[Vector3i, bool] = {}
 
+## How many SEPARATE unreachable reports a cell must accumulate before it earns
+## scaffolding. Not a tuning nicety — without it this coordinator erects a
+## scaffold for essentially every wall cell in a room.
+##
+## Measured, not assumed: instrumenting a real hosted build of a 30-cell room
+## produced 20+ reports with `planned=true` for every single one, including
+## cells that were perfectly reachable moments later. A pre-claim probe reports
+## a cell as unreachable whenever it happens to be unreachable AT THAT INSTANT
+## — which, with one villager walking around a site, is most cells most of the
+## time. Erecting on the first report therefore floods the queue with scaffold
+## jobs, and since a villager may hold only ONE claim, the real wall cells
+## starve: villager-ai-024's regression test fell 30/30 -> 27/30.
+##
+## Requiring persistence restores the design rule the user actually stated —
+## scaffolding is built only when it is NEEDED. A cell that is momentarily
+## out of reach recovers on its own; a cell that is structurally out of reach
+## keeps reporting.
+const REPORTS_BEFORE_ERECTING: int = 3
+
+## Per-cell count of distinct unreachable reports seen so far. Cleared when the
+## cell is finally served, so a later structural change starts the count fresh.
+var _report_counts: Dictionary[Vector3i, int] = {}
+
 
 func _init(
 	p_voxel_world: VoxelWorldGrid,
@@ -70,6 +93,13 @@ func _on_job_reported_unreachable(cell: Vector3i) -> void:
 	var owning_project: BuildProject = build_project_registry.get_project(owning_id)
 	if owning_project == null or owning_project.kind != BuildProject.Kind.BUILD:
 		return
+	# PERSISTENCE GATE — see REPORTS_BEFORE_ERECTING. A single report means
+	# "not right now", not "never without help".
+	var seen: int = _report_counts.get(cell, 0) + 1
+	_report_counts[cell] = seen
+	if seen < REPORTS_BEFORE_ERECTING:
+		return
+
 	var plan: ScaffoldPlan = ScaffoldErectionPlanner.plan_for_target(
 		voxel_world, scaffold_registry, build_project_registry, furniture_registry,
 		cell, config.scaffold_max_cantilever_cells
@@ -82,6 +112,7 @@ func _on_job_reported_unreachable(cell: Vector3i) -> void:
 		# throttle, and the next attempt sees a different world.
 		return
 	_served_cells[cell] = true
+	_report_counts.erase(cell)
 	_erect(plan, owning_id)
 
 

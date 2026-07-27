@@ -1242,6 +1242,11 @@ func _wire_build_project_lifecycle() -> void:
 	_scaffold_registry = ScaffoldRegistry.new()
 	_construction_tick_loop.scaffold_registry = _scaffold_registry
 	_scaffold_presentation.scaffold_registry = _scaffold_registry
+	# DIAGNOSTIC PROBE — temporary, reverted after the run.
+	_scaffold_erection_coordinator = ScaffoldErectionCoordinator.new(
+		_voxel_world, _scaffold_registry, _build_project_registry, _construction_job_queue,
+		_furniture_registry, scaffold_config,
+	)
 	# ERECTION AND DISMANTLE ARE DELIBERATELY NOT CONSTRUCTED HERE YET.
 	#
 	# This piece lands the scaffold OCCUPANCY tier only: the registry, its
