@@ -689,6 +689,27 @@ var unstuck_telemetry: VillagerUnstuckTelemetry = null
 ## this villager's own [method setup] runs.
 var nav_graph: VillagerNavGraph = null
 
+## Scaffold occupancy dependency (story `building-034`, ADR-0007 §1a/§1b, TD
+## ruling D1) -- a Building-System-owned [ScaffoldRegistry], the SECOND
+## occupancy source the shared walkability predicates now accept alongside
+## [member voxel_world]. Duck-typed `Object` (never the concrete
+## [ScaffoldRegistry] type) mirroring [member job_queue]/[member
+## needs_provider]'s own established "shared collaborator, code-assigned,
+## test-mockable without inheriting the real class" precedent -- callers only
+## ever invoke the ONE method the predicates duck-type against,
+## `has_scaffold(cell: Vector3i) -> bool`. Deliberately nil-safe, NOT
+## `setup()`-asserted (mirrors [member nav_graph]'s own precedent exactly): a
+## villager with this left `null` observes EXACTLY pre-amendment behaviour --
+## every predicate call below passes it straight through as the shared
+## predicates' own defaulted `scaffold_source` parameter, and a `null` source
+## is structurally equivalent to "no source supplied" there. This is the
+## SOLE injection point (D1: "the injection point is VillagerAi's existing
+## one-line delegations, not every call site") -- every consumer holding a
+## [VillagerAi] ([VillagerNavGraph], [VillagerRescueTargetSearch], the
+## re-path filter) becomes scaffold-aware consistently and for free by
+## calling this instance's own [method is_standable]/[method is_step_legal].
+var scaffold_registry: Object = null
+
 ## Story villager-ai-019's own per-villager random source for F3/Rule 7c
 ## selection ([VillagerWanderSelector.select_micro_behavior]/[method
 ## VillagerWanderSelector.select_wander_target]) -- see this class's own doc
@@ -867,6 +888,14 @@ var _tick_count: int = 0
 ## cell is eligible again on the very next Deciding pass (AC10's "a retry
 ## attempt occurs").
 var _unreachable_retry_after_tick: Dictionary[Vector3i, int] = {}
+
+## Report-throttle window for D5's PRE-CLAIM probe misses (story
+## `building-034`). Deliberately a SECOND map rather than a reuse of
+## [member _unreachable_retry_after_tick]: that one is consulted by the
+## candidate filter, so reusing it would suppress re-probing and change build
+## order destructively (measured: a whole corner column left unbuilt). This
+## map is read by NOTHING except [method _is_unreachable_report_throttled].
+var _unreachable_report_after_tick: Dictionary[Vector3i, int] = {}
 
 ## The [BlueprintCell] this villager currently holds a claim on while
 ## [member _pursued_activity] == [constant PursuedActivity.WORK] (Story
@@ -1172,7 +1201,7 @@ func _process(_delta: float) -> void:
 ## clause.
 func is_standable(cell: Vector3i) -> bool:
 	assert(voxel_world != null, "VillagerAi.voxel_world not wired")
-	return VillagerWalkabilityRules.is_standable(voxel_world, cell)
+	return VillagerWalkabilityRules.is_standable(voxel_world, cell, scaffold_registry)
 
 
 ## Step-legality predicate (ADR-0007 Decision §1, GDD Rule 9/[TR-villager-ai-
@@ -1180,8 +1209,13 @@ func is_standable(cell: Vector3i) -> bool:
 ## BV-4): the real body, doc comment and all, now lives on
 ## [method VillagerWalkabilityRules.is_step_legal]. This method's signature
 ## is unchanged so every existing caller keeps working untouched.
+##
+## Story `building-034` (ADR-0007 §1a/§1b, D1): forwards [member
+## scaffold_registry] as the shared predicates' `scaffold_source` -- this is
+## the SOLE injection point (D1) that makes [VillagerNavGraph] (and every
+## other consumer holding a [VillagerAi]) scaffold-aware for free.
 func is_step_legal(from_cell: Vector3i, to_cell: Vector3i) -> bool:
-	return VillagerWalkabilityRules.is_step_legal(voxel_world, from_cell, to_cell)
+	return VillagerWalkabilityRules.is_step_legal(voxel_world, from_cell, to_cell, scaffold_registry)
 
 
 ## Body-column derivation (Story villager-ai-003, ADR-0009 slice-propagation
@@ -1549,10 +1583,19 @@ func _claim_job(cell: Vector3i) -> bool:
 ## villager-ai-011, GDD Rule 6/AC9, [TR-villager-ai-behavior-055]). Nil-safe,
 ## same rationale as [method _has_available_job]. Delegates entirely to
 ## [member ConstructionJobQueue.report_unreachable] -- this class owns no
-## ghost-tint/visual state of its own; only [method _abandon_travel]'s WORK
-## branch ever calls this, and only for a job THIS villager had just claimed
-## and then failed to path to (never for F2's own silent pre-claim
-## reachability skip, which never claims or reports anything).
+## ghost-tint/visual state of its own.
+##
+## **AMENDED 2026-07-27 (story `building-034`, TD ruling D5).** Previously
+## only [method _abandon_travel]'s WORK branch ever called this (a job THIS
+## villager had just claimed and then failed to path to) -- F2's own silent
+## pre-claim reachability skip never called or reported anything. That is no
+## longer true: [method _attempt_claim_and_travel_to_job] now ALSO calls this
+## for every candidate [VillagerJobSelector.select_job] itself found
+## unreachable this pass (throttled by the same per-cell cooldown), so the
+## Building System can detect an unreachable cell and erect scaffolding for
+## it BEFORE it is ever claimed. A doc comment that contradicts the code is
+## how `villager-ai-024` lost a day -- this comment is rewritten precisely so
+## it does not repeat that.
 func _report_job_unreachable(cell: Vector3i) -> void:
 	if job_queue == null:
 		return
@@ -1568,6 +1611,16 @@ func _report_job_unreachable(cell: Vector3i) -> void:
 ## from the map) is never cooling down.
 func _is_job_cooling_down(cell: Vector3i) -> bool:
 	return _unreachable_retry_after_tick.has(cell) and _tick_count < _unreachable_retry_after_tick[cell]
+
+
+## Report-throttle read for D5's pre-claim probe misses -- the report-only
+## twin of [method _is_job_cooling_down]. Never consulted by candidate
+## selection; see [member _unreachable_report_after_tick].
+func _is_unreachable_report_throttled(cell: Vector3i) -> bool:
+	return (
+		_unreachable_report_after_tick.has(cell)
+		and _tick_count < _unreachable_report_after_tick[cell]
+	)
 
 
 ## Rule 4/F2 claim-and-travel commit loop (Story villager-ai-011; GDD Rule 4
@@ -1631,6 +1684,35 @@ func _attempt_claim_and_travel_to_job() -> bool:
 		var result: JobSelectionResult = VillagerJobSelector.select_job(
 			candidates, current_cell, nav_graph, config.job_candidate_count, config.max_selection_candidates
 		)
+		# Story `building-034` (TD ruling D5) -- F2's own silent pre-claim
+		# reachability skip becomes a REPORTING skip: every cell this pass
+		# probed and found unreachable is forwarded to [member job_queue]'s
+		# `report_unreachable` seam, throttled by the SAME already-landed
+		# per-cell cooldown ([member _unreachable_retry_after_tick] /
+		# [method _is_job_cooling_down]) a post-claim pathing failure already
+		# uses -- a report can never storm per tick. This rewrites the
+		# "never for F2's own silent pre-claim reachability skip" sentence
+		# [method _report_job_unreachable]'s own doc comment used to state
+		# (correctly, before this story).
+		# THROTTLE THE REPORT, NEVER THE SELECTION — and the distinction is
+		# load-bearing. The TD ruling asked for the landed 20-tick cooldown so
+		# a pre-claim probe miss cannot storm the queue, and that is right. But
+		# `_unreachable_retry_after_tick` is ALSO read by the candidate filter,
+		# so writing probe misses into it stops the villager re-probing those
+		# cells for 20 ticks. Measured consequence: it builds other cells
+		# first, seals a corner off, and villager-ai-024's regression test
+		# falls 30/30 -> 27/30 with a whole corner column left PLANNED. A
+		# pre-claim probe is cheap and MUST be repeated every pass, because a
+		# cell that is unreachable now routinely becomes reachable as the build
+		# progresses. So the throttle gets its own map and the selection filter
+		# is left alone.
+		for unreachable_cell: Vector3i in result.unreachable_cells:
+			if _is_unreachable_report_throttled(unreachable_cell):
+				continue
+			_report_job_unreachable(unreachable_cell)
+			_unreachable_report_after_tick[unreachable_cell] = (
+				_tick_count + config.unreachable_retry_ticks
+			)
 		if not result.has_selection():
 			return false
 		if _claim_job(result.chosen.cell):
@@ -2757,12 +2839,41 @@ func _get_other_villager_cells() -> Array[Vector3i]:
 ## behind [method ConstructionTickLoop.set_seal_prevention_predicate]) --
 ## this method itself has no Building System awareness whatsoever, exactly
 ## like [method is_standable]/[method is_step_legal].
+##
+## Story `building-034` (ADR-0007 §1b, TD ruling D1 -- "the correction the
+## story missed"): the escape-route search now ALSO tries the same-column
+## neighbors directly above/below [member current_cell] -- a scaffold-to-
+## scaffold vertical step is a legal escape route since §2a, and a villager
+## standing ON a scaffold cell has air beneath it, so leaving this search
+## purely horizontal would silently under-count real escape routes once
+## scaffolding lands. [constant VillagerNavGraph.VERTICAL_SAME_COLUMN_OFFSETS]
+## is the same constant [VillagerNavGraph]'s own patch pass reuses -- never a
+## second, independently-declared offset pair.
 func would_trap_builder(written_cell: Vector3i) -> bool:
 	if not _is_standable_after_write(current_cell, written_cell):
 		return true
 	for offset: Vector2i in VillagerNavGraph.HORIZONTAL_FULL_OFFSETS:
 		for dy: int in VillagerNavGraph.VERTICAL_STEP_OFFSETS:
 			var neighbor: Vector3i = current_cell + Vector3i(offset.x, dy, offset.y)
+			if (
+				_is_standable_after_write(neighbor, written_cell)
+				and _is_step_legal_after_write(current_cell, neighbor, written_cell)
+			):
+				return false
+	# SCAFFOLD-ONLY, and the guard is load-bearing. A same-column escape exists
+	# solely as the §2a scaffold-to-scaffold edge. Without this check the loop
+	# also accepts a vertical move where NEITHER cell is scaffold — because the
+	# step predicate deliberately falls through to pre-amendment behaviour
+	# there — and that reports an escape route the villager does not actually
+	# have. The observable cost was concrete: seal prevention started allowing
+	# writes it used to refuse, and one of them sealed off a corner column, so
+	# villager-ai-024's regression test fell from 30/30 to 27/30 with all three
+	# cells of that column left PLANNED and unclaimed.
+	if _has_scaffold(current_cell):
+		for dy: int in VillagerNavGraph.VERTICAL_SAME_COLUMN_OFFSETS:
+			var neighbor: Vector3i = current_cell + Vector3i(0, dy, 0)
+			if not _has_scaffold(neighbor):
+				continue
 			if (
 				_is_standable_after_write(neighbor, written_cell)
 				and _is_step_legal_after_write(current_cell, neighbor, written_cell)
@@ -2777,8 +2888,21 @@ func would_trap_builder(written_cell: Vector3i) -> bool:
 ## through the override-aware [method _is_solid_after_write]/[method
 ## _is_passable_after_write] below instead of [method _is_solid]/[method
 ## _is_passable] directly.
+##
+## **Story `building-034` (ADR-0007 §1b, MUST receive the scaffold source):**
+## a villager standing on a scaffold cell has air beneath it -- a
+## scaffold-blind version of this twin would report it unstandable and
+## [method would_trap_builder] would return `true` for essentially every
+## write that villager evaluates, firing the self-seal exemption
+## continuously. [member scaffold_registry] is consulted via [method
+## _has_scaffold] exactly like the non-`_after_write` [method
+## VillagerWalkabilityRules.is_standable] -- the hypothetical write never
+## changes real scaffold occupancy, so this read is never routed through an
+## "as if written" scaffold twin of its own; only solidity/passability are
+## hypothetical here.
 func _is_standable_after_write(cell: Vector3i, written_cell: Vector3i) -> bool:
-	if not _is_solid_after_write(cell + Vector3i(0, -1, 0), written_cell):
+	var solid_below: bool = _is_solid_after_write(cell + Vector3i(0, -1, 0), written_cell)
+	if not solid_below and not _has_scaffold(cell):
 		return false
 	for offset in range(VILLAGER_CLEARANCE):
 		if not _is_passable_after_write(cell + Vector3i(0, offset, 0), written_cell):
@@ -2791,11 +2915,29 @@ func _is_standable_after_write(cell: Vector3i, written_cell: Vector3i) -> bool:
 ## is_step_legal]; only the diagonal flanker standability reads are routed
 ## through [method _is_standable_after_write] instead of [method
 ## is_standable] directly.
+##
+## Story `building-034` (ADR-0007 §2a clause 2, mirrored here for the
+## `_after_write` shape): a same-column pair is legal only if BOTH endpoints
+## are (really -- never hypothetically) scaffold cells.
 func _is_step_legal_after_write(from_cell: Vector3i, to_cell: Vector3i, written_cell: Vector3i) -> bool:
 	if absi(to_cell.y - from_cell.y) > MAX_STEP_HEIGHT:
 		return false
 	var dx: int = to_cell.x - from_cell.x
 	var dz: int = to_cell.z - from_cell.z
+	if dx == 0 and dz == 0:
+		var from_is_scaffold: bool = _has_scaffold(from_cell)
+		var to_is_scaffold: bool = _has_scaffold(to_cell)
+		if from_is_scaffold and to_is_scaffold:
+			return true  # §2a: the one new edge class.
+		if from_is_scaffold or to_is_scaffold:
+			return false  # Never climb between ordinary ground and scaffolding.
+		# NEITHER endpoint is scaffold: fall through to the pre-amendment rules.
+		# Same correction as VillagerWalkabilityRules.is_step_legal — the gate
+		# was copied here verbatim, so it carried the same defect: it flipped
+		# this predicate from true to false for every ordinary same-column
+		# pair, and these _after_write twins feed would_trap_builder. Refusing
+		# them made the builder believe far more writes would trap it than
+		# actually do.
 	if dx != 0 and dz != 0:
 		var flanker_a := Vector3i(to_cell.x, from_cell.y, from_cell.z)
 		var flanker_b := Vector3i(from_cell.x, from_cell.y, to_cell.z)
@@ -2805,6 +2947,18 @@ func _is_step_legal_after_write(from_cell: Vector3i, to_cell: Vector3i, written_
 		):
 			return false
 	return true
+
+
+## The O(1) duck-typed scaffold-membership read [member scaffold_registry]
+## exposes -- see that field's own doc comment. `null` is structurally
+## "never scaffold," mirroring [method VillagerWalkabilityRules._has_scaffold]
+## exactly (this is the instance-side twin, since [member scaffold_registry]
+## is a per-villager-population-shared field, not a static parameter).
+func _has_scaffold(cell: Vector3i) -> bool:
+	if scaffold_registry == null:
+		return false
+	@warning_ignore("unsafe_method_access")
+	return bool(scaffold_registry.has_scaffold(cell))
 
 
 ## [method _is_solid]'s override-aware twin -- [param written_cell] always
@@ -2875,6 +3029,12 @@ func _is_passable_after_write(cell: Vector3i, written_cell: Vector3i) -> bool:
 ## independently-written field-assignment blocks.
 func climb_onto_self_sealed_cell(sealed_cell: Vector3i) -> void:
 	_snap_current_cell_to(sealed_cell + Vector3i(0, 1, 0))
+	# Story `building-034` COUPLED RULING -- telemetry, not retirement (see
+	# [VillagerUnstuckTelemetry]'s own doc comment). Nil-safe: mirrors this
+	# class's own established "telemetry is observational, never gates
+	# behaviour" precedent (see [method _perform_watchdog_rescue]).
+	if unstuck_telemetry != null:
+		unstuck_telemetry.record_self_seal_climb()
 
 
 ## See [method climb_onto_self_sealed_cell]'s own doc comment for the full
@@ -2964,6 +3124,11 @@ func _relocate_if_marooned() -> void:
 			return
 		if _is_useful_relocation_candidate(result.cell):
 			_snap_current_cell_to(result.cell)
+			# Story `building-034` COUPLED RULING -- telemetry, not
+			# retirement, recorded ONLY on an actual relocation (never on
+			# one of this method's own early no-op returns above).
+			if unstuck_telemetry != null:
+				unstuck_telemetry.record_marooned_relocation()
 			return
 		excluded_candidates.append(result.cell)
 

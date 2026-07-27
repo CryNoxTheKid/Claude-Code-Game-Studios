@@ -43,7 +43,21 @@
 ## `_is_solid_after_write`, `_is_passable_after_write`) stay on [VillagerAi]
 ## unchanged -- they are the one sanctioned duplication of this control flow
 ## today; an overlay-predicate parameter unifying them with this class is a
-## later story.
+## later story. **Story `building-034` threads the scaffold source through
+## both shapes (see below); it does NOT unify them (TD ruling D1, explicit).**
+##
+## **Scaffolding amendment (ADR-0007 §1a/§1b/§2a, story `building-034`,
+## 2026-07-27).** [method is_standable]/[method is_step_legal] gain ONE
+## explicit, DEFAULTED `scaffold_source` parameter -- a second occupancy
+## source alongside [param voxel_world] (D1: scaffolding is NOT voxel data,
+## mirrors the BV-1 furniture ruling). A caller that passes nothing (Build
+## Validation, everywhere in `src/build_validation/`) observes EXACTLY
+## pre-amendment behaviour -- structurally, not by discipline. `scaffold_source`
+## is duck-typed against ONE method, an O(1) keyed read:
+## `func has_scaffold(cell: Vector3i) -> bool` -- [ScaffoldRegistry] is the
+## concrete implementation; no structural search (support/cantilever/
+## connectivity) may ever run inside these predicates (ADR-0007 §1a binding
+## performance clause) -- those are erection-time planning rules only.
 class_name VillagerWalkabilityRules
 extends RefCounted
 
@@ -82,17 +96,30 @@ const MAX_STEP_HEIGHT: int = 1
 ## is non-solid/passable here BY CONSTRUCTION, matching Building System Core
 ## Rule 14b / GDD AC17 with no special-case branch needed.
 ##
-## Pure query: reads only [param voxel_world]'s cell data, never mutates
-## anything, caches nothing of its own (Control Manifest Feature Layer
-## Guardrail: "predicates are pure queries... no mutation, no caching state
-## of their own"). A cell outside the configured world bounds reads back
-## `null` from [method VoxelWorldGrid.get_cell] and is treated as blocking by
-## both helpers below -- the world simply does not extend there, so it can
-## neither support a foot (never solid-below) nor offer clearance (never
-## passable).
-static func is_standable(voxel_world: VoxelWorldGrid, cell: Vector3i) -> bool:
+## Pure query: reads only [param voxel_world]'s cell data (and, since the
+## scaffolding amendment, [param scaffold_source]'s O(1) membership), never
+## mutates anything, caches nothing of its own (Control Manifest Feature
+## Layer Guardrail: "predicates are pure queries... no mutation, no caching
+## state of their own"). A cell outside the configured world bounds reads
+## back `null` from [method VoxelWorldGrid.get_cell] and is treated as
+## blocking by both helpers below -- the world simply does not extend there,
+## so it can neither support a foot (never solid-below) nor offer clearance
+## (never passable).
+##
+## **§1a (ADR-0007, story `building-034`): a scaffold cell is standable
+## WITHOUT a solid cell beneath it -- scaffolding supports itself.** The
+## solid-below requirement becomes `(solid below) OR (this cell is a
+## scaffold cell)`; the clearance-column check is completely unchanged (a
+## scaffold cell is always passable in the raw grid -- D9 forbids it ever
+## occupying an address that reads solid). [param scaffold_source] defaults
+## to `null`, which is structurally identical to "never scaffold" -- the
+## exact pre-amendment behaviour.
+static func is_standable(
+	voxel_world: VoxelWorldGrid, cell: Vector3i, scaffold_source: Object = null
+) -> bool:
 	assert(voxel_world != null, "VillagerWalkabilityRules.is_standable requires voxel_world")
-	if not _is_solid(voxel_world, cell + Vector3i(0, -1, 0)):
+	var solid_below: bool = _is_solid(voxel_world, cell + Vector3i(0, -1, 0))
+	if not solid_below and not _has_scaffold(scaffold_source, cell):
 		return false
 	for offset in range(VILLAGER_CLEARANCE):
 		if not _is_passable(voxel_world, cell + Vector3i(0, offset, 0)):
@@ -115,17 +142,58 @@ static func is_standable(voxel_world: VoxelWorldGrid, cell: Vector3i) -> bool:
 ## standable-cell pairs via this predicate, so re-verifying that here would
 ## duplicate [method is_standable]'s own job. Pure query, no mutation, no
 ## cached state (same guardrail as [method is_standable]).
+##
+## **§2a clause 2 (ADR-0007, story `building-034`, LOAD-BEARING): a
+## same-column step (`dx = 0 and dz = 0`) is legal ONLY if BOTH endpoints are
+## scaffold cells.** Before this amendment, a same-column pair could never
+## reach this predicate at all -- two stacked cells could never both be
+## standable (no scaffold-supports-itself clause existed). §1a removes
+## exactly that structural prevention, so without this explicit gate,
+## `|dy| <= MAX_STEP_HEIGHT` alone would silently accept a same-column step
+## between an ordinary standable cell and a scaffold cell directly above/
+## below it -- general climbing, never intended. This gate is checked FIRST,
+## before the diagonal flank check (which never runs for a same-column pair
+## anyway, since `dx == 0 and dz == 0`).
 static func is_step_legal(
-	voxel_world: VoxelWorldGrid, from_cell: Vector3i, to_cell: Vector3i
+	voxel_world: VoxelWorldGrid, from_cell: Vector3i, to_cell: Vector3i, scaffold_source: Object = null
 ) -> bool:
 	if absi(to_cell.y - from_cell.y) > MAX_STEP_HEIGHT:
 		return false
 	var dx: int = to_cell.x - from_cell.x
 	var dz: int = to_cell.z - from_cell.z
+	if dx == 0 and dz == 0:
+		var from_is_scaffold: bool = _has_scaffold(scaffold_source, from_cell)
+		var to_is_scaffold: bool = _has_scaffold(scaffold_source, to_cell)
+		if from_is_scaffold and to_is_scaffold:
+			return true  # §2a: the one new edge class.
+		if from_is_scaffold or to_is_scaffold:
+			return false  # Never climb between ordinary ground and scaffolding.
+		# NEITHER endpoint is scaffold: fall through to the pre-amendment rules
+		# and return exactly what this predicate returned before story 034.
+		#
+		# This clause is load-bearing and was MISSING in the first cut, which
+		# turned the whole suite red. The amendment's binding promise is that a
+		# caller passing no scaffold_source observes EXACTLY pre-amendment
+		# behaviour. Refusing every same-column step broke that promise: the
+		# predicate used to fall through to the |dy| <= MAX_STEP_HEIGHT check
+		# and return true here, and villager-ai-024's wall fix depends on it —
+		# its regression test dropped straight back to 27/30.
+		#
+		# The TD's rationale for the blanket refusal was that two stacked
+		# ordinary cells can never both be standable, so the case never
+		# arises. That is true of callers which check standability first, and
+		# NOT true of every caller. Structural safety still holds without the
+		# blanket refusal: §1a relaxes solid-below only FOR scaffold cells, so
+		# two ordinary stacked cells still cannot both stand, and the
+		# one-endpoint-scaffold case above is what actually closes general
+		# climbing.
 	if dx != 0 and dz != 0:
 		var flanker_a := Vector3i(to_cell.x, from_cell.y, from_cell.z)
 		var flanker_b := Vector3i(from_cell.x, from_cell.y, to_cell.z)
-		if not is_standable(voxel_world, flanker_a) or not is_standable(voxel_world, flanker_b):
+		if (
+			not is_standable(voxel_world, flanker_a, scaffold_source)
+			or not is_standable(voxel_world, flanker_b, scaffold_source)
+		):
 			return false
 	return true
 
@@ -192,3 +260,15 @@ static func _is_solid(voxel_world: VoxelWorldGrid, cell: Vector3i) -> bool:
 static func _is_passable(voxel_world: VoxelWorldGrid, cell: Vector3i) -> bool:
 	var contents: CellContents = voxel_world.get_cell(cell)
 	return contents != null and contents.is_empty()
+
+
+## The O(1) duck-typed scaffold-membership read every predicate above
+## consults (ADR-0007 §1a/§1b, story `building-034`). A `null`
+## [param scaffold_source] (the default, and Build Validation's own explicit
+## choice everywhere) is structurally "never scaffold" -- never a crash, never
+## a special-cased branch at any call site.
+static func _has_scaffold(scaffold_source: Object, cell: Vector3i) -> bool:
+	if scaffold_source == null:
+		return false
+	@warning_ignore("unsafe_method_access")
+	return bool(scaffold_source.has_scaffold(cell))

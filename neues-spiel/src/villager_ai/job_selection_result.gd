@@ -29,10 +29,24 @@ var chosen: BlueprintCell = null
 ## total candidates were supplied to it.
 var pathfind_attempt_count: int = 0
 
+## Story `building-034` addition (TD ruling D5): the deterministic list of
+## every candidate cell THIS pass probed via [method VillagerNavGraph.find_path]
+## and found unreachable (`path.is_empty()`) -- [method
+## VillagerJobSelector.select_job] already computed exactly this set inside
+## its own round loop and previously threw it away. `select_job` stays a
+## PURE static function (D5: "reports nothing itself, gains no dependency")
+## -- the caller ([VillagerAi]) forwards this list to
+## [method ConstructionJobQueue.report_unreachable], throttled by the
+## already-landed retry cooldown.
+var unreachable_cells: Array[Vector3i] = []
 
-func _init(p_chosen: BlueprintCell = null, p_pathfind_attempt_count: int = 0) -> void:
+
+func _init(
+	p_chosen: BlueprintCell = null, p_pathfind_attempt_count: int = 0, p_unreachable_cells: Array[Vector3i] = []
+) -> void:
 	chosen = p_chosen
 	pathfind_attempt_count = p_pathfind_attempt_count
+	unreachable_cells = p_unreachable_cells
 
 
 ## Whether this pass found a reachable job -- the explicit "hit or miss"

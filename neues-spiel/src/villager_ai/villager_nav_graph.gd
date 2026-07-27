@@ -91,6 +91,16 @@ const HORIZONTAL_HALF_OFFSETS: Array[Vector2i] = [
 ## at a different Y (a step up or down, e.g. a staircase).
 const VERTICAL_STEP_OFFSETS: Array[int] = [-1, 0, 1]
 
+## Story `building-034` (ADR-0007 §2a clause 1) -- the ONLY same-column
+## (`dx = 0, dz = 0`) candidate offsets this graph ever offers, and the only
+## place `(0, +-1, 0)` appears anywhere in this class's candidate generation.
+## Reused verbatim by [method VillagerAi.would_trap_builder]'s own escape-
+## route search (§1b) -- never a second, independently-declared same-column
+## offset pair. Legality is still gated entirely by [method
+## VillagerWalkabilityRules.is_step_legal]'s own explicit same-column refusal
+## (§2a clause 2) -- offering the candidate here does not itself admit it.
+const VERTICAL_SAME_COLUMN_OFFSETS: Array[int] = [-1, 1]
+
 ## The underlying AStar3D graph. Never exposed directly to a consumer --
 ## every read goes through [method find_path]/[method has_point] so this
 ## class stays the sole owner of the id-packing scheme.
@@ -204,6 +214,18 @@ func build(
 				if not _astar.has_point(to_id):
 					continue
 				_connect_if_legal(predicate_source, from_cell, from_id, to_cell, to_id)
+		# Story `building-034` (ADR-0007 §2a clause 1) -- the same-column
+		# vertical edge class. Only `(0, +1, 0)` here, mirroring
+		# [constant HORIZONTAL_HALF_OFFSETS]'s own "visit each unordered pair
+		# exactly once from a full, fresh scan" discipline: every standable
+		# cell is visited as `from_cell` exactly once, so offering only the
+		# upward direction here still reaches every same-column pair (the
+		# downward direction is the SAME pair, visited from its own upper
+		# cell's own turn through this same loop).
+		var above_cell := from_cell + Vector3i(0, 1, 0)
+		var above_id: int = VillagerNavGraph.cell_to_astar_id(above_cell)
+		if _astar.has_point(above_id):
+			_connect_if_legal(predicate_source, from_cell, from_id, above_cell, above_id)
 
 	_is_built = true
 
@@ -382,6 +404,31 @@ func subscribe_to_voxel_world(voxel_world: VoxelWorldGrid, predicate_source: Vil
 	voxel_world.cells_changed_batch.connect(_on_voxel_world_cells_changed_batch.bind(predicate_source))
 
 
+## Story `building-034` (ADR-0007 §2b) -- subscribes this graph to [param
+## scaffold_source]'s OWN change signal, since a scaffold erection/removal is
+## NOT a [VoxelWorldGrid] write and [signal VoxelWorldGrid.cell_changed] will
+## never fire for it. Connects with Godot's default (synchronous, never
+## `CONNECT_DEFERRED`) flags -- the same race-closure discipline [method
+## subscribe_to_voxel_world] already relies on. [param scaffold_source] is
+## duck-typed (`Object`, mirrors [member VillagerAi.scaffold_registry]'s own
+## typing) against exactly one signal: `signal scaffold_changed(cell:
+## Vector3i)`. Routes into the EXISTING, bounded [method patch_cell] path --
+## never `_astar.clear()`, never a rebuild.
+func subscribe_to_scaffold_registry(scaffold_source: Object, predicate_source: VillagerAi) -> void:
+	@warning_ignore("unsafe_property_access")
+	scaffold_source.scaffold_changed.connect(_on_scaffold_changed.bind(predicate_source))
+
+
+## [signal ScaffoldRegistry.scaffold_changed] handler -- delegates to [method
+## patch_cell] exactly like [method _on_voxel_world_cell_changed]. Consumers
+## re-query CURRENT state via [param predicate_source]; the changed cell
+## itself is only ever used as the bounded patch's own center, never trusted
+## as a snapshot of broader state (see [ScaffoldRegistry.scaffold_changed]'s
+## own doc comment).
+func _on_scaffold_changed(cell: Vector3i, predicate_source: VillagerAi) -> void:
+	patch_cell(predicate_source, cell)
+
+
 ## [signal VoxelWorldGrid.cell_changed] handler ([param predicate_source] is
 ## the bound extra argument appended after the signal's own three, [method
 ## Signal.bind] semantics). Delegates to [method patch_cell] -- never
@@ -492,6 +539,21 @@ func _resync_connections(predicate_source: VillagerAi, cells: Array[Vector3i]) -
 				if not _astar.has_point(neighbor_id):
 					continue
 				_resync_pair(predicate_source, cell, id, neighbor, neighbor_id)
+		# Story `building-034` (ADR-0007 §2a clause 1) -- a patch revisits a
+		# small, pre-existing subset of points, never a complementary full
+		# scan, so BOTH same-column directions must be considered explicitly
+		# here (matching [constant HORIZONTAL_FULL_OFFSETS]'s own "all 8, not
+		# half" patch-pass discipline). This is also the ONLY path a scaffold
+		# write's own patch ([method patch_cell] via [signal
+		# ScaffoldRegistry.scaffold_changed]) ever reaches this edge class
+		# through -- a scaffold write is never part of [method build]'s
+		# initial full scan.
+		for dy: int in VERTICAL_SAME_COLUMN_OFFSETS:
+			var neighbor: Vector3i = cell + Vector3i(0, dy, 0)
+			var neighbor_id: int = VillagerNavGraph.cell_to_astar_id(neighbor)
+			if not _astar.has_point(neighbor_id):
+				continue
+			_resync_pair(predicate_source, cell, id, neighbor, neighbor_id)
 
 
 ## Re-evaluates ONE ordered pair's connection in BOTH directions

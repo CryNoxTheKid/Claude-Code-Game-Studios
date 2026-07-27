@@ -65,3 +65,46 @@ func get_world_total() -> int:
 ## been rescued (absent from [member _per_villager_counts]), never an error.
 func get_villager_count(villager_id: int) -> int:
 	return _per_villager_counts.get(villager_id, 0)
+
+
+## Story `building-034` COUPLED RULING ("retire on evidence, not on landing"):
+## [method VillagerAi.climb_onto_self_sealed_cell] and [method
+## VillagerAi._relocate_if_marooned] (ADR-0009's sanctioned discrete
+## `current_cell` mutation points (c)/(d)) each gain their own world-total
+## telemetry counter here, alongside the pre-existing watchdog-rescue
+## counter -- NOT retired, NOT merged with [method record_rescue] (a
+## different mutation class, a different sanctioned point). The anti-vacuity
+## levers require BOTH of these to read ZERO for the build phase: a firing
+## means scaffolding failed to cover a case it should, and must FAIL the
+## lever rather than silently mask the gap behind the discrete-mutation
+## safety net (this is "loudness," not deletion -- see the story's own
+## COUPLED RULING section).
+var _self_seal_climb_total: int = 0
+var _marooned_relocation_total: int = 0
+
+
+## Records exactly one self-seal climb (`ADR-0009` point (c)) -- called by
+## [method VillagerAi.climb_onto_self_sealed_cell] every time it actually
+## fires.
+func record_self_seal_climb() -> void:
+	_self_seal_climb_total += 1
+
+
+## Records exactly one marooned relocation (`ADR-0009` point (d)) -- called
+## by [method VillagerAi._relocate_if_marooned] only when it actually
+## relocates the villager (never on one of that method's own early no-op
+## returns).
+func record_marooned_relocation() -> void:
+	_marooned_relocation_total += 1
+
+
+## World-total self-seal-climb count -- the anti-vacuity levers assert this
+## is `0` for the build phase.
+func get_self_seal_climb_total() -> int:
+	return _self_seal_climb_total
+
+
+## World-total marooned-relocation count -- the anti-vacuity levers assert
+## this is `0` for the build phase.
+func get_marooned_relocation_total() -> int:
+	return _marooned_relocation_total

@@ -95,9 +95,19 @@ enum ProjectState {
 ## does not yet model (a future dig-order story's addition). This story
 ## carries the field only; no kind-based merge/rollup behavior is
 ## implemented here yet.
+## Story `building-034` addition (TD ruling D3): `SCAFFOLD` is a THIRD `Kind`
+## -- a scaffold structure is its OWN project, never a member of the project
+## it serves (D3's circularity finding: `recompute_state()` reaches `DONE`
+## iff every tracked cell is `BUILT`, and `DONE` is the dismantle trigger --
+## a scaffold cell counted among the owner's OWN cells would make the
+## dismantle trigger a state the scaffolding itself prevents). [member
+## BuildProjectRegistry.assign_cells] already gates grouping on
+## `existing_project.kind == kind` -- a `SCAFFOLD` project can therefore
+## NEVER merge into the structure it serves, for free.
 enum Kind {
 	BUILD,
 	DIG,
+	SCAFFOLD,
 }
 
 ## Caller-supplied identity (Story building-003's future reverse index owns
@@ -139,10 +149,20 @@ var cells: Dictionary[Vector3i, BlueprintCell] = {}
 ## "Attribution is not a control channel").
 var worker_ids: Array[int] = []
 
+## Story `building-034` addition (TD ruling D3) -- the id of the `BUILD`-kind
+## project this scaffold structure serves, or `-1` (the same sentinel
+## convention [method BuildProjectRegistry.project_at_cell] already uses) for
+## every non-`SCAFFOLD` project. A scaffold project's dismantle is triggered
+## by its owner reaching `DONE` or being canceled (AC3/D4) -- this link field
+## is what a dismantle coordinator resolves "which scaffold structure serves
+## THIS project" through, never a name/position heuristic.
+var owner_project_id: int = -1
 
-func _init(p_id: int, p_kind: Kind = Kind.BUILD) -> void:
+
+func _init(p_id: int, p_kind: Kind = Kind.BUILD, p_owner_project_id: int = -1) -> void:
 	id = p_id
 	kind = p_kind
+	owner_project_id = p_owner_project_id
 
 
 ## Adds [param blueprint_cell] to this project's cell set and recomputes the
@@ -313,6 +333,7 @@ func serialize() -> Dictionary:
 		"kind": kind,
 		"state": state,
 		"worker_ids": worker_ids.duplicate(),
+		"owner_project_id": owner_project_id,
 	}
 
 

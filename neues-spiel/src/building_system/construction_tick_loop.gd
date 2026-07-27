@@ -423,6 +423,14 @@ var write_tag: BuildingSystemWriteTag = null
 ## story exists; no such assembly exists yet in this codebase.
 var furniture_registry: FurnitureRegistry = null
 
+## Story `building-034` addition (TD ruling D1/D3) -- the sole destination a
+## completing [constant BlueprintCell.Category.SCAFFOLD] job's cell routes to,
+## INSTEAD OF [VoxelWorldGrid], mirroring [member furniture_registry]'s own
+## precedent exactly. `null` is tolerated identically (a completing scaffold
+## job with no registry wired is silently dropped, never falls back to
+## writing the grid).
+var scaffold_registry: ScaffoldRegistry = null
+
 ## Story building-033 addition ([TR-building-system-075]) -- fires exactly
 ## once per [method _on_tick] dispatch that completes at least one job,
 ## carrying every cell completed in THIS SAME dispatch (never a zero-cell
@@ -673,6 +681,7 @@ func create_demolition_order(blueprint_cell: BlueprintCell) -> bool:
 	if (
 		blueprint_cell.category != BlueprintCell.Category.BLOCK
 		and blueprint_cell.category != BlueprintCell.Category.FURNITURE
+		and blueprint_cell.category != BlueprintCell.Category.SCAFFOLD
 	):
 		return false
 	if blueprint_cell.is_demolition_queued:
@@ -780,6 +789,8 @@ static func required_ticks_for(category: BlueprintCell.Category, ticks_config: C
 	match category:
 		BlueprintCell.Category.FURNITURE:
 			return ticks_config.base_build_ticks_furniture
+		BlueprintCell.Category.SCAFFOLD:
+			return ticks_config.base_build_ticks_scaffold
 		_:
 			return ticks_config.base_build_ticks_block
 
@@ -793,6 +804,8 @@ static func required_demolition_ticks_for(
 	match category:
 		BlueprintCell.Category.FURNITURE:
 			return ticks_config.base_demolition_ticks_furniture
+		BlueprintCell.Category.SCAFFOLD:
+			return ticks_config.base_demolition_ticks_scaffold
 		_:
 			return ticks_config.base_demolition_ticks_block
 
@@ -869,11 +882,17 @@ func _on_tick() -> void:
 				# was never written into the grid in the first place, so
 				# there is nothing to clear. Routed to [member
 				# furniture_registry] instead, in [method _complete_jobs].
-				if job.blueprint_cell.category != BlueprintCell.Category.FURNITURE:
+				if (
+					job.blueprint_cell.category != BlueprintCell.Category.FURNITURE
+					and job.blueprint_cell.category != BlueprintCell.Category.SCAFFOLD
+				):
 					# Story building-009 (Rule 14j/14l, TR-115) -- always
 					# included for a BLOCK cell: the restore_value snapshot
 					# if this was a floor-excavation entry, otherwise an
-					# explicit empty cell ("the clear occurs").
+					# explicit empty cell ("the clear occurs"). Story
+					# building-034: SCAFFOLD is excluded identically to
+					# FURNITURE -- never touched the grid, nothing to clear
+					# (routed to [member scaffold_registry] instead).
 					changes[cell] = (
 						job.blueprint_cell.restore_value
 						if job.blueprint_cell.restore_value != null
@@ -882,8 +901,13 @@ func _on_tick() -> void:
 			# Story building-028 (ADR-0016 BV-1 ruling) -- a FURNITURE-category
 			# construction completion is EXCLUDED from the bulk_write payload
 			# entirely; it is routed to [member furniture_registry] instead, in
-			# [method _complete_jobs]. Every other category is unaffected.
-			elif job.blueprint_cell.category != BlueprintCell.Category.FURNITURE:
+			# [method _complete_jobs]. Story building-034: SCAFFOLD is excluded
+			# identically (D1: never voxel data). Every other category is
+			# unaffected.
+			elif (
+				job.blueprint_cell.category != BlueprintCell.Category.FURNITURE
+				and job.blueprint_cell.category != BlueprintCell.Category.SCAFFOLD
+			):
 				changes[cell] = job.blueprint_cell.contents
 			completed_jobs.append(job)
 	_complete_jobs(changes, completed_jobs)
@@ -1020,6 +1044,26 @@ func _complete_jobs(changes: Dictionary[Vector3i, CellContents], completed_jobs:
 		# building-017" block, point 4).
 		if _furniture_demolished_callback.is_valid():
 			_furniture_demolished_callback.call(definition_id, footprint_cells)
+	# Story `building-034` (TD ruling D1/D3) -- route SCAFFOLD construction
+	# completions to [member scaffold_registry] INSTEAD OF the grid.
+	for job: _ActiveJob in completed_jobs:
+		if (
+			job.is_demolition
+			or job.blueprint_cell.category != BlueprintCell.Category.SCAFFOLD
+			or scaffold_registry == null
+		):
+			continue
+		scaffold_registry.add(job.blueprint_cell.cell)
+	# Story `building-034` -- route SCAFFOLD demolition completions to
+	# [member scaffold_registry]'s own [method ScaffoldRegistry.remove].
+	# SC-INV-1 (ADR-0007 §1b) is enforced by [ScaffoldDismantlePlanner] at
+	# ORDER-of-demolition time, before this class ever completes the job.
+	for job: _ActiveJob in completed_jobs:
+		if not job.is_demolition or job.blueprint_cell.category != BlueprintCell.Category.SCAFFOLD:
+			continue
+		if scaffold_registry == null:
+			continue
+		scaffold_registry.remove(job.blueprint_cell.cell)
 	if not completed_construction_cells.is_empty():
 		construction_completed.emit(completed_construction_cells)
 	if not completed_demolition_cells.is_empty():

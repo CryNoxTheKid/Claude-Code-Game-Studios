@@ -95,6 +95,18 @@ func register_project(project: BuildProject) -> void:
 		_next_id = project.id + 1
 
 
+## Story `building-034` addition (TD ruling D3) -- a fresh, never-before-used
+## project id, for a caller ([ScaffoldErectionCoordinator]) that constructs
+## its OWN [BuildProject] externally (a `SCAFFOLD`-kind project is never
+## produced by [method assign_cells], since scaffolding is never grouped/
+## merged with player-drawn cells) and must still draw from the SAME id
+## space every other project uses, never a second counter.
+func allocate_project_id() -> int:
+	var id: int = _next_id
+	_next_id += 1
+	return id
+
+
 ## The core grouping/merge entry point (AC55/AC56, Rule 14c, F6,
 ## [TR-building-system-107]) -- [signal CommitPipeline.blueprint_cells_created]'s
 ## real future consumer (that class's own doc comment names this exact

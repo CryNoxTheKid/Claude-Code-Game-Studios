@@ -64,6 +64,27 @@ const BASE_DEMOLITION_TICKS_FURNITURE_MAX: int = 40
 ## this story's own BLOCK-only scope.
 @export var base_demolition_ticks_furniture: int = 8
 
+## Safe range for [member base_build_ticks_scaffold]/[member
+## base_demolition_ticks_scaffold] (story `building-034`, TD ruling D7: "1-20
+## to match its siblings").
+const BASE_BUILD_TICKS_SCAFFOLD_MIN: int = 1
+const BASE_BUILD_TICKS_SCAFFOLD_MAX: int = 20
+const BASE_DEMOLITION_TICKS_SCAFFOLD_MIN: int = 1
+const BASE_DEMOLITION_TICKS_SCAFFOLD_MAX: int = 20
+
+## `base_build_ticks[scaffold]` (story `building-034`, AC2/TD ruling D7).
+## **PROVISIONAL -- LEFT TO THE USER.** D7 fixed the hard constraints only
+## (`>= 1`, never zero; strictly `< base_build_ticks_block` per AC2, asserted
+## by the AC2 test rather than a `validate()` BLOCKING invariant) -- the pacing
+## VALUE itself is a creative/design call the TD deliberately did not make.
+## Shipped here as `1` (a quarter of a wall cell's default 4) purely to keep
+## the structure buildable and testable; DO NOT read this as tuned.
+@export var base_build_ticks_scaffold: int = 1
+
+## `base_demolition_ticks[scaffold]` -- same PROVISIONAL status as [member
+## base_build_ticks_scaffold]; see that field's own doc comment.
+@export var base_demolition_ticks_scaffold: int = 1
+
 
 ## See [ConfigResource.validate]. Clamps all four fields to their respective
 ## bounds and appends a warning string per clamped field -- no BLOCKING
@@ -109,5 +130,22 @@ func validate() -> Array[String]:
 		)
 		base_demolition_ticks_furniture = clampi(
 			base_demolition_ticks_furniture, BASE_DEMOLITION_TICKS_FURNITURE_MIN, BASE_DEMOLITION_TICKS_FURNITURE_MAX
+		)
+	if base_build_ticks_scaffold < BASE_BUILD_TICKS_SCAFFOLD_MIN or base_build_ticks_scaffold > BASE_BUILD_TICKS_SCAFFOLD_MAX:
+		issues.append(
+			"base_build_ticks_scaffold out of range [%s, %s], got %s -- clamped" %
+			[BASE_BUILD_TICKS_SCAFFOLD_MIN, BASE_BUILD_TICKS_SCAFFOLD_MAX, base_build_ticks_scaffold]
+		)
+		base_build_ticks_scaffold = clampi(base_build_ticks_scaffold, BASE_BUILD_TICKS_SCAFFOLD_MIN, BASE_BUILD_TICKS_SCAFFOLD_MAX)
+	if (
+		base_demolition_ticks_scaffold < BASE_DEMOLITION_TICKS_SCAFFOLD_MIN
+		or base_demolition_ticks_scaffold > BASE_DEMOLITION_TICKS_SCAFFOLD_MAX
+	):
+		issues.append(
+			"base_demolition_ticks_scaffold out of range [%s, %s], got %s -- clamped" %
+			[BASE_DEMOLITION_TICKS_SCAFFOLD_MIN, BASE_DEMOLITION_TICKS_SCAFFOLD_MAX, base_demolition_ticks_scaffold]
+		)
+		base_demolition_ticks_scaffold = clampi(
+			base_demolition_ticks_scaffold, BASE_DEMOLITION_TICKS_SCAFFOLD_MIN, BASE_DEMOLITION_TICKS_SCAFFOLD_MAX
 		)
 	return issues

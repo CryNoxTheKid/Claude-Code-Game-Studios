@@ -118,7 +118,25 @@ const WORLD_MAX_Y: int = 15  # 16 vertical cells — AC36: "32x32x16".
 ## production BuildValidationReachability/VillagerNavGraph implementations
 ## under test, which must stay untouched -- that would defeat the corpus's
 ## own purpose).
-const PAIRS_PER_SEED: int = 5
+## CUT LEVER PULLED 2026-07-27 (5 -> 4), exactly as this file's own Cut-Lever
+## Policy directs: reduce PAIRS_PER_SEED BEFORE reducing the seed count,
+## re-measure once, then escalate. The ceiling was NOT relaxed and the test was
+## NOT skipped.
+##
+## Why, with the measurements: this corpus ran 45.78s at midday and 60.83s in
+## the evening ON THE SAME CODE, with an idle machine and the tree restored to
+## the last green commit — so the baseline moved, not the algorithm. Story
+## building-034 then added ~2.4% on top (60.83 -> 62.27), which is inside
+## ADR-0007 v1.1's own +5% patch budget. The breach is the drifted baseline, not
+## the scaffolding work.
+##
+## Seed count stays at 100 because seed diversity is what this property corpus
+## actually buys; 500 pairs -> 400 keeps every seed represented.
+##
+## ESCALATED TO THE TECHNICAL DIRECTOR: if the baseline keeps drifting, the next
+## lever is not another cut — it is a ruling on whether a wall-clock ceiling is
+## the right guard at all, since it measures the machine as much as the code.
+const PAIRS_PER_SEED: int = 4
 const MIN_FILL_DENSITY: float = 0.10
 const MAX_FILL_DENSITY: float = 0.40
 const CI_RUNTIME_CEILING_SEC: float = 60.0

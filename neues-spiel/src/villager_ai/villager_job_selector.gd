@@ -152,6 +152,12 @@ static func select_job(
 		))
 	ranked.sort_custom(_less_than_by_chebyshev)
 
+	# Story `building-034` (TD ruling D5) -- every candidate this pass probes
+	# and finds unreachable is recorded here, deterministically, for the
+	# caller to forward to [method ConstructionJobQueue.report_unreachable].
+	# This function stays PURE: it reports nothing itself, gains no
+	# job-queue dependency.
+	var unreachable_cells: Array[Vector3i] = []
 	var attempts: int = 0
 	var round_start: int = 0
 	while round_start < ranked.size() and attempts < max_selection_candidates:
@@ -167,12 +173,14 @@ static func select_job(
 				reachable_this_round.append(_ReachableCandidate.new(
 					candidate.blueprint_cell, candidate.queue_index, VillagerNavGraph.path_length_cells(path)
 				))
+			else:
+				unreachable_cells.append(candidate.blueprint_cell.cell)
 		if not reachable_this_round.is_empty():
 			reachable_this_round.sort_custom(_less_than_by_selection_key)
-			return JobSelectionResult.new(reachable_this_round[0].blueprint_cell, attempts)
+			return JobSelectionResult.new(reachable_this_round[0].blueprint_cell, attempts, unreachable_cells)
 		round_start = round_end
 
-	return JobSelectionResult.new(null, attempts)
+	return JobSelectionResult.new(null, attempts, unreachable_cells)
 
 
 ## Straight-line (Chebyshev / chessboard) distance between two cells --

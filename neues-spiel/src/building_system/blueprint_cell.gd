@@ -77,9 +77,15 @@ enum MicroState {
 ## `[furniture]` = 8, [TR-building-system-079]) -- Story building-029
 ## addition (see class doc comment). Determines which tuning knob
 ## [method ConstructionTickLoop.required_ticks_for] reads for this cell.
+## Story `building-034` addition (ADR-0007/TD ruling D1/D3): `SCAFFOLD` is a
+## THIRD category, mirroring `FURNITURE`'s own routing shape -- a completing
+## `SCAFFOLD` job routes to [ScaffoldRegistry] INSTEAD OF [VoxelWorldGrid]
+## (D1: scaffolding is not voxel data), exactly as `FURNITURE` routes to
+## [FurnitureRegistry] (BV-1).
 enum Category {
 	BLOCK,
 	FURNITURE,
+	SCAFFOLD,
 }
 
 ## The cell address this blueprint cell occupies.
