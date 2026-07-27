@@ -58,6 +58,16 @@
 ##    prints WHY and the tool moves on to the next one rather than faking a
 ##    result.
 ##
+## Story scene-009 ("The payoff loop's last step, IN THE GAME") extends this
+## file with stages 6 (claim) and 7 (sleep): the villager claims the bed
+## stage 5 just finished, then sleeps in it — both driven entirely by the
+## villager's own real Rest need under the real [TimeTickSystem.set_warp]
+## already requested above, never a tool-written need value (see
+## [method _attempt_claim_and_sleep_stages]'s own doc comment, Open Decision
+## 1). `06-claimed`/`07-sleeping` follow the SAME honesty rule as `05-furnished`
+## above: a stage that does not reach its own real condition inside its wait
+## cap prints why and skips its screenshot.
+##
 ## Run WINDOWED (a real viewport is required):
 ##   Godot_v4.7-stable_win64_console.exe --path neues-spiel res://tools/payoff_loop_demo.tscn
 extends Node3D
@@ -82,14 +92,41 @@ const SETTLE_SEC := 2.0
 ## anything ever stalls, mirroring every other tool scene's self-quit
 ## precedent. Generous because real construction is tick-driven and this
 ## tool deliberately never fakes a faster outcome, but bounded so the process
-## always exits on its own.
-const SAFETY_CAP_SEC := 480.0
+## always exits on its own. Story scene-009 raised this from 480 -> 780 to
+## cover its own two new stages' wait caps below on top of the five that
+## already existed — a change to the OVERALL safety net, never to
+## [constant WALL_WAIT_CAP_SEC]/[constant FURNITURE_WAIT_CAP_SEC] themselves
+## (Sprint 12 plan: a stalled construction plateau is a finding for
+## `spike-plateau` to diagnose, never a cap this tool quietly raises to route
+## around it).
+const SAFETY_CAP_SEC := 780.0
 
 ## Sub-caps for the two tick-driven waits (walls, then the bed) — bounded
 ## independently of the overall cap so a stalled wall build cannot silently
 ## eat the bed stage's entire budget.
 const WALL_WAIT_CAP_SEC := 220.0
 const FURNITURE_WAIT_CAP_SEC := 120.0
+
+## Story scene-009 — wall-clock cap for the CLAIM stage: how long this run
+## waits for the villager's OWN real Rest need to reach urgency (driven
+## purely by real F1 decay under [constant DEMO_TIME_WARP], never a
+## tool-written need value — Open Decision 1(a)) and claim the bed
+## [method _attempt_furniture_stage] just finished. Generous: construction
+## itself already consumes some of the villager's decay budget, but a fast,
+## honest construction run can still owe most of the ~1,000-tick decay from a
+## fresh spawn's 100.0 down to [member NeedsMoodConfig.urgency_threshold].
+const CLAIM_WAIT_CAP_SEC := 300.0
+
+## Story scene-009 — wall-clock cap for the SLEEP stage once a bed is
+## claimed: travel to the bed plus [method NeedsMood.start_recovery] taking
+## hold is short relative to [constant CLAIM_WAIT_CAP_SEC]'s own decay wait.
+const SLEEP_WAIT_CAP_SEC := 60.0
+
+## Story scene-009 — how long this run waits to collect at least two real
+## per-tick recovery-value samples via the real [signal TimeTickSystem.tick]
+## broadcast once Recovering is observed, bounded independently so a stall
+## here cannot silently hang the run.
+const RECOVERY_SAMPLE_WAIT_CAP_SEC := 15.0
 
 ## Real time-warp this demo requests via the SANCTIONED [TimeTickSystem.set_warp]
 ## API (never `Engine.time_scale`, Forbidden per `technical-preferences.md`) —
@@ -106,6 +143,24 @@ var _phase: int = 0  # 0 = waiting for boot, 1 = settling, 2 = run, 3 = done
 ## around each commit attempt below, read immediately after, never left
 ## connected across stages (see [method _commit_with_report]).
 var _commit_rejected_this_batch: Array[Dictionary] = []
+
+## Story scene-009 — edge-triggered log of every distinct entry into
+## [constant VillagerAi.State.SLEEPING] observed anywhere in this run,
+## ground/unsheltered sleeps included (GDD D10's own "the villager's first
+## sleep is always the unsheltered one" pacing finding,
+## AC-D10-IS-REPORTED-NOT-SUPPRESSED). Populated by
+## [method _sample_sleep_transition], which every wait loop in this file now
+## calls every frame it waits (room-wall wait, bed wait, and the two new
+## stages below) — no SLEEPING episode this run passes through goes
+## unrecorded, never only the one the sleep stage itself is waiting for.
+## Each entry: `{"owned_bed": Variant, "sheltered": bool, "cell": Vector3i}`.
+var _sleep_event_log: Array[Dictionary] = []
+
+## Story scene-009 — tracks whether the LAST sampled frame already read
+## [constant VillagerAi.State.SLEEPING], [method _sample_sleep_transition]'s
+## own edge-trigger guard so a multi-frame sleep episode is logged exactly
+## once, at entry, never once per frame it persists.
+var _was_sleeping_last_sample: bool = false
 
 
 func _ready() -> void:
@@ -249,7 +304,7 @@ func _run_demo() -> void:
 	# cell while the claiming villager is actually on site. This tool
 	# observes and reports whatever that real, now-honest behavior actually
 	# produces — it does not paper over it either way.
-	await _wait_for_built(wall_cells, WALL_WAIT_CAP_SEC, "room walls")
+	await _wait_for_built(wall_cells, WALL_WAIT_CAP_SEC, "room walls", valley, villager)
 	var built_wall_count: int = _count_built(wall_cells)
 	print("payoff_loop_demo: REPORT — construction result: %d / %d wall cells reached BUILT" % [built_wall_count, wall_cells.size()])
 	print("payoff_loop_demo: REPORT — villager after construction wait: state=%s pursued_activity=%s current_cell=%s" % [
@@ -267,6 +322,10 @@ func _run_demo() -> void:
 	# ---- Furniture: place a bed inside the finished room, if reachable ----
 	await _attempt_furniture_stage(valley, anchor, villager, build_editor_mode, commit_pipeline, placement_pick, build_project_registry)
 
+	# ---- Claim + sleep: the payoff loop's last step (Story scene-009) ----
+	await _attempt_claim_and_sleep_stages(valley, villager, build_project_registry)
+
+	_report_sleep_event_log()
 	print("payoff_loop_demo: REPORT — run complete. Quitting.")
 	get_tree().quit()
 
@@ -324,13 +383,20 @@ func _release_projects_for(blueprint_cells: Array[BlueprintCell], registry: Buil
 ## running inside the live scene tree are the only things that ever move
 ## [member BlueprintCell.state] forward. Prints a periodic progress line so a
 ## human watching the console can see the loop is alive, not stalled.
-func _wait_for_built(blueprint_cells: Array[BlueprintCell], cap_sec: float, label: String) -> void:
+## Story scene-009 — also samples [method _sample_sleep_transition] every
+## frame this loop waits, so a GROUND (D10) sleep episode occurring mid-
+## construction is recorded even though this method's own focus is the
+## build, not the villager's needs.
+func _wait_for_built(
+	blueprint_cells: Array[BlueprintCell], cap_sec: float, label: String, valley: Node, villager: VillagerAi
+) -> void:
 	if blueprint_cells.is_empty():
 		return
 	var start_usec: int = Time.get_ticks_usec()
 	var deadline_usec: int = start_usec + int(cap_sec * 1000000.0)
 	var last_report_usec: int = start_usec
 	while true:
+		_sample_sleep_transition(valley, villager)
 		var built_count: int = _count_built(blueprint_cells)
 		if built_count == blueprint_cells.size():
 			print("payoff_loop_demo: REPORT — %s: all %d cells reached BUILT after %0.1fs real time" % [
@@ -411,7 +477,7 @@ func _attempt_furniture_stage(
 	var released_ids: Array[int] = _release_projects_for(bed_cells, build_project_registry)
 	print("payoff_loop_demo: REPORT — bed project(s) released: %s" % str(released_ids))
 
-	await _wait_for_built(bed_cells, FURNITURE_WAIT_CAP_SEC, "bed")
+	await _wait_for_built(bed_cells, FURNITURE_WAIT_CAP_SEC, "bed", valley, villager)
 	var built_bed_count: int = _count_built(bed_cells)
 	print("payoff_loop_demo: REPORT — bed construction result: %d / %d cells reached BUILT" % [built_bed_count, bed_cells.size()])
 
@@ -433,6 +499,207 @@ func _attempt_furniture_stage(
 		print("payoff_loop_demo: REPORT — villager id=%d has claimed a bed at %s" % [villager.get_villager_id(), str(owned_bed)])
 	else:
 		print("payoff_loop_demo: REPORT — villager id=%d has NOT claimed a bed this run (needs a real Rest-need trigger this demo's timeframe did not necessarily reach — reported honestly, not assumed)." % villager.get_villager_id())
+
+
+# ---------------------------------------------------------------------------
+# Story scene-009 — the payoff loop's last step: claim the bed, then sleep
+# in it. Both stages are driven ENTIRELY by the villager's own real Rest
+# need and the real, hosted FurnitureBedProvider/BuildValidation chain — this
+# section claims nothing on the villager's behalf and writes no need value
+# (Open Decision 1: the only acceleration is the real, player-facing
+# TimeTickSystem.set_warp() already requested above, never a tool-written
+# NeedsMood.set_need_value() — Open Decision 1(c), rejected).
+# ---------------------------------------------------------------------------
+
+## Edge-triggered sleep-episode recorder — called every frame every wait loop
+## in this file spins (room-wall wait, bed wait, and the two stages below), so
+## ANY SLEEPING episode this run passes through is captured, not only the one
+## the sleep stage itself is waiting for (GDD D10's "the villager's first
+## sleep is always unsheltered" pacing finding). Read-only: queries
+## [method VillagerAi.get_state]/[method VillagerAi.get_owned_bed_cell] and the
+## real, hosted [FurnitureBedProvider] — writes nothing.
+func _sample_sleep_transition(valley: Node, villager: VillagerAi) -> void:
+	var is_sleeping: bool = villager.get_state() == VillagerAi.State.SLEEPING
+	if is_sleeping and not _was_sleeping_last_sample:
+		var owned_bed: Variant = villager.get_owned_bed_cell()
+		var sheltered: bool = false
+		if owned_bed != null:
+			var bed_provider: FurnitureBedProvider = valley.get_furniture_bed_provider()
+			if bed_provider != null:
+				sheltered = bed_provider.is_bed_sheltered(owned_bed)
+		_sleep_event_log.append({
+			"owned_bed": owned_bed,
+			"sheltered": sheltered,
+			"cell": villager.get_current_cell(),
+		})
+	_was_sleeping_last_sample = is_sleeping
+
+
+## Prints every SLEEPING episode [method _sample_sleep_transition] recorded
+## this run, distinguishing GROUND (no owned bed — GDD D10's "unsheltered
+## first sleep" pacing finding) from BED episodes, and BED episodes'
+## sheltered/unsheltered verdict — AC-D10-IS-REPORTED-NOT-SUPPRESSED: this
+## story reports D10, it does not retune, suppress, or work around it.
+func _report_sleep_event_log() -> void:
+	if _sleep_event_log.is_empty():
+		print("payoff_loop_demo: REPORT — D10 check: zero SLEEPING episodes observed this run.")
+		return
+	print("payoff_loop_demo: REPORT — D10 check: %d SLEEPING episode(s) observed this run:" % _sleep_event_log.size())
+	for i in range(_sleep_event_log.size()):
+		var entry: Dictionary = _sleep_event_log[i]
+		if entry["owned_bed"] == null:
+			print("payoff_loop_demo: REPORT —   episode %d: GROUND sleep at %s (no bed owned yet — D10's own 'first sleep is unsheltered' pacing finding, reported not suppressed)." % [
+				i + 1, str(entry["cell"]),
+			])
+		else:
+			print("payoff_loop_demo: REPORT —   episode %d: BED sleep at %s, sheltered=%s." % [
+				i + 1, str(entry["owned_bed"]), str(entry["sheltered"]),
+			])
+
+
+## Drives stages 6 (claim) and 7 (sleep). Never advances the loop itself — the
+## real TimeTickSystem/NeedsMood/VillagerAi already running under
+## [constant DEMO_TIME_WARP] are the only things that move the villager toward
+## a claim and a sheltered sleep. If a wait cap is hit, prints exactly why and
+## returns without capturing the corresponding screenshot — never a picture
+## that does not match its own report (the `05-furnished` precedent,
+## generalized here to `06`/`07`).
+func _attempt_claim_and_sleep_stages(
+	valley: Node, villager: VillagerAi, build_project_registry: BuildProjectRegistry
+) -> void:
+	print("payoff_loop_demo: REPORT — need-trigger mechanism this run uses: (a) TimeTickSystem.set_warp(%d), the real player-facing time-warp control (already requested above) — never a tool-written NeedsMood.set_need_value() (Open Decision 1(c), rejected)." % DEMO_TIME_WARP)
+
+	# ---- Stage 6: claim ---------------------------------------------------
+	var claimed: Variant = await _wait_for_claim(valley, villager, CLAIM_WAIT_CAP_SEC)
+	if claimed == null:
+		print("payoff_loop_demo: REPORT — stage 6 (claim) NOT REACHED this run: villager id=%d has not claimed a bed within the %0.0fs wait cap (needs its own real Rest need to reach urgency — reported honestly, not assumed). Skipping '06-claimed' and stage 7 (sleep)." % [
+			villager.get_villager_id(), CLAIM_WAIT_CAP_SEC,
+		])
+		return
+	var claimed_cell: Vector3i = claimed
+
+	var project_id: int = build_project_registry.project_at_cell(claimed_cell)
+	print("payoff_loop_demo: REPORT — stage 6 (claim): villager id=%d claimed bed cell %s, owned by BuildProject id=%d." % [
+		villager.get_villager_id(), str(claimed_cell), project_id,
+	])
+	if project_id != -1:
+		var project: BuildProject = build_project_registry.get_project(project_id)
+		var built_by_this_villager: bool = project != null and project.worker_ids.has(villager.get_villager_id())
+		print("payoff_loop_demo: REPORT — stage 6 (claim): BuildProject id=%d worker_ids=%s — built by claiming villager id=%d: %s." % [
+			project_id, str(project.worker_ids if project != null else []), villager.get_villager_id(), str(built_by_this_villager),
+		])
+
+	var bed_provider: FurnitureBedProvider = valley.get_furniture_bed_provider()
+	var shelter_verdict: bool = bed_provider.is_bed_sheltered(claimed_cell) if bed_provider != null else false
+	print("payoff_loop_demo: REPORT — stage 6 (claim): hosted BuildValidation's shelter verdict for %s (via the real FurnitureBedProvider) = %s." % [str(claimed_cell), str(shelter_verdict)])
+
+	await _shoot_through_game_camera("06-claimed")
+
+	# ---- Stage 7: sleep ----------------------------------------------------
+	var reached_sleep: bool = await _wait_for_sleeping_at(valley, villager, claimed_cell, SLEEP_WAIT_CAP_SEC)
+	var needs_mood: NeedsMood = valley.get_needs_mood()
+	if not reached_sleep:
+		print("payoff_loop_demo: REPORT — stage 7 (sleep) NOT REACHED this run: villager id=%d did not reach SLEEPING at its claimed bed cell %s (with sleep need_state RECOVERING) within the %0.0fs wait cap. Skipping '07-sleeping'. Honesty over a picture." % [
+			villager.get_villager_id(), str(claimed_cell), SLEEP_WAIT_CAP_SEC,
+		])
+		return
+
+	print("payoff_loop_demo: REPORT — stage 7 (sleep): villager id=%d is SLEEPING at %s, sleep need_state=%s." % [
+		villager.get_villager_id(), str(claimed_cell), str(needs_mood.get_need_state(villager.get_villager_id(), &"sleep")),
+	])
+
+	await _report_recovery_rate(needs_mood, villager)
+	await _shoot_through_game_camera("07-sleeping")
+
+
+## Waits, real frame by real frame, until [method VillagerAi.has_owned_bed]
+## reads `true`, or [param cap_sec] real seconds elapse. Returns the claimed
+## cell, or `null` if the cap is hit first — never assumes a claim that did
+## not happen. Samples [method _sample_sleep_transition] every frame so a
+## GROUND (D10) sleep occurring while this stage waits is still recorded.
+func _wait_for_claim(valley: Node, villager: VillagerAi, cap_sec: float) -> Variant:
+	var start_usec: int = Time.get_ticks_usec()
+	var deadline_usec: int = start_usec + int(cap_sec * 1000000.0)
+	var last_report_usec: int = start_usec
+	while true:
+		_sample_sleep_transition(valley, villager)
+		if villager.has_owned_bed():
+			return villager.get_owned_bed_cell()
+		var now_usec: int = Time.get_ticks_usec()
+		if now_usec >= deadline_usec:
+			return null
+		if now_usec - last_report_usec >= 10000000:
+			last_report_usec = now_usec
+			print("payoff_loop_demo: REPORT — stage 6 (claim): still waiting for a real Rest-need-driven claim — %0.1fs elapsed, villager state=%s." % [
+				(now_usec - start_usec) / 1000000.0, str(villager.get_state()),
+			])
+		await get_tree().process_frame
+
+
+## Waits until [param villager] reads [constant VillagerAi.State.SLEEPING] AT
+## [param claimed_cell] specifically, with [method NeedsMood.get_need_state]
+## reading [constant NeedsMood.NeedState.RECOVERING] for its `sleep` need —
+## AC-SLEEP-STAGE-IS-REAL's own two-part observation, never merely "reached
+## SLEEPING somewhere" (which a D10 ground-sleep episode can also produce).
+func _wait_for_sleeping_at(valley: Node, villager: VillagerAi, claimed_cell: Vector3i, cap_sec: float) -> bool:
+	var needs_mood: NeedsMood = valley.get_needs_mood()
+	var start_usec: int = Time.get_ticks_usec()
+	var deadline_usec: int = start_usec + int(cap_sec * 1000000.0)
+	while true:
+		_sample_sleep_transition(valley, villager)
+		var at_claimed_bed: bool = (
+			villager.get_state() == VillagerAi.State.SLEEPING
+			and villager.get_current_cell() == claimed_cell
+			and needs_mood.get_need_state(villager.get_villager_id(), &"sleep") == NeedsMood.NeedState.RECOVERING
+		)
+		if at_claimed_bed:
+			return true
+		if Time.get_ticks_usec() >= deadline_usec:
+			return false
+		await get_tree().process_frame
+
+
+## Samples the REAL, per-tick credited recovery rate by connecting a temporary
+## listener directly to the real [signal TimeTickSystem.tick] broadcast (the
+## SAME real Autoload every hosted module already binds to at boot — never a
+## tool-owned clock) for up to [constant RECOVERY_SAMPLE_WAIT_CAP_SEC], then
+## reports the observed per-tick delta against
+## [member NeedsMoodConfig.base_recovery_per_tick_sleep] and
+## [member NeedsMoodConfig.unsheltered_bed_multiplier] — BOTH read LIVE from
+## the shipped config, never a literal (AC-RECOVERY-CREDITS-THE-SHELTERED-RATE).
+func _report_recovery_rate(needs_mood: NeedsMood, villager: VillagerAi) -> void:
+	var time_tick_system: Object = get_node_or_null(^"/root/TimeTickSystem")
+	if time_tick_system == null or not time_tick_system.has_signal(&"tick"):
+		print("payoff_loop_demo: REPORT — stage 7 (sleep): cannot sample the credited recovery rate — the real TimeTickSystem Autoload is unreachable.")
+		return
+
+	var samples: Array[float] = []
+	var sampler := func() -> void:
+		samples.append(needs_mood.get_need_value(villager.get_villager_id(), &"sleep"))
+	time_tick_system.tick.connect(sampler)
+
+	var start_usec: int = Time.get_ticks_usec()
+	var deadline_usec: int = start_usec + int(RECOVERY_SAMPLE_WAIT_CAP_SEC * 1000000.0)
+	while samples.size() < 3 and Time.get_ticks_usec() < deadline_usec:
+		await get_tree().process_frame
+
+	time_tick_system.tick.disconnect(sampler)
+
+	if samples.size() < 2:
+		print("payoff_loop_demo: REPORT — stage 7 (sleep): fewer than 2 real ticks observed while Recovering inside the %0.0fs sample cap — cannot report a per-tick rate." % RECOVERY_SAMPLE_WAIT_CAP_SEC)
+		return
+
+	var config: NeedsMoodConfig = needs_mood.config
+	var sheltered_rate: float = config.base_recovery_per_tick_sleep
+	var unsheltered_rate: float = config.base_recovery_per_tick_sleep * config.unsheltered_bed_multiplier
+	var observed_delta: float = samples[samples.size() - 1] - samples[samples.size() - 2]
+	var matches_sheltered: bool = is_equal_approx(observed_delta, sheltered_rate)
+	var matches_unsheltered: bool = is_equal_approx(observed_delta, unsheltered_rate)
+	print(
+		"payoff_loop_demo: REPORT — stage 7 (sleep): credited per-tick recovery delta = %0.4f. Shipped config: base_recovery_per_tick_sleep (sheltered, x1.0) = %0.4f, unsheltered (x%0.2f) = %0.4f. Matches SHELTERED: %s. Matches UNSHELTERED: %s." % [
+			observed_delta, sheltered_rate, config.unsheltered_bed_multiplier, unsheltered_rate, str(matches_sheltered), str(matches_unsheltered),
+		]
+	)
 
 
 # ---------------------------------------------------------------------------

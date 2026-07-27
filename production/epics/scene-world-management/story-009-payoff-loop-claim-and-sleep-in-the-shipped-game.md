@@ -1,7 +1,7 @@
 # Story 009: The payoff loop's last step, IN THE GAME — a villager claims a bed in a room it helped build, and sleeps in it
 
 > **Epic**: Scene & World Management
-> **Status**: Ready
+> **Status**: BLOCKED on villager-ai story-024 (2026-07-27). Not started-and-abandoned — attempted, and the attempt found why it cannot be done yet.
 > **Layer**: Core (integration / scene assembly) → produces Presentation evidence
 > **Type**: Integration
 > **Estimate**: **1.5 days** *(relative-complexity anchor, not a calendar prediction — sprint-09.md sizing convention)*. Authored at gate G2 of Sprint 12; the sprint anchored 1.5 and authoring did **not** move it, but authoring surfaced one genuinely open mechanism question (§ Open Decision 1 — how the villager is brought to a **sheltered** sleep without the tool supplying simulation state) that could move it. See **Sizing and the descope ladder**.
@@ -448,3 +448,48 @@ Test Evidence table)
   lands.
 </content>
 </invoke>
+
+---
+
+## Blocked Note (2026-07-27) — the attempt is the finding
+
+This story cannot be honestly completed today, and the reason is worth more than
+the story would have been.
+
+**A single villager cannot finish a wall.** Instrumented runs against the real
+booted game — real WallTool, real commit pipeline, real tick loop, real gates,
+one real villager — never reached full enclosure in ANY room shape, size or
+build order tried. Construction plateaus at the topmost wall layer, every time.
+Written up as `villager-ai/story-024-villagers-cannot-finish-a-wall.md`, marked
+BLOCKING, because it breaks the game's core promise: draw a room, your people
+build it.
+
+Since scene-009's premise is that the villager sleeps in a bed inside a room
+**it built**, hand-placing the walls to make the test pass would fake precisely
+the thing under test. So the story waits.
+
+**It also corrected Sprint 12's own plateau hypothesis.** `spike-plateau`
+assumes seal-prevention refusals. The stuck cells are `PLANNED` with
+`claimed_by_villager_id == -1` and `abandon_count == 0` — never claimed, so the
+seal-prevention path is never consulted. The exclusion happens in job selection,
+before any claim. The spike must be redirected or it will search the wrong
+system for its whole time-box.
+
+**Second finding, independent:** `is_candidate_interior_cell` requires a cell to
+be roofed before it is even a Room candidate, and `payoff_loop_demo` builds walls
+only, never a roof. Two separate reasons the demo's bed has never been sheltered.
+
+**Third, a fixture rule now written down:** `BuildValidation.get_shelter_status()`
+serves a cached snapshot refreshed by `_run_analysis_pass` (subscribed to
+`cells_changed_batch`) or `run_load_pass`. `VoxelWorldGrid.set_cell` fires only
+the singular `cell_changed`, so a directly-placed roof never reaches the cache.
+Any fixture using `set_cell` must call `run_load_pass` afterwards.
+
+**What exists and where:** the reproduction case is parked at
+`production/qa/evidence/scene-009-reproduction-not-a-live-test.gd.txt` — as
+evidence, deliberately not as a live test, because it fails and this project does
+not land failing tests. Its bed-construction, claim and sleep stages all PASS
+against the real hosted chain; only the shelter verdict fails, correctly.
+`tools/payoff_loop_demo.gd`'s claim and sleep stages are written but were never
+executed, so `06-claimed.png` and `07-sleeping.png` do not exist. That is a named
+debt, not a silent gap.
