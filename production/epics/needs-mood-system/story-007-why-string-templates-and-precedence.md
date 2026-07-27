@@ -1,7 +1,7 @@
 # Story 007: Why-string selection, templates & UI-slot precedence
 
 > **Epic**: Needs & Mood System
-> **Status**: Ready
+> **Status: Complete (2026-07-27 — 1345/1345 suite green 0 orphans, agent-verified; parent re-verifies with the concurrent building-011)
 > **Layer**: Feature
 > **Type**: Logic
 > **Estimate**: ~1 agent-day

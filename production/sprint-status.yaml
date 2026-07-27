@@ -108,7 +108,7 @@ stories:
     name: "Why-string selection, templates & UI-slot precedence — consumed by the crown's unsheltered edge case"
     file: "production/epics/needs-mood-system/story-007-why-string-templates-and-precedence.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete
     owner: "godot-gdscript-specialist"
     estimate_days: 1.0
     blocker: "HARD: needs-mood-005 (in-sprint — mood band for the empty case). Dep needs-mood-003 Complete. Domain review: systems-designer. Composed HERE, consumed VERBATIM by Villager Info UI — the UI never assembles its own from need values (ADR-0001 leaf rule). Pure function of current state: no cached last-reason, no sticky string. A why-string must NEVER name a fix the player cannot take (a trapped villager is never told 'no bed'). All templates in ONE table for a future localization pass"

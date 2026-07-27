@@ -79,6 +79,31 @@
 ## comments make) -- this story's own AC requires zero events observable
 ## after initialization plus one subsequent tick.
 ##
+## Story needs-mood-007 (this revision) fills in why-string selection,
+## templates, and UI-slot precedence for real (GDD Core Rule 11,
+## TR-needs-mood-system-045/046/047/064): [method get_why_string] -- a PURE,
+## O(active needs) query with two inputs and one output ("no history, no
+## caching" per this story's own Implementation Notes) -- (1) [method
+## _strongest_drain_record] picks the strongest current drain (the LOWEST
+## tracked need value, schema-order tie-break via [constant NEED_NAMES]'s
+## own insertion order, never gated by [constant ACTIVE_NEEDS] so a test
+## double can exercise a schema-inactive need directly), and (2) [method
+## _why_string_for_need] reads that need's CURRENTLY reported recovery
+## source against [constant WHY_STRING_TEMPLATES] (data, keyed by source
+## enum -- "adding a source rung adds a row, not a branch") or falls back to
+## [constant NEED_WHY_BASE]'s bare word with no source suffix. Empty EXACTLY
+## when nothing is urgent AND mood is [constant MoodBand.HAPPY] -- a
+## Content-mood villager with nothing urgent still yields a string (this
+## story's own "do not widen the empty case" warning). [enum WhySlotFeeder]
+## + [constant WHY_STRING_PRECEDENCE_RANK] publish this module's own
+## UI-slot precedence rank for the single why-slot (Villager AI's
+## distress/trapped cue outranks this module's why, which outranks Build
+## Validation's structural string) -- this module never arbitrates the
+## other two feeders itself, that is Villager Info UI's own epic.
+## `ground_trapped` has no production reporter yet (`villager-ai-018`'s ACs
+## name only the other two ground values) -- its template is implemented
+## and tested here anyway, exercised by mock until Villager AI reports it.
+##
 ## Tick dispatch is driven EXCLUSIVELY by [member time_tick_system]'s `tick`
 ## signal (GDD: "all decay/recovery/mood math runs on Time & Tick events",
 ## TR-needs-mood-system-051), connected with Godot's plain synchronous
@@ -150,6 +175,33 @@ const RECOVERY_SOURCE_NAMES: Dictionary[RecoverySource, StringName] = {
 	RecoverySource.GROUND_TRAPPED: &"ground_trapped",
 }
 
+## Recovery-source -> why-string-SUFFIX template table (GDD Core Rule 11,
+## TR-needs-mood-system-045/046) -- DATA, keyed by the same `StringName` id
+## [constant RECOVERY_SOURCE_NAMES] resolves and [member _source_rate_table]
+## already keys by: "adding a source rung adds a row, not a branch" (this
+## story's own Implementation Notes), never a hardcoded branch. Every entry
+## here is the FULL "tired -- ..." string for [constant Need.SLEEP] (the only
+## need with an owned base word today, [constant NEED_WHY_BASE]); a future
+## need with its own base word gets its own template set the same way, never
+## a second copy of this dictionary's shape.
+##
+## [constant RecoverySource.BED_SHELTERED] is DELIBERATELY absent: a
+## sheltered sleeper has no fix to offer, so it -- and "not currently
+## Recovering" (no reported source at all) -- falls through to [method
+## _why_string_for_need]'s bare [constant NEED_WHY_BASE] word with NO source
+## suffix, never a hardcoded special case. The `ground_trapped` row is
+## implemented and tested here even though `villager-ai-018`'s ACs report
+## only the other two ground values in production today -- getting this row
+## wrong (e.g. reusing the `ground_no_bed_owned` string) is the exact
+## "sends the player to build a second bed for a trapped villager" Pillar-4
+## failure this story's own Implementation Notes name.
+const WHY_STRING_TEMPLATES: Dictionary[StringName, String] = {
+	&"ground_no_bed_owned": "tired — no bed",
+	&"ground_bed_unreachable": "tired — bed unreachable",
+	&"ground_trapped": "tired — trapped!",
+	&"bed_unsheltered": "sleeping rough — no shelter",
+}
+
 ## Mood band schema (GDD Core Rule 7, TR-needs-mood-system-039): a pure
 ## function of the smoothed mood value (see [method _band_for_mood]) against
 ## [member NeedsMoodConfig.mood_band_happy]/[member NeedsMoodConfig.
@@ -159,6 +211,28 @@ const RECOVERY_SOURCE_NAMES: Dictionary[RecoverySource, StringName] = {
 ## comparison between members is ever meaningful, only [method
 ## _band_for_mood]'s threshold comparisons are.
 enum MoodBand { HAPPY, CONTENT, LOW }
+
+## The single why-slot's UI-slot precedence order (GDD Core Rule 11,
+## TR-needs-mood-system-047): ONE display slot, THREE competing feeders.
+## Declared as a single ordered enum (declaration order == precedence order,
+## highest first) so a UI consumer compares feeders by ordinal rather than
+## hardcoding an if/else chain. This module publishes ONLY its own member
+## ([constant WHY_STRING_PRECEDENCE_RANK], read via [method
+## get_why_string_precedence_rank]) -- it never arbitrates the other two
+## feeders' strings itself (Villager Info UI's own epic, Out of Scope here).
+enum WhySlotFeeder {
+	VILLAGER_AI_DISTRESS,          ## Highest precedence -- the distress/trapped cue.
+	NEEDS_MOOD_WHY,                ## This module's own [method get_why_string] output.
+	BUILD_VALIDATION_STRUCTURAL,   ## Lowest -- building/bed context only, never here.
+}
+
+## This module's own rank within [enum WhySlotFeeder] -- the value [method
+## get_why_string_precedence_rank] returns. A UI consumer compares this
+## ordinal against the other two feeders' own published ranks (not exposed by
+## this module) to resolve which of the (at most) three candidate strings
+## wins the single why-slot.
+const WHY_STRING_PRECEDENCE_RANK: WhySlotFeeder = WhySlotFeeder.NEEDS_MOOD_WHY
+
 
 ## One flat record per (villager_id, need) pair actually tracked -- created
 ## ONLY by [method set_need_value] (never as a side effect of a query, see
@@ -237,6 +311,21 @@ const NEED_NAME_TO_ENUM: Dictionary[StringName, Need] = {
 	&"sleep": Need.SLEEP,
 	&"food": Need.FOOD,
 	&"company": Need.COMPANY,
+}
+
+## Per-need base why-string word (GDD Core Rule 11's template table), keyed
+## by [enum Need] -- read by [method _why_string_for_need] whenever a need's
+## record is NOT currently [constant NeedState.RECOVERING], or IS Recovering
+## via [constant RecoverySource.BED_SHELTERED] (absent from [constant
+## WHY_STRING_TEMPLATES] by design): both cases are "the base string with no
+## source suffix" per this story's own Implementation Notes. Only [constant
+## Need.SLEEP] is configured this story's own TR scope covers (Core Rule 2:
+## "MVP fills only sleep"), matching every other per-need MVP lookup already
+## in this file ([method _decay_rate_for_need], [method
+## _base_recovery_rate_for_need]) -- FOOD/COMPANY answer "" until a future
+## story gives them their own base word.
+const NEED_WHY_BASE: Dictionary[Need, String] = {
+	Need.SLEEP: "tired",
 }
 
 ## Edge-triggered "need is urgent" notification (GDD Core Rule 3,
@@ -489,6 +578,40 @@ func get_mood_band(villager_id: int) -> MoodBand:
 	if not _mood_records.has(villager_id):
 		return MoodBand.HAPPY
 	return _band_for_mood(_mood_records[villager_id].value)
+
+
+## Returns this module's published UI-slot precedence rank (see [enum
+## WhySlotFeeder]/[constant WHY_STRING_PRECEDENCE_RANK]'s own doc comments,
+## TR-needs-mood-system-047). Pure, no side effects, no `villager_id` --
+## the rank is fixed data, not per-villager state.
+func get_why_string_precedence_rank() -> WhySlotFeeder:
+	return WHY_STRING_PRECEDENCE_RANK
+
+
+## `docs/architecture/architecture.md` API Boundaries: `get_why_string(
+## villager_id: int) -> String` (GDD Core Rule 11, TR-needs-mood-system-
+## 045/046/064). Pure query, O(active needs), no allocation-heavy formatting
+## (Control Manifest Guardrail) -- two inputs, one output, NO history/caching
+## (Implementation Notes): (1) [method _strongest_drain_record] picks the
+## strongest current drain; (2) [method _why_string_for_need] reads that
+## need's CURRENTLY reported recovery source fresh, every call.
+##
+## Empty EXACTLY when nothing is urgent ([method has_urgent_need]) AND mood
+## is [constant MoodBand.HAPPY] ([method get_mood_band]) -- a Content-mood
+## villager with nothing urgent still yields a string per the selection rule
+## (this story's own "do not widen the empty case" warning). An unknown
+## villager id (no tracked records at all: [method has_urgent_need] reads
+## false, [method get_mood_band] defaults HAPPY) falls straight into this
+## same empty branch -- the "unknown answers as if fine" bias every sibling
+## query in this file shares, here landing on the empty string rather than a
+## distinct default. Never errors on an unrecognized/untracked id.
+func get_why_string(villager_id: int) -> String:
+	if not has_urgent_need(villager_id) and get_mood_band(villager_id) == MoodBand.HAPPY:
+		return ""
+	var strongest: NeedRecord = _strongest_drain_record(villager_id)
+	if strongest == null:
+		return ""
+	return _why_string_for_need(strongest.need, strongest)
 
 
 ## Initialization/test seam -- the ONE entry point that creates a
@@ -766,6 +889,56 @@ func _band_for_mood(mood: float) -> MoodBand:
 	elif mood >= config.mood_band_content:
 		return MoodBand.CONTENT
 	return MoodBand.LOW
+
+
+## First half of [method get_why_string]'s selection rule (GDD Core Rule 11,
+## Implementation Notes "two inputs, one output"): which need is the
+## strongest current drain -- the LOWEST tracked value across every need
+## this `villager_id` has ANY record for, tie-broken by [enum Need]'s OWN
+## declared order (sleep > food > company, via [constant NEED_NAMES]'s
+## insertion order) using a STRICT `<` comparison so an earlier-iterated tie
+## is never displaced by a later, equal-valued need.
+##
+## Deliberately NOT gated by [constant ACTIVE_NEEDS] -- a schema-inactive
+## need (food/company pre-tier) can still be tracked directly via [method
+## set_need_value] (this story's own test double for "a mocked active
+## need"), and the selection rule must honor it the same as a real MVP
+## sleep record. Returns `null` (never lazily creating a record, the same
+## "no lazy init" bias every sibling query in this file shares) when this
+## villager has no tracked need record at all -- [method get_why_string]
+## reads that as "nothing to describe."
+##
+## Returns the [NeedRecord] itself (not a separate `Need`/value pair) so the
+## caller can read [member NeedRecord.need] straight off it -- reusing the
+## record's own denormalized field rather than a second lookup.
+func _strongest_drain_record(villager_id: int) -> NeedRecord:
+	var strongest: NeedRecord = null
+	for need_enum: Need in NEED_NAMES.keys():
+		var need_name: StringName = NEED_NAMES[need_enum]
+		var key: String = _record_key(villager_id, need_name)
+		if _need_records.has(key):
+			var record: NeedRecord = _need_records[key]
+			if strongest == null or record.value < strongest.value:
+				strongest = record
+	return strongest
+
+
+## Second half of [method get_why_string]'s selection rule: the reported
+## [enum RecoverySource]'s template for `record` (GDD Core Rule 11's
+## template table, [constant WHY_STRING_TEMPLATES]), or `need_enum`'s own
+## base word with NO source suffix when `record` is NOT currently
+## [constant NeedState.RECOVERING] -- covers BOTH "bed_sheltered" (Recovering,
+## no suffix by design -- absent from [constant WHY_STRING_TEMPLATES]) and
+## "not currently sleeping" (not Recovering at all) in the SAME fallback,
+## per Implementation Notes ("both produce the base string with no source
+## suffix"). Reads `record.recovery_source_name` fresh every call -- no
+## history, no caching (Core Rule 10's "re-reads the CURRENT source enum
+## each tick", applied here to a query instead of a tick pass).
+func _why_string_for_need(need_enum: Need, record: NeedRecord) -> String:
+	var base: String = NEED_WHY_BASE.get(need_enum, "")
+	if record.state == NeedState.RECOVERING:
+		return WHY_STRING_TEMPLATES.get(record.recovery_source_name, base)
+	return base
 
 
 ## F1 -- need decay (GDD Formulas: `value <- max(0, value -
