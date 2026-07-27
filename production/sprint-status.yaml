@@ -125,7 +125,7 @@ stories:
     name: "Removal-tool base — the C1 chain's production caller; independent, day one on lane R2"
     file: "production/epics/building-system/story-031-removal-tool-base.md"
     priority: must-have
-    status: scope-absorbed-by-015-verify-then-close
+    status: complete-absorbed-by-015
     owner: "godot-gdscript-specialist"
     estimate_days: 1.0
     blocker: "START DAY ONE on lane R2 — its own header depends on building-021 + building-029, both Complete. ⚑ F5 — 031's Unlocks line names 'Story 015 (extends to Built -> demolition)', but building-015's OWN Dependencies read only 'Story 002, Story 009, Story 012'. THE CONSUMING STORY'S HEADER IS AUTHORITATIVE (the rule that found S09's building-012 inversion and S10's F1/F2), so 031 is NOT on the C1 serial chain and runs fully parallel. Scheduled anyway because criterion #11's own wording names the removal tool, and because it is what scene-007 hosts as the chain's caller. Removal tool as a ToolStateMachine mode over blueprint cells and their micro-states, revoking claims on cells it removes. DO NOT implement the Built->demolition extension here — that is building-015's scope."

@@ -1,7 +1,7 @@
 # Story 031: Removal tool base — Planned→Canceled + job revoke
 
 > **Epic**: Building System
-> **Status**: Ready
+> **Status**: Complete — scope absorbed by story-015 (2026-07-27, parent-verified)
 > **Layer**: Core
 > **Type**: Logic
 > **Estimate**: 0.5 day
@@ -31,8 +31,8 @@
 
 *From GDD `design/gdd/building-system.md`, scoped to this story:*
 
-- [ ] AC41: GIVEN a Planned blueprint cell, WHEN the player directly removes it (not via undo), THEN it transitions to Canceled, the ghost is removed, and any claimed job is revoked (Blueprint lifecycle). [TR-068]
-- [ ] Removing a Queued/UnderConstruction (released but not yet Built) cell cancels instantly and revokes the claiming villager's job. [TR-063]
+- [x] AC41: GIVEN a Planned blueprint cell, WHEN the player directly removes it (not via undo), THEN it transitions to Canceled, the ghost is removed, and any claimed job is revoked (Blueprint lifecycle). [TR-068]
+- [x] Removing a Queued/UnderConstruction (released but not yet Built) cell cancels instantly and revokes the claiming villager's job. [TR-063]
 
 ---
 
@@ -85,3 +85,28 @@
 
 - Depends on: Story 021 (blueprint cells), Story 029 (cell micro-states + claims to revoke).
 - Unlocks: Story 015 (extends to Built → demolition), Story 027 (block-tool remove mode).
+
+---
+
+## Closure Note (2026-07-27, parent-verified)
+
+This story's scope was absorbed by story-015 (removal tool / draft eraser,
+commit e357dc4), which implements the full micro-state branch in one place
+rather than layering 015 on top of a separate 031 base. Verified against the
+shipped code before closing:
+
+- **AC41 (Planned -> Canceled + job revoke)** — `RemovalTool._cancel_not_yet_built_cell()`
+  revokes the claiming villager's job first via `_revoke_active_job()`, mirroring
+  `PlanOnlyUndoGate._revoke_active_job()` exactly, then cancels. Covered by
+  `draft_eraser_removal_branch_test.gd::test_remove_cell_cancels_and_revokes_a_real_claimed_under_construction_cell`.
+- **Queued/UnderConstruction instant cancel + revoke** [TR-063] — covered by the
+  same test plus `..._cancels_a_released_unclaimed_queued_cell`.
+- **Draft -> instant, no job** — `..._erases_draft_cell_instantly_with_no_job_or_notification`.
+- **Canceled never reachable from Built** — `..._on_built_cell_creates_a_demolition_order_not_an_instant_removal`,
+  and a grep guard proves RemovalTool never calls a VoxelWorld write API directly.
+- **Floor-excavation `restore_value` write-back** — deliberately a no-op, and
+  documented as such in `removal_tool.gd`: a not-yet-Built excavation cell never
+  actually touched the terrain, so leaving the grid alone IS the restore. This is
+  an argued exemption, not an omission.
+
+No separate implementation or commit; closed against story-015's code and tests.
