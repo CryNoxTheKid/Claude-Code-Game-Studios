@@ -54,6 +54,31 @@
 ## get_mood_band] (TR-needs-mood-system-040), a claim this story's own test
 ## suite verifies directly against `src/villager_ai`'s source.
 ##
+## Story needs-mood-006 (this revision) fills in F4 spawn initialization for
+## real: [method initialize_villager] -- the sole entry point that seeds every
+## [constant ACTIVE_NEEDS] member at 100 for a villager (idempotent by
+## construction -- an already-tracked need is left completely untouched, no
+## overwrite) and creates that villager's [MoodRecord] at `mean_active`
+## (reusing [method _mean_active_need_value] verbatim, never a second copy of
+## that formula, per this story's own Implementation Notes), but ONLY the
+## FIRST time this is called for a given villager_id -- an already-existing
+## [MoodRecord] is never rewritten. That one guard is what lets a SINGLE
+## method legally serve both GDD F4 spawn-init (TR-needs-mood-system-056) and
+## an existing villager's new-need schema activation (Edge Case 5,
+## TR-needs-mood-system-061, AC26) without ever re-running F4's mood formula
+## against a villager whose mood is already ticking -- the Control Manifest's
+## own named Forbidden pattern (re-running F4 on an existing villager is what
+## would erase story needs-mood-012's future load-restored smoothing state).
+## The optional [param active_needs] override (default [constant
+## ACTIVE_NEEDS]) exists SOLELY so this story's own test suite can exercise
+## the new-need-activation path deterministically without mutating the real
+## schema constant (which Godot treats as read-only at runtime) -- production
+## always calls with zero arguments beyond `villager_id`. Never emits any
+## signal on either branch (the same "initialization is never a cross"
+## argument [method set_need_value]/[method set_mood_value]'s own doc
+## comments make) -- this story's own AC requires zero events observable
+## after initialization plus one subsequent tick.
+##
 ## Tick dispatch is driven EXCLUSIVELY by [member time_tick_system]'s `tick`
 ## signal (GDD: "all decay/recovery/mood math runs on Time & Tick events",
 ## TR-needs-mood-system-051), connected with Godot's plain synchronous
@@ -579,6 +604,67 @@ func set_mood_value(villager_id: int, value: float) -> void:
 	_mood_records[villager_id].value = clampf(value, 0.0, 100.0)
 
 
+## Story needs-mood-006, GDD F4 (TR-needs-mood-system-056) + Edge Case 5
+## (TR-needs-mood-system-061, AC26) -- the ONE production entry point for
+## spawn initialization. Called once per starting villager from the boot path
+## (`docs/architecture/architecture.md`'s Initialization Order step 8, "Needs
+## & Mood initializes (F4 spawn-init per starting villager)"), and again --
+## the SAME method, deliberately -- whenever a schema revision activates a
+## need an existing villager does not yet track (Edge Case 5: "the new need
+## initializes at 100 and `mean_active` simply gains a term").
+##
+## Two-line body, per Implementation Notes ("F4 is two lines and one trap"):
+## 1. Every [param active_needs] member with no existing record is seeded at
+##    100.0 via [method set_need_value] (SATISFIED, since 100 is always above
+##    [member NeedsMoodConfig.urgency_threshold]) -- an ALREADY-tracked need
+##    (this villager's own prior initialization, or a value a test arranged
+##    directly) is left completely untouched, never overwritten. This is what
+##    makes AC26's "sleep untouched, food seeded at 100" and the story's own
+##    idempotence requirement ("calling this twice for the same villager does
+##    not silently reset live values") the SAME guarantee, not two separate
+##    branches.
+## 2. Mood initializes to `mean_active` ONLY the first time this runs for
+##    `villager_id` (no [MoodRecord] yet) -- reusing [method
+##    _mean_active_need_value] verbatim so the two formulas can never diverge
+##    (Implementation Notes' own "the trap is the second line" warning). An
+##    already-existing [MoodRecord] (a villager whose mood has been ticking)
+##    is NEVER rewritten here -- re-running F4's mood formula against a
+##    villager that already has one is the Control Manifest's own named
+##    Forbidden pattern (would erase story needs-mood-012's future
+##    load-restored smoothing state). A degenerate `active_needs` with no
+##    active needs at all (or one whose members were all already tracked from
+##    a fresh [MoodRecord]) yields [method _mean_active_need_value]'s own
+##    `-1.0` "no active need has data" sentinel -- this method reads that as
+##    "nothing to initialize mood from yet" and leaves [member _mood_records]
+##    untouched rather than dividing by zero or defaulting to a literal (the
+##    story's own named degenerate-config edge case: "a documented,
+##    non-crashing mood").
+##
+## [param active_needs] defaults to [constant ACTIVE_NEEDS] -- production
+## NEVER passes a second argument. The override exists solely so this story's
+## own test suite can exercise the new-need-activation path (AC26's "mocked
+## schema change") deterministically, without mutating the real schema
+## constant (which this codebase treats as fixed, GDD Core Rule 2: "adding a
+## need type is a design change, not a data edit").
+##
+## GUARANTEE (this story's own AC): never emits [signal need_urgent], [signal
+## need_satisfied], or [signal mood_band_changed] on either branch --
+## [method set_need_value]/[method set_mood_value] both already document
+## "initialization is never a cross," and this method's own logic never
+## drives an [enum NeedState]/[enum MoodBand] transition either (a brand-new
+## record cannot "transition" from nothing).
+func initialize_villager(villager_id: int, active_needs: Array[Need] = ACTIVE_NEEDS) -> void:
+	for need_enum: Need in active_needs:
+		var need_name: StringName = NEED_NAMES.get(need_enum, &"")
+		var key: String = _record_key(villager_id, need_name)
+		if not _need_records.has(key):
+			set_need_value(villager_id, need_name, 100.0)
+	if not _mood_records.has(villager_id):
+		var mean_active: float = _mean_active_need_value(villager_id, active_needs)
+		if mean_active >= 0.0:
+			set_mood_value(villager_id, mean_active)
+
+
 ## Composite storage key for [member _need_records] (see [NeedRecord]'s own
 ## doc comment for why this is flat rather than nested).
 static func _record_key(villager_id: int, need: StringName) -> String:
@@ -644,10 +730,17 @@ func _rate_for_source(source_name: StringName) -> float:
 ## active need has a tracked record yet -- the sentinel [method
 ## _pass_f3_mood] reads to skip that villager's mood update entirely this
 ## tick, rather than dividing by zero or defaulting a term.
-func _mean_active_need_value(villager_id: int) -> float:
+##
+## [param active_needs] defaults to [constant ACTIVE_NEEDS] -- [method
+## _pass_f3_mood] always calls with zero arguments beyond `villager_id`. The
+## override exists solely so [method initialize_villager] (story
+## needs-mood-006) can reuse this SAME formula for its own mocked-schema test
+## path (see that method's own doc comment) without a second, divergent copy
+## of the mean calculation.
+func _mean_active_need_value(villager_id: int, active_needs: Array[Need] = ACTIVE_NEEDS) -> float:
 	var sum: float = 0.0
 	var count: int = 0
-	for need_enum: Need in ACTIVE_NEEDS:
+	for need_enum: Need in active_needs:
 		var need_name: StringName = NEED_NAMES.get(need_enum, &"")
 		var key: String = _record_key(villager_id, need_name)
 		if _need_records.has(key):

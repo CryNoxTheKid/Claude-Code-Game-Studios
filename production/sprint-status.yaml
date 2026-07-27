@@ -89,7 +89,7 @@ stories:
     name: "F4 spawn initialization & new-need activation"
     file: "production/epics/needs-mood-system/story-006-spawn-init-and-need-activation.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete
     owner: "godot-gdscript-specialist"
     estimate_days: 0.5
     blocker: "HARD: needs-mood-005 (in-sprint — needs mean_active/bands). Dep needs-mood-002 Complete. Domain review: systems-designer. Initialization in an explicitly-callable method reached from the boot path — NEVER _ready(), never inferred from scene state. Inactive needs are ABSENT, not zeroed. Mood is never initialized to 0 or to a literal: the ordering trap this AC exists to prevent is a zero-default mood displaying Low for ~10s at ticks_per_second 4.0 while the EMA catches up — a cold-start VISUAL bug, not a math bug"

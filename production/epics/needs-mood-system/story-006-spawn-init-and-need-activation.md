@@ -1,7 +1,7 @@
 # Story 006: F4 spawn initialization & new-need activation
 
 > **Epic**: Needs & Mood System
-> **Status**: Ready
+> **Status: Complete (2026-07-27 — 1307/1307 suite green 0 orphans, parent-verified; production call site wired separately, see follow-up)
 > **Layer**: Feature
 > **Type**: Logic
 > **Estimate**: ~0.5 agent-day
