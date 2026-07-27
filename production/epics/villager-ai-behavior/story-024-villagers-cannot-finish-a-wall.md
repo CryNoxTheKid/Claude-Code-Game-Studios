@@ -186,3 +186,39 @@ enclosure. Named as a debt rather than claimed.
 They were written by the scene-009 attempt and committed without the tool ever
 being `load()`-ed once. The tool that exists to catch "shipped but never run" was
 itself shipped but never run. Fixed, with the reason recorded at both sites.
+
+---
+
+## AC5 / AC6 — RUN, and NOT met (2026-07-27)
+
+The demo was finally executed end to end. It did not reach a roofed,
+Room-classifiable enclosure, so both ACs stay open. Recorded rather than rounded up.
+
+    room walls: WAIT CAP (220s) hit with 27/30 cells BUILT — stopping honestly
+    construction result: 27 / 30 wall cells reached BUILT
+    roof drafted: 12/12 cells on the plane one above the finished walls (y=9)
+    roof: 9/12 BUILT at the cap
+    stage 6 (claim) NOT REACHED: villager id=0 has not claimed a bed within the
+      300s wait cap. Skipping '06-claimed' and stage 7 (sleep).
+
+The fix is real — 19/30 before it, 27/30 after, same cap — and the unit test
+reaches 30/30 on a tick budget. The gap between 30/30 in test and 27/30 live is
+not a second wall defect. It is D10:
+
+    D10 check: 6 SLEEPING episode(s) observed this run:
+      episode 1: GROUND sleep at (992, 9, 1003) (no bed owned yet)
+      ... 6 of them, every one on the ground, none in a bed ...
+
+The villager spends more of the run exhausted than building. It builds its own
+house, gets tired, lies down in the dirt beside it, gets up, builds a bit more —
+and never gets far enough to claim the bed it placed itself. That is the
+hen-and-egg pacing finding, and it has stopped being a curiosity: it is now the
+dominant factor in whether the payoff loop can be demonstrated at all.
+
+**This makes D10 a blocker for scene-009, not a footnote.** Whatever the creative
+director decides — a gentler initial need, a longer first day, a slower decay
+until the first bed exists — scene-009 cannot show a villager sleeping in a bed
+it built until the villager can stay awake long enough to finish the room.
+
+`06-claimed.png` and `07-sleeping.png` do not exist, correctly: the tool refuses
+to photograph a stage it did not reach.
