@@ -18,15 +18,22 @@
 ##    voxel terrain, or there is no ground.
 ##  * NO fabricated villagers, buildings or props. Whatever figures appear were
 ##    spawned by the real roster spawn.
-##  * The camera is supplied by this tool ONLY because the shipped scene hosts
-##    no [Camera3D] at all (see the report line this tool prints). That is a
-##    finding, not a fixture — when a camera-hosting story lands, this tool
-##    should drive the shipped camera instead.
+##  * The camera is supplied by this tool ONLY because staged diagnostic
+##    angles (topdown/eyelevel/closeup) need a second, tool-driven vantage in
+##    addition to the game's own. The player-view shot below goes through the
+##    shipped [Camera3D] itself (cam-013), not this one.
 ##
-## Lighting IS applied here (the art bible's golden-hour recipe, same values as
-## `tools/m01_c4_valley_ambient_capture.gd`) because an unlit scene renders as
-## a black rectangle regardless of what is in it — that would hide content, not
-## reveal it, which is the opposite of this tool's purpose.
+## Story presentation-004 (AC6, "The world has no sun") -- this tool used to
+## supply its OWN golden-hour lighting (`_apply_golden_hour_lighting`, since
+## removed), because before that story `Valley.tscn` hosted no
+## [DirectionalLight3D]/[WorldEnvironment] at all and an unlit scene renders
+## as a black rectangle. That made every screenshot this tool ever produced
+## lit by the TOOL, never by the shipped game -- exactly the failure mode
+## presentation-004 exists to close. This tool now supplies NOTHING: the real,
+## unmodified `GameWorldScene` hosts its own [WorldLighting] (inside `Valley`),
+## which lights the whole scene on its own. If `player-view-on-launch-*.png`
+## looks unlit again, that is a real regression in the shipped lighting, not
+## a missing tool fixture -- which is the entire point.
 ##
 ## Run WINDOWED (a real viewport is required — this cannot run headless):
 ##   Godot_v4.7-stable_win64_console.exe --path neues-spiel res://tools/settlement_overview_capture.tscn
@@ -45,8 +52,6 @@ const SETTLE_SEC := 3.0
 const SAFETY_CAP_SEC := 60.0
 
 @onready var _camera: Camera3D = $Camera3D
-@onready var _light: DirectionalLight3D = $DirectionalLight3D
-@onready var _world_environment: WorldEnvironment = $WorldEnvironment
 
 var _world: Node
 var _boot_start_usec: int = 0
@@ -57,31 +62,10 @@ var _shot_index: int = 0
 
 func _ready() -> void:
 	_boot_start_usec = Time.get_ticks_usec()
-	_apply_golden_hour_lighting()
-	_world = GameWorldScene.instantiate()
-	add_child(_world)
-
-
-func _apply_golden_hour_lighting() -> void:
-	var environment := Environment.new()
-	environment.background_mode = Environment.BG_COLOR
-	environment.background_color = Color(0.85, 0.68, 0.5)
-	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	environment.ambient_light_color = Color(0.98, 0.94, 0.86)
-	environment.ambient_light_energy = 0.5
-	environment.ssao_enabled = false
-	_world_environment.environment = environment
-
-	_light.rotation_degrees = Vector3(-42.0, -35.0, 0.0)
-	_light.light_color = Color(1.0, 0.93, 0.80)
-	_light.light_energy = 1.7
-	_light.shadow_enabled = true
-	_light.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
-	_light.directional_shadow_max_distance = 400.0
-	_light.shadow_blur = 1.0
-
 	_camera.current = true
 	_camera.far = 4000.0
+	_world = GameWorldScene.instantiate()
+	add_child(_world)
 
 
 func _process(_delta: float) -> void:
@@ -208,16 +192,13 @@ func _capture_all() -> void:
 	await _shoot(focus + Vector3(-22.0, 14.0, 22.0), focus, "settlement-overview-eyelevel")
 	await _shoot(focus + Vector3(-5.0, 2.5, 5.0), focus, "settlement-overview-closeup")
 
-	# DIAGNOSTIC PAIR, not a retune. At the art bible's own golden-hour values
-	# the terrain reads as near-white pale yellow, which raises a fair question:
-	# is the terrain material actually colourless, or is it just blown out?
-	# These extra frames answer it by dropping only the exposure and changing
-	# nothing else. The art-bible frames above remain the reference; these are
-	# labelled `-dimmed` precisely so nobody mistakes them for the shipped look.
-	_light.light_energy = 0.95
-	_world_environment.environment.ambient_light_energy = 0.28
-	await _shoot(focus + Vector3(-22.0, 14.0, 22.0), focus, "settlement-overview-eyelevel-dimmed")
-	await _shoot(focus + Vector3(0.0, 70.0, 0.1), focus, "settlement-overview-topdown-dimmed")
+	# Story presentation-004 (AC6): the old "-dimmed" diagnostic pair (dropping
+	# exposure to 0.95/0.28 to prove the terrain wasn't just blown out at the
+	# art bible's literal 1.7/0.5) is retired here -- the SHIPPED
+	# WorldLightingConfig now ships at exactly 0.95/0.28 (see that class's own
+	# doc comment for the provisional-values rationale), so every frame above
+	# already IS what used to be the "-dimmed" pair. No separate diagnostic
+	# capture is needed anymore.
 
 	get_tree().quit()
 

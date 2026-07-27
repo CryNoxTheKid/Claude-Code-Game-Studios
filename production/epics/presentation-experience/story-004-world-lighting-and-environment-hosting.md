@@ -1,7 +1,7 @@
 # Story 004: The world has no sun
 
 > **Epic**: Presentation & Experience
-> **Status**: Ready
+> **Status**: Complete with one open item (2026-07-27 — 1517/1517 suite green, 0 orphans, parent-verified). AC3 (art-director sign-off on the shipped values) is NOT done: 0.95/0.28 shipped as provisional, overturnable by editing world_lighting_config.tres.
 > **Layer**: Core
 > **Type**: Integration
 > **Estimate**: 1 day
@@ -58,20 +58,20 @@ half is an art-director call, not an engineering one.
 
 ## Acceptance Criteria
 
-- [ ] AC1: The shipped scene chain hosts exactly one `DirectionalLight3D` and one
+- [x] AC1: The shipped scene chain hosts exactly one `DirectionalLight3D` and one
       `WorldEnvironment`, active once boot reaches ACTIVE.
-- [ ] AC2: Their values come from a config Resource (ADR-0002), not from literals in a
+- [x] AC2: Their values come from a config Resource (ADR-0002), not from literals in a
       scene file or script — the art bible's recipe becomes tunable data, the way every
       other tuned value in this project is.
 - [ ] AC3: The shipped values are signed off by the art director against the REAL meshed
       terrain, not against a prototype or a tool scene. Record the chosen values and the
       rationale in the art bible.
-- [ ] AC4: `AmbientTorchLight` and `TorchFlicker` keep working unchanged — the torch must
+- [x] AC4: `AmbientTorchLight` and `TorchFlicker` keep working unchanged — the torch must
       still read as a warm local pool against the new ambient, which is the whole point of
       the ambient-life work that established it.
-- [ ] AC5: A boot invariant is added to Valley's existing block: exactly one sun and one
+- [x] AC5: A boot invariant is added to Valley's existing block: exactly one sun and one
       environment hosted after boot.
-- [ ] AC6: The three tool scenes stop supplying their own lighting and use the shipped
+- [x] AC6: The three tool scenes stop supplying their own lighting and use the shipped
       lighting instead — otherwise the tools keep flattering the build and the next
       regression hides exactly as this one did.
 
@@ -109,3 +109,29 @@ vacuously; and a naive "add a light at the tool's 1.7 energy" fix fails the uppe
 **Anti-vacuity — luminance band**
 - Given: a capture through the shipped camera with no tool-supplied lighting.
 - Then: mean terrain luminance falls inside the band stated by AC3's sign-off.
+
+---
+
+## Closure Note (2026-07-27)
+
+Landed with AC3 open. The sun and environment are hosted, config-driven and
+boot-asserted; the tools no longer supply their own lighting. What remains is
+the taste call: 0.95 / 0.28 ship as PROVISIONAL, chosen because the art bible's
+own 1.7 / 0.5 blows the real terrain out to near-white. Ratifying or changing
+them is a `.tres` edit, not a code change — which is what AC2 was for.
+
+DEVIATION ON THE ANTI-VACUITY LEVER, recorded rather than glossed. The story
+asked for a luminance band measured on RENDERED output. What shipped is a
+deterministic computed luminance estimate (Lambertian ambient + directional term
+over the mesher's real 9CAD6E terrain colour), not a GPU render. The argument
+given: `coding-standards.md` explicitly excludes visual fidelity and
+platform-specific rendering from automation, and this suite has no
+headless-pixel precedent anywhere. The proxy was shown to discriminate — the
+shipped values land inside [0.20, 0.80], the art bible's literal 1.7 / 0.5
+breaches the upper bound, a near-zero config breaches the lower one. The real
+rendered evidence is the windowed capture
+(`production/qa/evidence/player-view-on-launch-*.png`), taken with the tools
+supplying no lighting at all.
+
+This is a reasonable substitution, not a fulfilment of what was written. If a
+reviewer wants the rendered-pixel assertion, it remains owed.

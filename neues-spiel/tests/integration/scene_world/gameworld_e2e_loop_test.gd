@@ -151,9 +151,11 @@ func test_ac_assembly_gameworld_wires_all_tier_modules_into_valley_and_boots_act
 	# which happened to already assume this. Story cam-013 (Camera hosting in
 	# the shipped scene) adds ONE further injected-tier module, CameraMirror
 	# (20 -> 21) -- updated consciously, not incidentally, per that story's
-	# own dev-story instructions to flag this file.
+	# own dev-story instructions to flag this file. Story presentation-004
+	# ("The world has no sun") adds ONE further injected-tier module,
+	# WorldLighting (21 -> 22) -- updated consciously, not incidentally.
 	assert_array(world.injected_tier_modules).contains_exactly(valley.get_injected_tier_modules())
-	assert_int(world.injected_tier_modules.size()).is_equal(21)
+	assert_int(world.injected_tier_modules.size()).is_equal(22)
 
 
 func test_ac_assembly_hosted_modules_ran_through_boot_gated_setup_never_their_own_ready() -> void:

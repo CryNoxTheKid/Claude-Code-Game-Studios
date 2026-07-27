@@ -16,18 +16,16 @@
 ## `Valley`, not a stand-in rebuild of it (the criterion's own wording: "visible
 ## in the build").
 ##
-## Golden-hour lighting is supplied by THIS tool only (`_apply_golden_hour_
-## lighting`), never written into `Valley.tscn`/`GameWorld.tscn` themselves --
-## neither scene owns any lighting/environment node today (grep-verified; no
-## `DirectionalLight3D`/`WorldEnvironment` anywhere under
-## `src/scene_world_management/`), a standing, pre-existing gap this ONE
-## wiring task does not silently expand into "add a permanent lighting/
-## atmosphere system" (a separate, larger art/technical decision, out of this
-## condition's scope). The recipe reused here is `design/art/art-bible.md`
-## §2.1's own already-validated one -- the EXACT values
-## `prototypes/last-seal-vertical-slice/game_world.gd` arrived at via its own
-## documented A/B render ("warm flat ambient... found via the mesher agent's
-## A/B render"), not a freshly-invented palette.
+## Story presentation-004 (AC6, "The world has no sun") -- golden-hour
+## lighting used to be supplied by THIS tool only (`_apply_golden_hour_
+## lighting`, since removed), because before that story neither
+## `Valley.tscn` nor `GameWorld.tscn` owned any lighting/environment node at
+## all. That gap is now closed: `Valley` hosts a real [WorldLighting] module
+## driving a real [DirectionalLight3D]/[WorldEnvironment], config-driven
+## (ADR-0002, `res://data/config/world_lighting_config.tres`). This tool no
+## longer applies its own recipe -- the real, unmodified `GameWorldScene`
+## lights itself, and if it didn't, this capture would show that honestly
+## instead of masking it.
 ##
 ## Run via (WINDOWED -- do not pass --headless):
 ##   Godot_v4.7-stable_win64_console.exe --path neues-spiel res://tools/m01_c4_valley_ambient_capture.tscn
@@ -46,8 +44,6 @@ const CLOSEUP_PNG := "m01-c4-valley-golden-hour-torch-closeup-20260726-2.png"
 const SAFETY_CAP_SEC := 30.0
 
 @onready var _camera: Camera3D = $Camera3D
-@onready var _light: DirectionalLight3D = $DirectionalLight3D
-@onready var _world_environment: WorldEnvironment = $WorldEnvironment
 
 var _world: GameWorld
 var _boot_start_usec: int = 0
@@ -63,14 +59,15 @@ var _settle_frames_remaining: int = 5
 ## comment: "a fresh grid has no terrain yet," a future world-generation
 ## story's job). Without SOME surface to catch the warm key light, an empty
 ## scene reads as a flat color field regardless of how correctly
-## [TorchFlicker] is wired -- this plane exists only so the golden-hour
-## lighting and the torch glow are visibly legible in the screenshot.
+## [TorchFlicker] is wired -- this plane exists only so the shipped lighting
+## and the torch glow are visibly legible in the screenshot.
 var _ground_plane: MeshInstance3D
 
 
 func _ready() -> void:
 	_boot_start_usec = Time.get_ticks_usec()
-	_apply_golden_hour_lighting()
+	_camera.current = true
+	_camera.far = 200.0
 	_build_capture_only_ground_plane()
 	_world = GameWorldScene.instantiate()
 	add_child(_world)
@@ -86,36 +83,6 @@ func _build_capture_only_ground_plane() -> void:
 	_ground_plane.mesh = mesh
 	_ground_plane.position = Vector3(0.5, -0.6, 0.5)
 	add_child(_ground_plane)
-
-
-## The `design/art/art-bible.md` §2.1 "permanent golden-hour bias" recipe --
-## the EXACT values `prototypes/last-seal-vertical-slice/game_world.gd`
-## already validated via its own A/B render (warm flat ambient, warm
-## directional key light, single orthogonal shadow split) -- reused verbatim,
-## never re-tuned here.
-func _apply_golden_hour_lighting() -> void:
-	var environment := Environment.new()
-	environment.background_mode = Environment.BG_COLOR
-	# A warm dusk-leaning sky (never a cool neutral blue) -- art-bible §2.1's
-	# own "permanent golden-hour bias, never harsh/neutral-white" rule applied
-	# to the background too, not only the key/ambient lights below.
-	environment.background_color = Color(0.85, 0.68, 0.5)
-	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	environment.ambient_light_color = Color(0.98, 0.94, 0.86)
-	environment.ambient_light_energy = 0.5
-	environment.ssao_enabled = false
-	_world_environment.environment = environment
-
-	_light.rotation_degrees = Vector3(-42.0, -35.0, 0.0)
-	_light.light_color = Color(1.0, 0.93, 0.80)
-	_light.light_energy = 1.7
-	_light.shadow_enabled = true
-	_light.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
-	_light.directional_shadow_max_distance = 90.0
-	_light.shadow_blur = 1.0
-
-	_camera.current = true
-	_camera.far = 200.0
 
 
 func _process(_delta: float) -> void:

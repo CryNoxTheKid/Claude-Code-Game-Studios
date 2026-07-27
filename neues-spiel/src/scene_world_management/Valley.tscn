@@ -1,4 +1,4 @@
-[gd_scene load_steps=32 format=3]
+[gd_scene load_steps=34 format=3]
 
 [ext_resource type="Script" path="res://src/scene_world_management/valley.gd" id="1_valley"]
 [ext_resource type="Script" path="res://src/voxel_world/voxel_world_grid.gd" id="2_voxelgrid"]
@@ -33,6 +33,8 @@
 [ext_resource type="Script" path="res://src/building_system/undo_redo_stack.gd" id="29_undoredostack"]
 [ext_resource type="Resource" path="res://data/config/undo_redo_stack_config.tres" id="30_undoredostackcfg"]
 [ext_resource type="Script" path="res://src/camera_input/camera_mirror.gd" id="31_cameramirror"]
+[ext_resource type="Script" path="res://src/presentation/world_lighting.gd" id="32_worldlighting"]
+[ext_resource type="Resource" path="res://data/config/world_lighting_config.tres" id="33_worldlightingcfg"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_torchindicator"]
 shading_mode = 0
@@ -133,3 +135,11 @@ config = ExtResource("28_ghostpreviewcfg")
 [node name="UndoRedoStack" type="Node" parent="."]
 script = ExtResource("29_undoredostack")
 config = ExtResource("30_undoredostackcfg")
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+
+[node name="WorldLighting" type="Node" parent="."]
+script = ExtResource("32_worldlighting")
+config = ExtResource("33_worldlightingcfg")

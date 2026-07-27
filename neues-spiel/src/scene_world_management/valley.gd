@@ -377,6 +377,37 @@
 ## cell BEFORE this class's very first rendered frame, the hosted camera is
 ## already framed on the starting roster's neighbourhood the instant boot
 ## reaches ACTIVE (AC4) -- no additional target-setting call was needed here.
+##
+## Story presentation-004 ("The world has no sun" -- the seventh instance of
+## this project's ship-green-and-uncalled failure mode, and the most visible
+## yet: before this story `Valley.tscn` hosted ZERO [DirectionalLight3D]/
+## [WorldEnvironment] nodes, counted directly, so a human launching the real
+## game got a near-black screen; every "lit" screenshot this project ever
+## produced was lit by a TOOL supplying its own throwaway lighting). Hosts
+## [member _sun_light] (a plain, scripted-nowhere [DirectionalLight3D]) and
+## [member _world_environment] (a plain [WorldEnvironment]) -- structural
+## children only, mirrors [member _ambient_torch_light]'s own "a plain
+## [Light3D]/host node has no `setup()` of its own" precedent exactly --
+## plus [member _world_lighting], the real injected-tier module that applies
+## the art bible SS2.1 golden-hour recipe to both of them exactly once, from
+## config (ADR-0002), in [method WorldLighting.setup]. [method
+## _wire_hosted_modules] code-assigns the two Node-typed cross-references
+## ([member WorldLighting.directional_light]/[member
+## WorldLighting.world_environment]), mirroring [member TorchFlicker.light]'s
+## own identical wiring shape. [WorldLighting] IS appended to [method
+## get_injected_tier_modules] (a real `setup()`/`is_set_up()` contract,
+## [GameWorld] calls it same as every other hosted module). [method
+## _assert_lighting_boot_invariant] (AC5) -- called from [method _ready],
+## after [method _wire_hosted_modules] -- is this story's own boot-invariant
+## addition: exactly one [DirectionalLight3D] and exactly one
+## [WorldEnvironment] must be direct children of this Valley once wiring
+## completes, asserted loudly (ADR-0005's own "fail loudly, not silently"
+## convention) rather than left as an unstated hope. AC6 (the three tool
+## scenes stop hand-rolling this same recipe and use this shipped
+## [WorldLighting] instead) is that story's own scope, not this class's --
+## see `tools/settlement_overview_capture.gd`/
+## `tools/m01_c4_valley_ambient_capture.gd`/`tools/camera_sandbox.gd`'s own
+## updated doc comments.
 class_name Valley
 extends Node3D
 
@@ -560,6 +591,25 @@ var _villager_unstuck_telemetry: VillagerUnstuckTelemetry = null
 ## scene-007 paragraphs.
 @onready var _undo_redo_stack: UndoRedoStack = $UndoRedoStack
 
+## Hosted sun (Story presentation-004, "The world has no sun"). Structural
+## child only, owns no config/script of its own -- [member _world_lighting]
+## is the real injected-tier module that drives it. Mirrors [member
+## _ambient_torch_light]'s own hosting-vs-DI distinction.
+@onready var _sun_light: DirectionalLight3D = $Sun
+
+## Hosted environment host (Story presentation-004). Structural child only --
+## [member _world_lighting] constructs and assigns the actual [Environment]
+## resource onto it (see [WorldLighting._apply]'s own doc comment for why an
+## empty [WorldEnvironment] node has nothing of its own to mutate in place).
+@onready var _world_environment: WorldEnvironment = $WorldEnvironment
+
+## Hosted [WorldLighting] instance (Story presentation-004). Structural
+## child -- [member WorldLighting.directional_light]/[member
+## WorldLighting.world_environment] are code-assigned Node-typed
+## cross-references in [method _wire_hosted_modules], mirroring [member
+## TorchFlicker.light]'s own identical wiring shape.
+@onready var _world_lighting: WorldLighting = $WorldLighting
+
 ## The build-project lifecycle tier's `RefCounted` collaborators (Story
 ## scene-007, ADR-0016; Sub-scope B/C) -- constructed in [method
 ## _wire_build_project_lifecycle], mirroring [method
@@ -651,6 +701,7 @@ func _ready() -> void:
 	_wire_hosted_modules()
 	_wire_build_project_lifecycle()
 	_wire_villager_population()
+	_assert_lighting_boot_invariant()
 
 
 ## Code-assigned DI for the Node-typed cross-references between hosted
@@ -673,6 +724,10 @@ func _wire_hosted_modules() -> void:
 	_torch_flicker.light = _ambient_torch_light
 	_villager_roster_provider = _ValleyRosterProvider.new(self)
 	_villager_body_presenter.roster_provider = _villager_roster_provider
+
+	# Story presentation-004: WorldLighting's two Node-typed cross-refs.
+	_world_lighting.directional_light = _sun_light
+	_world_lighting.world_environment = _world_environment
 
 	# Story cam-013: the camera-mirror driver's two Node-typed cross-refs.
 	_camera_mirror.camera = _valley_camera
@@ -721,6 +776,37 @@ func _wire_hosted_modules() -> void:
 		ToolStateMachine.TOOL_ID_FLOOR: _floor_tool.resolve_terrain_replace_cells,
 	}
 	_tool_state_machine.tool_armed.connect(_on_tool_armed)
+
+
+## Boot invariant (Story presentation-004, AC5) -- asserts exactly one
+## [DirectionalLight3D] and exactly one [WorldEnvironment] are hosted as
+## direct children of this Valley once [method _wire_hosted_modules] has run.
+## Fails LOUDLY (ADR-0005's own "fail loudly, not silently" convention,
+## matching [method seed_default_villager_needs]/[method
+## spawn_starting_roster]'s own ordering-guard asserts) rather than leaving
+## "exactly one sun, exactly one environment" as an unstated hope a future
+## story could silently violate (e.g. a second hand-added light for a new
+## feature). Counts direct children only -- every hosted lighting node this
+## class owns is authored as a direct child of `.` in `Valley.tscn`, matching
+## every other hosted module's own convention, so a direct-child count is
+## sufficient and avoids over-counting anything a future child SCENE
+## (e.g. a furniture prefab) might itself carry.
+func _assert_lighting_boot_invariant() -> void:
+	var sun_count: int = 0
+	var environment_count: int = 0
+	for child: Node in get_children():
+		if child is DirectionalLight3D:
+			sun_count += 1
+		if child is WorldEnvironment:
+			environment_count += 1
+	assert(
+		sun_count == 1,
+		"Valley must host exactly one DirectionalLight3D, found %d" % sun_count
+	)
+	assert(
+		environment_count == 1,
+		"Valley must host exactly one WorldEnvironment, found %d" % environment_count
+	)
 
 
 ## The armed-tool -> resolver router (Story scene-007, AC-TOOL-RESOLVER-IS-LIVE)
@@ -1073,6 +1159,21 @@ func get_torch_flicker() -> TorchFlicker:
 	return _torch_flicker
 
 
+## Returns the hosted sun (Story presentation-004).
+func get_sun_light() -> DirectionalLight3D:
+	return _sun_light
+
+
+## Returns the hosted environment host (Story presentation-004).
+func get_world_environment() -> WorldEnvironment:
+	return _world_environment
+
+
+## Returns the hosted [WorldLighting] instance (Story presentation-004).
+func get_world_lighting() -> WorldLighting:
+	return _world_lighting
+
+
 ## Returns the hosted [VillagerBodyPresenter] instance (Story
 ## presentation-003).
 func get_villager_body_presenter() -> VillagerBodyPresenter:
@@ -1177,7 +1278,10 @@ func get_furniture_bed_provider() -> FurnitureBedProvider:
 ## (structurally impossible -- this Valley instance does not exist in that
 ## scene file's own saved node tree; it is instantiated at runtime). This
 ## class still never calls `setup()` on any of these itself (see class doc
-## comment's hosting-vs-DI distinction) -- it only reports the list.
+## comment's hosting-vs-DI distinction) -- it only reports the list. Story
+## presentation-004 adds a TWENTY-SECOND, [WorldLighting] (21 -> 22) --
+## updated consciously, not incidentally, mirroring every prior story's own
+## "flag this file" precedent (see e.g. cam-013's own paragraph above).
 func get_injected_tier_modules() -> Array[Node]:
 	return [
 		_voxel_world,
@@ -1201,4 +1305,5 @@ func get_injected_tier_modules() -> Array[Node]:
 		_torch_flicker,
 		_villager_body_presenter,
 		_camera_mirror,
+		_world_lighting,
 	]

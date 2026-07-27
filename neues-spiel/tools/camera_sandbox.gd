@@ -8,8 +8,14 @@
 ##     `tools/mesher_evidence.gd`'s precedent: evidence/feel-checks FOR the
 ##     production classes, never a reimplementation of them) and generates a
 ##     modest, deterministic, seeded terrain extent with some height variety.
-##  2. Adds a [DirectionalLight3D] + [WorldEnvironment] so the terrain reads
-##     clearly (readability matters for a feel check).
+##  2. Lights the terrain via the real, shipped [WorldLighting] production
+##     class (Story presentation-004, AC6) driving a local
+##     [DirectionalLight3D] + [WorldEnvironment] this tool still hosts itself
+##     (this standalone sandbox never boots a real `GameWorld`/`Valley`, so
+##     there is no shipped Valley to read the lighting FROM -- reusing the
+##     real [WorldLighting] class + its real `.tres` config is what keeps
+##     this tool from hand-rolling a second, independently-drifting lighting
+##     recipe, which is exactly what this story closes).
 ##  3. Hosts a real [CameraInput] (the same production class
 ##     `src/camera_input/` ships, ADR-0002) as a child node -- once its
 ##     `config` is assigned and [method CameraInput.setup] is called, it owns
@@ -42,6 +48,12 @@ var _mesher: VoxelWorldMesher
 @onready var _light: DirectionalLight3D = $DirectionalLight3D
 @onready var _world_environment: WorldEnvironment = $WorldEnvironment
 @onready var _camera_input: CameraInput = $CameraInput
+
+## Story presentation-004 (AC6) -- the real, shipped lighting module, reused
+## here instead of a hand-rolled recipe. Not itself a scene child (this tool
+## does not need it Inspector-wired; it is constructed and `setup()` exactly
+## once in [method _setup_lighting_and_sky]).
+var _world_lighting: WorldLighting
 
 
 func _ready() -> void:
@@ -84,21 +96,20 @@ func _build_and_mesh_world() -> void:
 			_mesher.build_chunk(Vector2i(chunk_x, chunk_z))
 
 
-## A directional "sun" + a solid sky background (not black) plus decent
-## ambient, so shaded faces read clearly at every orbit angle -- readability
-## matters for a feel check, mirrors `tools/mesher_evidence.gd`'s lighting
-## rationale.
+## Story presentation-004 (AC6) -- lights the terrain via the real, shipped
+## [WorldLighting] class + the real `.tres` config, instead of this tool's
+## own former hand-rolled (and NOT golden-hour -- a plain blue-sky readability
+## rig) recipe. This tool's own [DirectionalLight3D]/[WorldEnvironment] nodes
+## are still hosted locally (this sandbox never boots a real `Valley` to read
+## lighting from), but the VALUES applied to them now come from the same
+## config every other consumer reads.
 func _setup_lighting_and_sky() -> void:
-	_light.rotation_degrees = Vector3(-50.0, -30.0, 0.0)
-	_light.light_energy = 1.1
-
-	var environment := Environment.new()
-	environment.background_mode = Environment.BG_COLOR
-	environment.background_color = Color(0.55, 0.72, 0.85)
-	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	environment.ambient_light_color = Color(0.4, 0.42, 0.45)
-	environment.ambient_light_energy = 1.0
-	_world_environment.environment = environment
+	_world_lighting = WorldLighting.new()
+	add_child(_world_lighting)
+	_world_lighting.config = load("res://data/config/world_lighting_config.tres")
+	_world_lighting.directional_light = _light
+	_world_lighting.world_environment = _world_environment
+	_world_lighting.setup()
 
 
 ## Wires the child [CameraInput]'s config and calls its own explicit
