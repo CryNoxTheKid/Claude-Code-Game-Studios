@@ -528,6 +528,26 @@
 ## appearance config must halt boot loudly, never render a plausible-looking
 ## (but actually hardcoded) world -- sprint-12's own deepest rule, named
 ## against this exact shape.
+##
+## Story presentation-005 ("A built bed becomes visible" -- the furniture
+## view layer, F7) hosts [FurniturePresenter] -- structural child, exactly
+## like every other hosted module above, following [VillagerBodyPresenter]'s
+## own landed per-entity-presenter precedent one-for-one (Open Decision D11:
+## the TD render-mechanism call is named in sprint-12.md but explicitly not a
+## blocker; this codebase's only landed precedent is followed, not
+## re-litigated). [member FurniturePresenter.furniture_registry] is
+## code-assigned in [method _wire_build_project_lifecycle] -- NOT in [method
+## _wire_hosted_modules], because [member _furniture_registry] does not exist
+## yet when that earlier method runs (mirrors [member
+## BuildValidation.furniture_registry]'s own identical ordering constraint,
+## same paragraph). `setup()` is reached ONLY via [method
+## get_injected_tier_modules] (this class still calls no hosted child's
+## `setup()` itself). [method _assert_furniture_presenter_boot_invariant]
+## extends this class's own "fail loudly, not silently" boot-invariant block
+## once more (sprint-12's own deepest rule: "no injected collaborator is both
+## optional and consequential") -- [FurniturePresenter] must be hosted and
+## its `furniture_registry` must be wired, asserted loudly at boot rather
+## than left as an unstated hope.
 class_name Valley
 extends Node3D
 
@@ -678,6 +698,15 @@ var _villager_unstuck_telemetry: VillagerUnstuckTelemetry = null
 ## VillagerBodyPresenter.roster_provider] is code-assigned in [method
 ## _wire_hosted_modules] to [member _villager_roster_provider] below.
 @onready var _villager_body_presenter: VillagerBodyPresenter = $VillagerBodyPresenter
+
+## Hosted [FurniturePresenter] instance (Presentation Experience story
+## presentation-005, F7). Structural child only -- mirrors [member
+## _villager_body_presenter]'s own "a real injected-tier module, `setup()`
+## reached only via [GameWorld]'s boot-gated sweep" precedent. [member
+## FurniturePresenter.furniture_registry] is code-assigned in [method
+## _wire_build_project_lifecycle] (not [method _wire_hosted_modules] -- see
+## class doc comment for why).
+@onready var _furniture_presenter: FurniturePresenter = $FurniturePresenter
 
 ## Hosted Building System outer Build/Editor Mode gate instance (Story
 ## scene-007; `building-system` epic, story building-001). Structural child,
@@ -866,6 +895,7 @@ func _ready() -> void:
 	_assert_build_validation_gates_boot_invariant()
 	_assert_loop_payoff_wiring_boot_invariant()
 	_assert_block_appearance_boot_invariant()
+	_assert_furniture_presenter_boot_invariant()
 
 
 ## Code-assigned DI for the Node-typed cross-references between hosted
@@ -998,6 +1028,24 @@ func _assert_block_appearance_boot_invariant() -> void:
 	)
 
 
+## Boot invariant (Story presentation-005, F7) -- extends this class's own
+## "fail loudly, not silently" boot-invariant block once more (mirrors
+## [method _assert_lighting_boot_invariant]/[method
+## _assert_block_appearance_boot_invariant]): [FurniturePresenter] must be
+## hosted (non-null) and its [member FurniturePresenter.furniture_registry]
+## must be wired to the SAME instance this Valley constructed -- sprint-12's
+## own deepest rule ("no injected collaborator is both optional and
+## consequential") applied to this story's own new collaborator, exactly as
+## its own story file requires.
+func _assert_furniture_presenter_boot_invariant() -> void:
+	assert(_furniture_presenter != null, "Valley must host exactly one FurniturePresenter instance")
+	assert(
+		_furniture_presenter.furniture_registry == _furniture_registry,
+		"Valley: FurniturePresenter.furniture_registry must be wired to the SAME hosted" +
+		" FurnitureRegistry instance -- never left null, never a second one"
+	)
+
+
 ## The armed-tool -> resolver router (Story scene-007, AC-TOOL-RESOLVER-IS-LIVE)
 ## -- re-points [CommitPipeline]'s single cell-set/terrain-replace resolver
 ## slots every time [signal ToolStateMachine.tool_armed] fires, keyed by
@@ -1034,6 +1082,10 @@ func _wire_build_project_lifecycle() -> void:
 	)
 	_furniture_registry = FurnitureRegistry.new()
 	_construction_tick_loop.furniture_registry = _furniture_registry
+	# Story presentation-005: FurniturePresenter's own registry cross-reference --
+	# assigned here, not in _wire_hosted_modules(), because _furniture_registry
+	# does not exist until the line above runs (see class doc comment).
+	_furniture_presenter.furniture_registry = _furniture_registry
 	# Story scene-008 -- BuildValidation's own duck-typed furniture_registry
 	# cross-reference, assigned before BuildValidation.setup() ever runs (that
 	# call is reached only via [method get_injected_tier_modules], strictly
@@ -1495,6 +1547,11 @@ func get_villager_body_presenter() -> VillagerBodyPresenter:
 	return _villager_body_presenter
 
 
+## Returns the hosted [FurniturePresenter] instance (Story presentation-005).
+func get_furniture_presenter() -> FurniturePresenter:
+	return _furniture_presenter
+
+
 ## Returns the hosted [BuildEditorMode] instance (Story scene-007).
 func get_build_editor_mode() -> BuildEditorMode:
 	return _build_editor_mode
@@ -1636,6 +1693,9 @@ func get_loop_payoff_adapter() -> LoopPayoffAdapter:
 ## list -- they mirror `_construction_job_queue`'s own established shape).
 ## Story build-validation-009 adds TWO more, [LoopPayoffSignalSurface] and
 ## [LoopPayoffAdapter] (23 -> 25) -- updated consciously, not incidentally.
+## Story presentation-005 adds a TWENTY-SIXTH, [FurniturePresenter] (25 -> 26)
+## -- updated consciously, not incidentally, mirroring every prior story's
+## own "flag this file" precedent.
 func get_injected_tier_modules() -> Array[Node]:
 	return [
 		_voxel_world,
@@ -1663,4 +1723,5 @@ func get_injected_tier_modules() -> Array[Node]:
 		_world_lighting,
 		_loop_payoff_signal_surface,
 		_loop_payoff_adapter,
+		_furniture_presenter,
 	]

@@ -1,4 +1,4 @@
-[gd_scene load_steps=38 format=3]
+[gd_scene load_steps=45 format=3]
 
 [ext_resource type="Script" path="res://src/scene_world_management/valley.gd" id="1_valley"]
 [ext_resource type="Script" path="res://src/voxel_world/voxel_world_grid.gd" id="2_voxelgrid"]
@@ -41,6 +41,7 @@
 [ext_resource type="Script" path="res://src/presentation/loop_payoff_adapter.gd" id="37_looppayoffadapter"]
 [ext_resource type="Script" path="res://src/voxel_world/block_appearance_config.gd" id="38_blockappearance"]
 [ext_resource type="Resource" path="res://data/config/block_appearance_config.tres" id="39_blockappearancecfg"]
+[ext_resource type="Script" path="res://src/presentation/furniture_presenter.gd" id="40_furniturepresenter"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_torchindicator"]
 shading_mode = 0
@@ -119,6 +120,9 @@ config = ExtResource("16_ambientcfg")
 
 [node name="VillagerBodyPresenter" type="Node3D" parent="."]
 script = ExtResource("19_villagerbodypresenter")
+
+[node name="FurniturePresenter" type="Node3D" parent="."]
+script = ExtResource("40_furniturepresenter")
 
 [node name="BuildEditorMode" type="Node" parent="."]
 script = ExtResource("20_buildeditormode")

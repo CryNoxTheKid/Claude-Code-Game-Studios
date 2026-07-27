@@ -165,10 +165,14 @@ func test_ac_assembly_gameworld_wires_all_tier_modules_into_valley_and_boots_act
 	# ("Loop-payoff surface receives real signals," milestone criterion #7)
 	# adds TWO further injected-tier modules, LoopPayoffSignalSurface and
 	# LoopPayoffAdapter (23 -> 25) -- updated consciously, not incidentally.
+	# Story presentation-005 ("A built bed becomes visible" -- the furniture
+	# view layer, F7) adds ONE further injected-tier module, FurniturePresenter
+	# (25 -> 26) -- updated consciously, not incidentally.
 	assert_object(valley.get_loop_payoff_signal_surface()).is_not_null()
 	assert_object(valley.get_loop_payoff_adapter()).is_not_null()
+	assert_object(valley.get_furniture_presenter()).is_not_null()
 	assert_array(world.injected_tier_modules).contains_exactly(valley.get_injected_tier_modules())
-	assert_int(world.injected_tier_modules.size()).is_equal(25)
+	assert_int(world.injected_tier_modules.size()).is_equal(26)
 
 
 func test_ac_assembly_hosted_modules_ran_through_boot_gated_setup_never_their_own_ready() -> void:

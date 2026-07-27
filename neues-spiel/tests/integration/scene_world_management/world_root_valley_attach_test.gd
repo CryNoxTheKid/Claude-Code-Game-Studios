@@ -210,7 +210,10 @@ func test_hosted_building_system_and_villager_ai_modules_are_children_of_valley(
 	# build-validation-009 ("Loop-payoff surface receives real signals,"
 	# milestone criterion #7) adds TWO more hosted children --
 	# [LoopPayoffSignalSurface] and [LoopPayoffAdapter] -- (27 -> 29), updated
-	# consciously, not incidentally.
+	# consciously, not incidentally. Story presentation-005 ("A built bed
+	# becomes visible" -- the furniture view layer, F7) adds ONE more hosted
+	# child -- [FurniturePresenter] -- (29 -> 30), updated consciously, not
+	# incidentally.
 	var world: GameWorld = auto_free(GameWorld.new())
 	var database: MockResourceItemDatabase = auto_free(MockResourceItemDatabase.new())
 	database.configure_ready_immediately()
@@ -222,7 +225,7 @@ func test_hosted_building_system_and_villager_ai_modules_are_children_of_valley(
 
 	# Assert
 	var valley: Valley = world.get_valley() as Valley
-	assert_int(valley.get_child_count()).is_equal(29)
+	assert_int(valley.get_child_count()).is_equal(30)
 	assert_object(valley.get_voxel_world_mesher()).is_not_null()
 	assert_object(valley.get_voxel_world_mesh_streamer()).is_not_null()
 	assert_object(valley.get_tool_state_machine()).is_not_null()
@@ -283,6 +286,10 @@ func test_hosted_building_system_and_villager_ai_modules_are_children_of_valley(
 	assert_object(valley.get_loop_payoff_adapter()).is_not_null()
 	assert_object(valley.get_loop_payoff_adapter().build_validation).is_same(valley.get_build_validation())
 	assert_object(valley.get_loop_payoff_adapter().payoff_surface).is_same(valley.get_loop_payoff_signal_surface())
+	# Story presentation-005 ("A built bed becomes visible") adds ONE more
+	# hosted child -- FurniturePresenter -- (29 -> 30).
+	assert_object(valley.get_furniture_presenter()).is_not_null()
+	assert_object(valley.get_furniture_presenter().furniture_registry).is_same(valley.get_furniture_registry())
 
 
 # ---------------------------------------------------------------------------
