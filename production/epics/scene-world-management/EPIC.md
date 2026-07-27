@@ -5,7 +5,7 @@
 > **Architecture Module**: Scene/World Management (World Root lifecycle; the 3-signal transition contract; scene attach/detach topology)
 > **Manifest Version**: 2026-07-23
 > **Status**: Ready
-> **Stories**: 5 stories created — 001–003 (2026-07-23; epic closed 3/3 after S3), plus **story 004 (2026-07-24)** re-opening the epic to close the integration-to-playable / E2E LOOP gap (Milestone 01 criterion #8; scheduled Sprint 6), plus **story 005 (2026-07-26)** re-opening it again to close the world-genesis boot gap — the production Valley boots an EMPTY grid (scheduled Sprint 9). Story 001 carries a NEEDS-DECISION flag (main-menu boot-flow conflict; does not block M01).
+> **Stories**: 6 stories created — 001–003 (2026-07-23; epic closed 3/3 after S3), plus **story 004 (2026-07-24)** re-opening the epic to close the integration-to-playable / E2E LOOP gap (Milestone 01 criterion #8; scheduled Sprint 6), plus **story 005 (2026-07-26)** re-opening it again to close the world-genesis boot gap — the production Valley boots an EMPTY grid (scheduled Sprint 9), plus **story 006 (2026-07-27)** re-opening it a third time to close the villager-need-seeding boot gap — `NeedsMood.initialize_villager()` is called nowhere, so every shipped villager holds zero need records (scheduled Sprint 10). Story 001 carries a NEEDS-DECISION flag (main-menu boot-flow conflict; does not block M01).
 
 ## Overview
 
@@ -82,6 +82,7 @@ This epic is complete when:
 | 003 | Transition-signal contract surface + transition state machine | Integration | Ready | ADR-0001 |
 | 004 | **GameWorld scene assembly + headless E2E LOOP test — THE INTEGRATION CROWN** (criterion #8) | Integration | Ready | ADR-0001, ADR-0005, ADR-0013 |
 | 005 | **World genesis in the boot sequence — terrain, roster and nav graph before ACTIVE** (the Valley boots an EMPTY grid today) | Integration | Ready | ADR-0005, ADR-0015, ADR-0014, ADR-0001 |
+| 006 | **Villager need seeding in the boot sequence** — a spawned villager carries REAL need records before ACTIVE (`NeedsMood.initialize_villager()` is called nowhere today) | Integration | Ready | ADR-0005, ADR-0001, ADR-0002 |
 
 Dependency order: 001 → 002 → 003 (closed 3/3 after S3). **Story 004 (added 2026-07-24, Sprint 6)** re-opens the epic to assemble grid+mesher+camera+building+villager into GameWorld's `injected_tier_modules` and land the headless E2E LOOP test — it depends on Building (021+029) and Villager AI (009) reaching the place-a-block and villager-walk seams, plus the DONE mesher (vox-007), residency (vox-010), World Root (001), and GameWorld DI scaffold (spine-001). It closes the integration-to-playable / E2E LOOP gap the Milestone 01 Feature List named but never storyed.
 
@@ -96,6 +97,21 @@ generation algorithm. Per ADR-0015 (which already superseded ADR-0014's full-wor
 genesis is the **residency page-in of the boot window**, not a full-extent `generate_terrain()` call: that method
 is measured non-viable at the shipped 2000×2000 config (52.2 s at 900×900, no completion in >200 s at 1000×1000 —
 a `Dictionary` rehash cliff recorded in vox-018's evidence). Depends on nothing unlanded.
+
+**Story 006 (added 2026-07-27, Sprint 10)** re-opens the epic a third time, for the **third occurrence of the
+same pattern story 005 fixed twice**: a production API that shipped green, complete and tested — and called
+from nowhere. `NeedsMood.initialize_villager()` (needs-mood-006) seeds a villager's needs and derives their
+starting mood; `valley.gd` assigns `needs_provider` at two sites and seeds at neither, so every villager in
+the shipped game holds **zero need records**. Because `NeedsMood`'s read surface deliberately answers benign
+defaults for untracked ids, the gap is invisible to every query — it only manifests under time, since
+`_pass_f1_decay` iterates existing records only, so an unseeded villager never decays, never goes urgent and
+never sleeps. **The payoff loop needs-mood-010 proved end-to-end cannot start in production.** It lives here
+rather than in `needs-mood` for the same reason story 005 did: the deliverable is a **boot-phase ordering
+change** in `valley.gd` / `game_world.gd` under ADR-0005 — this epic's own governing ADR and own files —
+driving an already-landed needs-mood surface. `needs_mood.gd` is expected not to change. The story carries the
+epic's running record of this pattern (generate_terrain → spawn_starting_roster → initialize_villager) and the
+rule it establishes: **a new production API needs a proven caller in the same sprint, or it is dead code with
+green tests.** Depends on nothing unlanded.
 
 MVP scope only — multi-scene (ADR-0013) and savepoint binding (ADR-0012) are VS-tier, deferred to Milestone 02+.
 
