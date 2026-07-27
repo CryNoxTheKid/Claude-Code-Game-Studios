@@ -1,12 +1,12 @@
 # Story 015: Draft eraser (removal-tool micro-state branch)
 
 > **Epic**: Building System
-> **Status**: Ready
+> **Status: Complete (2026-07-27 — 1428/1428 suite green 0 orphans, agent-verified; also covers building-031's AC41 scope)
 > **Layer**: Core
 > **Type**: Logic
 > **Estimate**: 1 day
 > **Manifest Version**: 2026-07-23
-> **Last Updated**: —
+> **Last Updated**: 2026-07-27
 
 ## Context
 

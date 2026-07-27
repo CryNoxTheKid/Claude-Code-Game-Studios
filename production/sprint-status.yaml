@@ -125,7 +125,7 @@ stories:
     name: "Removal-tool base — the C1 chain's production caller; independent, day one on lane R2"
     file: "production/epics/building-system/story-031-removal-tool-base.md"
     priority: must-have
-    status: ready-for-dev
+    status: scope-absorbed-by-015-verify-then-close
     owner: "godot-gdscript-specialist"
     estimate_days: 1.0
     blocker: "START DAY ONE on lane R2 — its own header depends on building-021 + building-029, both Complete. ⚑ F5 — 031's Unlocks line names 'Story 015 (extends to Built -> demolition)', but building-015's OWN Dependencies read only 'Story 002, Story 009, Story 012'. THE CONSUMING STORY'S HEADER IS AUTHORITATIVE (the rule that found S09's building-012 inversion and S10's F1/F2), so 031 is NOT on the C1 serial chain and runs fully parallel. Scheduled anyway because criterion #11's own wording names the removal tool, and because it is what scene-007 hosts as the chain's caller. Removal tool as a ToolStateMachine mode over blueprint cells and their micro-states, revoking claims on cells it removes. DO NOT implement the Built->demolition extension here — that is building-015's scope."
@@ -152,7 +152,7 @@ stories:
     name: "Draft-eraser / removal branch (Built -> demolition routing)"
     file: "production/epics/building-system/story-015-draft-eraser-removal-branch.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete
     owner: "godot-specialist"
     estimate_days: 1.0
     blocker: "HARD: building-009 AND building-012 (both in-sprint). Dep building-002 Complete. ⚑ building-031 is NOT a dependency (F5) despite 031's Unlocks line — 015's own header does not list it. The eraser BRANCHES ON CELL MICRO-STATE: a not-yet-Built cell is CANCELLED (with 012's restore_value applied), a Built cell ROUTES INTO 009's demolition-order contract — never an instant removal. This is the story that makes 'tear it down' ONE UNIFORM VERB rather than two behaviours. Depth-3 on lane C."
