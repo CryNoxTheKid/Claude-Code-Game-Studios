@@ -255,6 +255,34 @@ func on_job_claimed(project_id: int, cell: Vector3i, villager_id: int) -> bool:
 	return project.on_job_claimed(cell, villager_id)
 
 
+## Unregisters [param cell] from the reverse index only (Story building-011,
+## ADR-0016 primary, plan-only undo's own registry-aware caller --
+## [PlanOnlyUndoGate] -- see this class's own doc comment's "Reverse-index
+## removal on cancel/demolish" future-story note above, which named exactly
+## this gap). Does not touch any [BuildProject]'s own membership -- [method
+## BuildProject.cancel_cell]/[method BuildProject.demolish_cell] already
+## erase a cancelled/demolished cell from the project's OWN [member
+## BuildProject.cells] dictionary; this call keeps THIS registry's separate
+## reverse index consistent with that removal, so a later commit at the same
+## address is never blocked by a stale entry. A no-op if [param cell] is not
+## currently indexed.
+func unregister_cell(cell: Vector3i) -> void:
+	_cell_index.erase(cell)
+
+
+## Drops [param project] from this registry entirely (Story building-011) --
+## the caller-driven realization of AC61/Rule 14i's "the project entity
+## itself is deleted": a registry-aware caller (today, [PlanOnlyUndoGate])
+## checks [method BuildProject.is_empty] after a cancel/demolish that empties
+## it and calls this to drop the registry's own last reference. Mirrors
+## [method ConstructionJobQueue.remove_project]'s identically-named
+## counterpart -- a caller that also registered [param project] with that
+## queue is expected to call both, keeping every aggregator in sync. A no-op
+## if [param project]'s id is not currently registered.
+func remove_project(project: BuildProject) -> void:
+	_projects.erase(project.id)
+
+
 ## Merges [param absorbed]'s cells and worker-attribution history into
 ## [param survivor] (Rule 14c: "absorbs the others' cells and worker-
 ## attribution records") -- called only from within [method assign_cells]'s

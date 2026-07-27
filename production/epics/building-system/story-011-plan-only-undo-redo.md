@@ -1,7 +1,7 @@
 # Story 011: Plan-only undo/redo
 
 > **Epic**: Building System
-> **Status**: Ready
+> **Status: Complete (2026-07-27 — 1355/1355 suite green 0 orphans, parent-verified)
 > **Layer**: Core
 > **Type**: Logic
 > **Estimate**: 1 day

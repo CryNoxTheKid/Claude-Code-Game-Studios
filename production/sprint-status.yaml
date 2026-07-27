@@ -180,7 +180,7 @@ stories:
     name: "Plan-only undo/redo (criterion #12) — S09 CARRY-FORWARD, deferred not dropped"
     file: "production/epics/building-system/story-011-plan-only-undo-redo.md"
     priority: should-have
-    status: backlog
+    status: complete
     owner: "godot-specialist"
     estimate_days: 1.0
     blocker: "Deps building-002 + 032 both Complete (S7). Deliberately moved out of S09 mid-sprint on the producer's own trim recommendation; the QA sign-off's section 13 says 'deferred, not dropped; pull early in S10'. DEFERRING IT A SECOND TIME IS A SIGNAL WORTH NOTICING, not a free move — prefer trimming bv-008 first. Undo NEVER mutates a Built cell (the existing non-writer grep guard extended to the undo path): full undo of built geometry is rejected because it would make built geometry non-authoritative and bypass ADR-0009's occupancy/seal semantics and the worker-executed mutation contract. Redo re-creates only STILL-VALID cells, dropping invalidated ones with feedback. Stack bounded (undo_stack_depth 50) and EXCLUDED from serialize() (ADR-0012, TR-033). Also unblocks building-012, whose own header depends on 009 + 011"
@@ -381,7 +381,7 @@ sprint_9_history:
       name: "Plan-only undo/redo (Cluster 0, milestone criterion #12) — undo must NEVER mutate a Built cell"
       file: "production/epics/building-system/story-011-plan-only-undo-redo.md"
       priority: nice-to-have
-      status: deferred-to-s10
+      status: complete
       owner: "godot-specialist"
       estimate_days: 1.0
       blocker: "deps building-002 + building-032 (undo/redo stack core) both Complete S7. Pull only after building-023 + building-001 land with lane headroom"
