@@ -9,200 +9,391 @@
 #   done           ↔  Complete
 #   blocked        ↔  Blocked
 #
-# Active sprint: 10 (THE PAYOFF SPRINT — close milestone criterion #5. Complete the Needs & Mood formula
-# surface (nm-005 FIRST, it gates three; nm-004 parallel; then 006/007/008), land bed claiming
-# (villager-ai-018) and a real placeable bed (building-028 -> 016), then pull them tight in the UNMOCKED
-# live pair needs-mood-010 — THE CROWN. Give the villager a body (presentation-003) so criterion #5's
-# run-level capture is a picture, not a log, and so S11's three blocked villager-info-ui stories clear.
-# Sprint 1–9 history retained below the Sprint 10 block.)
+# Active sprint: 11 (THE REAL-BED SPRINT — S10 proved the payoff loop against doubles at exactly one
+# point: res://data/items/ does not exist, so ResourceItemDatabase holds ZERO entries,
+# is_need_functional("bed") returns FALSE in production, and CommitPipeline's furniture palette query
+# returns an EMPTY list. This sprint makes the bed a real authored item (rid-007 + rid-008 -> rid-009,
+# THE CROWN -> rid-006), and pays D8 option (c)'s owed demolition debt (building-009 -> 012 -> 015 ->
+# 017, plus the parallel removal tool 031). Then it hosts the build tools in the Valley scene
+# (scene-007) so none of it ships green-and-uncalled for the FOURTH time.
+# Sprint 1-10 history retained below the Sprint 11 block.)
 #
-# ⚑ THREE-LANE CONVERGENCE: needs-mood-010's inputs come from three separate lanes and it is sequenced
-#   LAST. This is strictly worse than S09's single cross-lane handoff. Day-one starts on all three lanes:
-#   nm-005 (lane B), villager-ai-018 (lane A), building-028 (lane C). All three are blocked on nothing.
-#   Trip-wire: if lane B is not clear by ~day 6, cut bv-008 and bv-009 immediately — never compress the crown.
+# ⛔ TWO DAY-0 GATES, both close BEFORE the first /dev-story on any lane:
+#   G1 — /qa-plan sprint -> production/qa/qa-plan-sprint-11-2026-07-28.md. Owner: qa-lead. S10 listed
+#        the QA plan as a DoD line, nothing gated on it, and it NEVER HAPPENED (sign-off condition #3).
+#        Making it a DoD line again would repeat the failure verbatim. It is a GATE this sprint.
+#   G2 — author scene-007's story file. Owner: producer. Same shape as presentation-003's S10 gate,
+#        except there is NO TD spec to transcribe: scope derives ONLY from building-ui EPIC.md Known
+#        Conflict 3's verified module list + ADR-0005's boot phases. Invent nothing. Then
+#        /story-readiness before /dev-story.
 #
-# ✅ presentation-003 AUTHORING GATE CLOSED (2026-07-26). The story file now exists at
-#   production/epics/presentation-experience/story-003-villager-body-view-and-hit-proxy.md, transcribed
-#   from VB-1 + VB-2 with nothing invented, and registered in that epic's EPIC.md. Status: ready-for-dev.
-#   Cross-check result: TD downstream item 13's "the grep guard will now trip" premise is FALSE — no
-#   _visual_position grep guard is landed as a test (prose only), and VB-2's AC list has no such AC. The
-#   real open question (who owns writing the re-scoped guard) is in the story's Open Decisions, not an AC.
+# ⚑ SEVEN FINDINGS FROM READING STORY FILES AND SOURCE, NOT TABLES (see sprint-11.md F1-F7):
+#   F1 — rid-009's Dependencies claim "Story 001, 004, 008, 005, 003, 007 — all DONE". FALSE on disk:
+#        rid-006, rid-007 and rid-008 all read Status: Ready. 007 and 008 are therefore scheduled
+#        AHEAD of the crown, not assumed.
+#   F2 — YOU CANNOT AUTHOR THE BED ALONE. resource_item_database.gd::_load_definitions() early-returns
+#        success on a MISSING data_dir (today's green state), but the moment the directory exists with
+#        ANY entry, _check_tier0_family_coverage() requires >=1 tier-0 building_material PER FAMILY.
+#        A lone bed.tres HALTS BOOT. Land the three tier-0 materials as their own commit FIRST.
+#   F3 — rid-006 must land AFTER rid-009. It makes a null visual_asset a TERMINAL boot halt: vacuous
+#        before content, boot-halting after content authored without meshes. It converts rid-009 into
+#        an art hand-off (four typed Mesh bindings). If meshes are not ready, ship 009 and TRIM 006 —
+#        that ordering is safe, the reverse is not.
+#   F4 — building-011 ALREADY LANDED (Complete 2026-07-27, 1355/1355) and it IS the 011 the C1 chain
+#        means: building-012's own header reads "Story 002, Story 009 (demolition writeback), Story
+#        011 (undo restore)". THE D8 CHAIN IS 009 -> 012 -> 015 -> 017, DEPTH 4, NOT 5.
+#   F5 — building-031's Unlocks names 015, but 015's OWN header lists only 002/009/012. Consuming
+#        header authoritative -> 031 runs FULLY PARALLEL on a different lane.
+#   F6 — ⚑ THE FOURTH SHIP-GREEN-AND-UNCALLED, AND IT IS A WHOLE SUBSYSTEM. Valley.tscn hosts 12
+#        modules; BuildEditorMode, WallTool, FloorTool, RoofTool, BlockTool, FurnitureTool,
+#        GhostPreview and UndoRedoStack are in NO SCENE, and BuildProjectRegistry /
+#        ConstructionJobQueue are constructed NOWHERE in src/. building-ui Known Conflict 3 recorded
+#        this 2026-07-26 and it SURVIVED building-001 landing. Without scene-007 the entire C1 chain
+#        ships with zero production callers and rid-009's real bed is in a palette no hosted tool
+#        reads. USER RULING D9.
+#   F7 — FURNITURE HAS NO VIEW LAYER. src/presentation/ has no furniture presenter and BV-1 correctly
+#        forbids furniture from reaching the voxel grid, so a placed, built bed is INVISIBLE. No story
+#        exists in any epic. THIS is why needs-mood-011 and the R8 external playtest are deferred to
+#        S12 — the S10 smoke check's own gate ("a human observes a villager move in") cannot be met.
 #
-# ⚑ TWO DEPENDENCY DEFECTS found by reading story headers rather than tables (see sprint-10.md F1/F2):
-#   F1 — needs-mood-010 contradicts itself: Dependencies demand the full furniture chain 028->016->017
-#        "landed and REAL"; Implementation Notes permit mocking "the bed's existence"; Out of Scope lists
-#        the chain. Resolved toward the Implementation Notes (028+016 real, 017 deferred). USER RULING D8.
-#   F2 — needs-mood-009 claims "Unlocks: 010", but 010's own Dependencies list omits 009. The consuming
-#        story's header is authoritative: 009 is NON-BLOCKING and deferred to S11 (D6(ii) unresolved).
+# ⚑ NO CROSS-LANE CONVERGENCE THIS SPRINT — the deliberate contrast with S10. No story takes inputs
+#   from two lanes. Risk moved rather than vanished: it is now SERIAL DEPTH (lane C is 5 deep;
+#   building-009 gates three in-sprint stories) plus ONE soft coupling (building-017 re-runs
+#   needs-mood-010's live-pair test, which is the ai-programmer lane's file — serialize it).
+#   Day-one starts, all blocked on nothing: rid-008 + rid-007 (lane R), building-031 (lane R2),
+#   building-009 (lane C).
 #
-# ⚑ SCENE-006 ADDED 2026-07-27 (must-have, 0.5d, blocked on nothing) — THE CROWN'S PRODUCTION COUNTERPART.
-#   needs-mood-010 proved the payoff loop end-to-end against a hand-seeded fixture; the SHIPPED game cannot
-#   start that loop, because NeedsMood.initialize_villager() is called from nowhere and _pass_f1_decay only
-#   iterates EXISTING records. Third occurrence of the ship-green-and-uncalled pattern (generate_terrain,
-#   spawn_starting_roster, now initialize_villager). Filed in scene-world-management — it is an ADR-0005
-#   boot-ordering change in that epic's own files, exactly like scene-005. The reported red-suite premise was
-#   MEASURED AND DID NOT REPRODUCE (1307/1307 green with the wiring applied); the real work is proving the
-#   call site, since the obvious assertion passes on the broken build. See the story's Open Decision 1 for the
-#   guard recommendation awaiting a user call.
+# ⚑ S10 PROCESS RULE THAT APPLIES DIRECTLY: a suite run is only evidence about the change under test
+#   if nothing else in the tree is mid-edit. S10 reverted a CORRECT change on a red run containing
+#   another lane's half-finished work; re-applied identically it measured green. Lane C runs five
+#   stories serially in one tree — RE-RUN IN ISOLATION BEFORE ANY REVERT.
 #
-# ⛑ PROVISIONAL RULINGS still unratified after a full sprint —
+# ⛑ STALE CARRY-FORWARD CORRECTED: the S10 sign-off says "the Cluster D UI epics — still no epics
+#   created". FALSE as of 2026-07-27. production/epics/building-ui/ (EPIC.md + 18 stories) and
+#   production/epics/villager-info-ui/ (EPIC.md + 7) all exist at Status: Ready. The R2 gate is
+#   CLOSED. villager-info-ui's Known Conflict 1 (villager body / collision layer) was closed by
+#   presentation-003 landing. What remains open is D3's SCOPE question — 25 stories vs the
+#   milestone's assumed ~14 — and the Cluster D cut-lever signal fires at the START of S12.
+#
+# ⛑ PROVISIONAL RULINGS still unratified after THREE sprints —
 #   production/architecture-decisions-m02-preflight-2026-07-26.md (TD) and
-#   production/creative-decisions-m02-preflight-2026-07-26.md (CD).
-#   Blast radius is SMALLER than S09: no S10 Must story is created by a ruling, and the only AC-shape
-#   exposure is bv-009 (CD Ruling 2), already Nice and already externally gated. NOT scheduled as work.
+#   production/creative-decisions-m02-preflight-2026-07-26.md (CD). NOT scheduled as work.
+#   Exposure this sprint: needs-mood-009 cites CD Ruling 1 (a doc pass with a no-value-change guard);
+#   bv-009 cites CD Ruling 2 and is NOT SCHEDULED (still TD-gated, second sprint).
 
-sprint: 10
-goal: "Close milestone criterion #5 — the payoff loop, live-pair, no mocks at the Needs<->Villager-AI seam. Complete the Needs & Mood formula surface (nm-005 mood smoothing FIRST since it gates 006/007/008; nm-004 recovery interruption in parallel), land the two halves the payoff needs from outside — bed claiming (villager-ai-018) and a real placeable multi-cell bed (building-028 -> 016) — then converge all three lanes in needs-mood-010, THE CROWN (AC34). In parallel give the villager a body (presentation-003, story file to be authored from TD spec VB-1/VB-2) so criterion #5's run-level capture is a picture rather than a log and S11's three blocked villager-info-ui stories clear. Capacity-permitting extend Build Validation's signal surface (bv-007 -> 008, with bv-009 as the TD-gated criterion-#7 wiring) and clear the S09 carry-forward (building-011) plus the Cluster C tier C1 opener (building-009). At sprint close: /team-qa sprint sign-off AND a single consolidated smoke artifact (sign-off condition #4). END OF S10 IS THE MILESTONE'S CUT-LEVER CHECKPOINT #1 — its signal is criterion #5."
-start: "2026-07-27"
+sprint: 11
+goal: "Make the bed real, and make the reverse verb work. Land the RID content chain (rid-007 + rid-008 -> rid-009 THE CROWN -> rid-006) so res://data/items/ finally exists and is_need_functional(bed) is TRUE in the shipped game — retiring the S10 BLOCKING DoD line that was not met and un-mocking bv-006's shelter classification and bv-008's warning tiers. In parallel discharge D8 option (c) by shipping the C1 demolition chain (building-009 -> 012 -> 015 -> 017, plus the parallel removal tool 031), closing criterion #11 and PAYING needs-mood-010's owed follow-on AC — the bed-revocation edge case re-verified against a REAL demolition job rather than a directly-fired signal. Then host the build tools in the Valley scene (scene-007) so none of it ships green-and-uncalled for the fourth time. Capacity-permitting open Cluster B's life work (villager-ai-019 -> presentation-001 Sub-B), clear the needs-mood-009 documentation debt (gated on D6(ii)), and put the first stake in Cluster D (building-ui-001, gated on the TD HUD-hosting ruling). END OF S11 IS THE MILESTONE'S CUT-LEVER CHECKPOINT #2 — its signal is 'criterion #5 still not green', and criterion #5 IS GREEN, so the lever does NOT pull; record that affirmatively."
+start: "2026-07-28"
 end: ""
 generated: "2026-07-27"
 updated: "2026-07-27"
 
 stories:
-  - id: "villager-ai-018"
-    name: "Sleep & home — bed claim (THE MOVE-IN MOMENT); the crown's villager half"
-    file: "production/epics/villager-ai-behavior/story-018-sleep-and-home.md"
+  - id: "rid-008"
+    name: "Furniture footprint field + boot validation — day one on lane R, it gates the crown"
+    file: "production/epics/resource-item-database/story-008-furniture-footprint-validation.md"
     priority: must-have
-    status: complete
-    owner: "ai-programmer"
-    estimate_days: 1.0
-    blocker: "START DAY ONE on lane A — deps villager-ai-006/009/011 all Complete, blocked on nothing. Bed claiming REUSES story-011's atomic-claim primitive; do NOT write a second claim mechanism. Needs rates stay MOCKED here (they go live in needs-mood-010, not here). AC24's widened source enum matters: ground_no_bed_owned vs ground_bed_unreachable — the distinction feeds the why-string (nm-007), not the rates"
-    completed: ""
-  - id: "needs-mood-005"
-    name: "F3 mood smoothing, snap rule, mean_active & band events — FIRST on lane B, it gates three Must stories"
-    file: "production/epics/needs-mood-system/story-005-mood-smoothing-and-band-events.md"
-    priority: must-have
-    status: complete
+    status: ready-for-dev
     owner: "godot-gdscript-specialist"
     estimate_days: 1.0
-    blocker: "START DAY ONE — gates nm-006, nm-007 and nm-008. Deps needs-mood-001/002 Complete. Domain review: systems-designer (per the S09 Lane-Korrektur — .gd implementation routes to godot-gdscript-specialist; the designer owns formulas and tuning tables, not the implementation). TRAP: use explicit float division (/ 40.0) — integer division on an int-typed mood_smoothing_ticks silently truncates the EMA step to zero. Band boundaries 70/40 are a DISPLAY CONTRACT shared verbatim with Villager Info UI — no second copy in UI code. Grep guard: zero mood references in work/scheduling code (Rule 8, statically checkable)"
+    blocker: "START DAY ONE on lane R — its own header depends on rid-001 + rid-004, both Complete; blocked on nothing. ⚑ READ THE LANDED FIELD BEFORE WRITING THE CHECK: @export var footprint: Vector2i = Vector2i(1, 1) ALREADY EXISTS on ItemDefinitionResource with an ItemDefinition.get_footprint() getter (verified in src/resource_item_database/). This story adds the TWO VALIDATION CHECKS, not the field: (a) furniture_fixture requires footprint present with both dims >= 1 — a missing field (31a) or a <= 0 dimension (31b) halts boot NAMING THE ENTRY AND THE OFFENDING DIMENSION; (b) any non-furniture_fixture entry carrying an authored footprint halts boot (category<->footprint pairing). The bed's (1,2) value is authored in rid-009, NEVER here."
     completed: ""
-  - id: "needs-mood-004"
-    name: "Recovery interruption, mid-recovery re-rating & bed revocation — independent, run parallel to nm-005"
-    file: "production/epics/needs-mood-system/story-004-recovery-interruption-and-re-rating.md"
+  - id: "rid-007"
+    name: "missing_item fallback definition + exclusion from listings — day one, parallel to rid-008"
+    file: "production/epics/resource-item-database/story-007-missing-item-fallback.md"
     priority: must-have
-    status: complete
+    status: ready-for-dev
     owner: "godot-gdscript-specialist"
     estimate_days: 1.0
-    blocker: "Depends on needs-mood-003 (Complete) and NOTHING else — fully parallel-safe. Domain review: systems-designer. AC30: a source change applies from the NEXT tick with no restart, no signal, no lost progress (and the mirror downgrade identically). AC31: interrupted at/below threshold re-enters Urgent BY VALUE with ZERO second urgent emission. stop_recovery's reason arg is DIAGNOSTIC ONLY — proven by three-reason identical-outcome test. This system NEVER subscribes to furniture_revoked and NEVER holds a bed id (the circular punt closed 2026-07-10 — do not re-open it)"
+    blocker: "START DAY ONE, fully parallel to rid-008 — its own header depends on rid-003 + rid-005, both Complete. Scheduled because rid-009's Dependencies NAME IT (finding F1: rid-009 claims it is DONE; it reads Status: Ready on disk). Dedicated fallback path (resolve_or_missing) DISTINCT from get_by_id's not-found result; missing_item is a CODE-DEFINED BUILT-IN, never an authored .tres (rid-005 already rejects an authored one); each distinct missing id logged EXACTLY ONCE per load event; missing_item NEVER appears in ANY listing query (category / family / tier / list-all) — reachable only by direct get-by-id. AC9b's save round-trip stays deferred (VS-tier)."
     completed: ""
-  - id: "building-028"
-    name: "Furniture placement base — single-cell support + palette query; FIRST on lane C, it is the bed"
-    file: "production/epics/building-system/story-028-furniture-placement-base.md"
+  - id: "rid-009"
+    name: "⚑ THE CROWN — MVP data content: three tier-0 materials + the bed. res://data/items/ comes into existence"
+    file: "production/epics/resource-item-database/story-009-mvp-data-content.md"
     priority: must-have
-    status: complete
-    owner: "godot-specialist"
-    estimate_days: 1.0
-    blocker: "START DAY ONE on lane C — deps building-021/022 + RID all Complete. ⚑ RE-READ AGAINST BV-1 BEFORE STARTING: it inherits TWO blocking ACs it did not have when it was written — (a) a FURNITURE-category completion NEVER bulk_writes to the grid (this is what makes build-validation-002's furniture-transparency guarantee true BY CONSTRUCTION; breaking it silently breaks a shipped, tested, green invariant with no test to catch it), and (b) the registry exposes a placed/removed signal + item enumeration as a duck-typed nil-safe provider. FOLD INTO ITS DoD: re-verify build-validation-006's is_need_functional TRUE branch non-vacuously against a real ItemDefinitionResource once this lands (sign-off section 13 carry-forward)"
-    completed: ""
-  - id: "needs-mood-006"
-    name: "F4 spawn initialization & new-need activation"
-    file: "production/epics/needs-mood-system/story-006-spawn-init-and-need-activation.md"
-    priority: must-have
-    status: complete
-    owner: "godot-gdscript-specialist"
-    estimate_days: 0.5
-    blocker: "HARD: needs-mood-005 (in-sprint — needs mean_active/bands). Dep needs-mood-002 Complete. Domain review: systems-designer. Initialization in an explicitly-callable method reached from the boot path — NEVER _ready(), never inferred from scene state. Inactive needs are ABSENT, not zeroed. Mood is never initialized to 0 or to a literal: the ordering trap this AC exists to prevent is a zero-default mood displaying Low for ~10s at ticks_per_second 4.0 while the EMA catches up — a cold-start VISUAL bug, not a math bug"
-    completed: ""
-  - id: "needs-mood-007"
-    name: "Why-string selection, templates & UI-slot precedence — consumed by the crown's unsheltered edge case"
-    file: "production/epics/needs-mood-system/story-007-why-string-templates-and-precedence.md"
-    priority: must-have
-    status: complete
+    status: ready-for-dev
     owner: "godot-gdscript-specialist"
     estimate_days: 1.0
-    blocker: "HARD: needs-mood-005 (in-sprint — mood band for the empty case). Dep needs-mood-003 Complete. Domain review: systems-designer. Composed HERE, consumed VERBATIM by Villager Info UI — the UI never assembles its own from need values (ADR-0001 leaf rule). Pure function of current state: no cached last-reason, no sticky string. A why-string must NEVER name a fix the player cannot take (a trapped villager is never told 'no bed'). All templates in ONE table for a future localization pass"
+    blocker: "THE CROWN. Deps rid-001/003/004/005 Complete + rid-007 and rid-008 IN-SPRINT (HARD). ⚑ F1 — THE STORY'S OWN DEPENDENCY LINE IS WRONG: it reads 'Story 001, 004+008, 005, 003, 007 — all DONE'; verified on disk 007 and 008 are Status: Ready. Do not trust it. ⚑ WHY THIS IS THE CROWN, verified in source not prose: build_validation_config.gd:203 is_need_functional() resolves through ResourceItemDatabase.get_by_id() and returns FALSE for null — that is the branch production takes, ALWAYS, because res://data/items/ does not exist. need_functional_item_ids already defaults to [bed]; the config .tres is authored; the consumer (build_validation.gd:669) is wired. THE ONLY MISSING INPUT IN THE ENTIRE CHAIN IS A bed.tres FILE. Its absence is also why commit_pipeline.gd:541's list_ids_by_category(furniture_fixture) returns an EMPTY PALETTE — no human can place a bed in the shipped game at all. ⚑ F2 — SEQUENCING IS LOAD-BEARING: COMMIT THE THREE TIER-0 MATERIALS FIRST. _load_definitions() early-returns success on a missing data_dir, but the moment the dir exists with ANY entry, _check_tier0_family_coverage() requires >=1 tier-0 building_material per family — A LONE bed.tres HALTS BOOT. ⚑ BUFFER'S PRIMARY NAMED CONSUMER: first story in project history whose deliverable is SHIPPED DATA; a failure halts the GAME, not a test. Escalate a stubborn validation shape to TD rather than relaxing a deliberately-terminal boot check. ⚑ ART HAND-OFF INSIDE A CONFIG/DATA STORY (F3): each entry binds a typed Mesh visual_asset; primitive placeholders in the Visual Direction Note colours (wood warm brown / stone cool grey / thatch warm red-brown) are SUFFICIENT — the bed's real model is a later art pass, not a gate. ⚑ TWO BLOCKING DoD LINES FOLDED IN, both S10 carry-forwards that were NOT met: (1) re-verify build-validation-006's is_need_functional(bed) TRUE branch NON-VACUOUSLY against the real authored ItemDefinitionResource — shelter_classification_test.gd currently ASSERTS IT RETURNS FALSE, and that assertion must become a genuine two-branch test; (2) re-verify build-validation-008's bed Warning tier END-TO-END (sign-off 4.4). Content smoke Smoke-1..4 against the SHIPPED data; AC29 palette-legibility screenshot is Advisory, non-blocking."
     completed: ""
-  - id: "needs-mood-008"
-    name: "Burst ordering, pause & warp determinism (full-cycle tick anchors) — the crown's determinism harness"
-    file: "production/epics/needs-mood-system/story-008-burst-pause-and-warp-determinism.md"
+  - id: "building-031"
+    name: "Removal-tool base — the C1 chain's production caller; independent, day one on lane R2"
+    file: "production/epics/building-system/story-031-removal-tool-base.md"
     priority: must-have
-    status: complete
+    status: ready-for-dev
     owner: "godot-gdscript-specialist"
     estimate_days: 1.0
-    blocker: "HARD: needs-mood-005 (in-sprint). Deps needs-mood-002/003 Complete. Domain review: systems-designer. ASSERT AGAINST TimeTickConfig.max_ticks_per_frame (landed default 12 per the S8 re-tune) — NEVER the literal 10 the GDD prose still says. Threshold signals are NEVER coalesced or deduplicated across a burst. SceneTree.paused and Engine.time_scale are project-wide forbidden — grep-guarded"
-    completed: ""
-  - id: "building-016"
-    name: "Multi-cell furniture placement (footprint) — the bed is 2 cells"
-    file: "production/epics/building-system/story-016-multi-cell-furniture-placement.md"
-    priority: must-have
-    status: complete
-    owner: "godot-specialist"
-    estimate_days: 1.0
-    blocker: "Its OWN header depends only on building-002 (Complete). Sequenced after building-028 per the epic's stated direction (028's Unlocks names 016) but NOT serially blocked by it — a 028 slip does not stall 016. footprint authored on ItemDefinitionResource, exposed via the getter-only ItemDefinition, typed Array[Vector3i]. A commit is valid IFF EVERY offset cell independently satisfies support + availability. All footprint cells are ONE entity sharing ONE occupant id — never N entities. NO partial placement"
-    completed: ""
-  - id: "presentation-003"
-    name: "Villager body view, hit proxy & slice hook — THE SUBSTRATE THREE EPICS ARE BLOCKED ON"
-    file: "production/epics/presentation-experience/story-003-villager-body-view-and-hit-proxy.md"
-    priority: must-have
-    status: complete
-    owner: "godot-specialist"
-    estimate_days: 1.0
-    blocker: "✅ AUTHORING GATE CLOSED 2026-07-26 — story file written by the producer, transcribed from production/architecture-decisions-m02-preflight-2026-07-26.md VB-1 (sections 1-6) + VB-2 (full AC list), nothing invented; registered in the presentation-experience EPIC.md. Next: /story-readiness, then /dev-story. Development dep: villager-ai-021 (Complete) is HARD for the integration AC only — every unit AC is testable against a mock roster. .gd review: godot-gdscript-specialist. Body lives in presentation-experience / src/presentation/, NEVER in the Core-layer villager-ai-behavior epic (VB-1 section 1 rejects that layering inversion by name). Area3D hit proxy on ADR-0004 layer 1; ADR-0009 two-layer position model with physics_interpolation_mode = OFF. ⚑ GREP-GUARD CROSS-CHECK DONE, PREMISE CORRECTED: the earlier note here said 'without TD item 13's re-scope this story's own grep AC contradicts a landed guard'. FALSE on both halves. (a) There is NO landed _visual_position grep guard anywhere in neues-spiel/tests/ — the only src/villager_ai grep guards are in tests/integration/villager_ai/config_and_scaffold_test.gd and assert only: no _physics_process, _process(_delta present, no Navigation*3D, no Thread/WorkerThreadPool. The invariant exists as PROSE only (ADR-0009 Validation Criteria, control-manifest.md, villager-ai-004's Forbidden line). (b) VB-2's AC list contains NO _visual_position grep AC — its three grep ACs (zero lerp( in villager_body_view.gd, zero Selection refs, zero mutating calls into VillagerAi) contradict nothing and do not depend on item 13. Nothing will trip in CI. REAL OPEN QUESTION, recorded in the story's Open Decisions for the user/TD: does THIS story own writing the re-scoped guard as an actual call-site-allowlist test (~+0.1 agent-day), or does item 13 stay a doc-only ADR amendment leaving the invariant unenforced-by-test? The producer deliberately did NOT invent that AC. Buffer's SECONDARY named consumer; named lever = ship VB-1 only (body + accessor) and defer the hit proxy/slice hook to S11"
-    completed: ""
-  - id: "needs-mood-010"
-    name: "⚑ THE CROWN — Live-pair shelter recovery round trip (AC34, MILESTONE CRITERION #5). Sequenced LAST"
-    file: "production/epics/needs-mood-system/story-010-live-pair-shelter-recovery.md"
-    priority: must-have
-    status: complete
-    owner: "ai-programmer"
-    estimate_days: 1.5
-    blocker: "THREE-LANE CONVERGENCE, SEQUENCED LAST. Deps verified in its own header: needs-mood-003 (Complete) + 004/006/007/008 (all in-sprint, lane B) + villager-ai-018 (in-sprint, lane A) + the furniture chain building-028 -> 016 (in-sprint, lane C) + build-validation-006 shelter classification (Complete). ⚑ F1 — the story file CONTRADICTS ITSELF on whether the bed must be real: Dependencies demand 028->016->017 'landed and REAL', Implementation Notes permit mocking 'the bed's existence', Out of Scope lists the chain. Resolved toward the Implementation Notes (the only seam it forbids mocking is Needs<->Villager AI); 017 deferred because its own header pulls building-009 + 015, which pull 012, which pulls 011 — four extra stories for the demolition half criterion #5 never exercises. ESCALATED AS USER RULING D8. ⚑ F2 — needs-mood-009 claims 'Unlocks: 010' but 010's own Dependencies omit it; the consuming header is authoritative, so 009 is NON-BLOCKING. BUFFER'S PRIMARY NAMED CONSUMER; named lever from the story itself = seed the need lower for the fast path and run the full ~1072-tick anchor exactly once, then escalate to TD rather than relaxing the ordering assertion. THE SINGLE MOST VALUABLE ASSERTION is the poll-not-event variant: re-run with need_urgent deliberately UNCONNECTED and the round trip must still complete identically (state is truth, the event is a latency hint). CROSS-LANE FILE HANDOFF: the production-wiring AC edits GameWorld's Booting path — a godot-specialist file changed from the ai-programmer lane; serialize against anything lane C has open in game_world.gd. Evidence requires BOTH the integration test AND a run-level capture in production/qa/evidence/"
-    completed: ""
-  - id: "scene-006"
-    name: "⚑ Villager need seeding in the boot sequence — THE CROWN'S PRODUCTION COUNTERPART; the payoff loop cannot start in the shipped game today"
-    file: "production/epics/scene-world-management/story-006-villager-need-seeding-in-boot-sequence.md"
-    priority: must-have
-    status: complete
-    owner: "godot-specialist"
-    estimate_days: 0.5
-    blocker: "ADDED 2026-07-27 by the producer. Blocked on NOTHING — deps needs-mood-006, villager-ai-021, scene-005, scene-004 all Complete. .gd review: godot-gdscript-specialist. ⚑ THIRD OCCURRENCE OF THE SAME PATTERN: VoxelWorldGrid.generate_terrain() shipped green and uncalled, Valley.spawn_starting_roster() shipped green and uncalled (both fixed by scene-005), and now NeedsMood.initialize_villager(). Each was found only when something actually RAN. The rule the story records: A NEW PRODUCTION API NEEDS A PROVEN CALLER IN THE SAME SPRINT, OR IT IS DEAD CODE WITH GREEN TESTS. ⚑ FILED IN scene-world-management, NOT needs-mood: the deliverable is a boot-phase ordering change in valley.gd/game_world.gd under ADR-0005 (this epic's own governing ADR and own files) driving an already-landed needs-mood surface; needs_mood.gd is expected NOT to change. Same reasoning that homed scene-005 here. ⚑ PREMISE CORRECTED, MEASURED NOT ASSUMED: the reported 'first wiring attempt turned the suite red (18 errors, 1 failure)' DID NOT REPRODUCE. The producer applied initialize_villager at BOTH assignment sites and ran both suites headless on 2026-07-27 — unit 878/878 and integration 429/429, 0 errors 0 failures 0 orphans exit 0 (the same 1307 needs-mood-006 closed against); the probe edit was reverted, valley.gd is unchanged on disk. All three named failure candidates ruled out: (a) config is Inspector-wired in valley.tscn line 75 so it is non-null at @onready — seeding runs pre-setup() WITHOUT erroring (still a real silent-correctness defect, see AC-SEED-AFTER-SETUP, but not a crash); (b) NO test asserts needs are untouched at spawn; (c) the crown test builds its own NeedsMood via _make_needs_mood and never touches Valley's hosted instance, so it cannot double-seed. THEREFORE the work is NOT 'fix 18 errors' — it is making the call site ADR-0005-legal and making it PROVABLE, because a green suite is exactly what this defect already produces. +0.5 contingency reserved if the failure resurfaces; on red, DIAGNOSE and record the cause, never revert the wiring. ⚑ THE ONE TRAP THAT DECIDES THIS STORY: the obvious assertion is VACUOUS. NeedsMood's whole read surface answers benign defaults for untracked ids by design (get_need_value -> 100.0, get_need_state -> SATISFIED, get_mood_band -> HAPPY, has_urgent_need -> false, none creating a record), so 'assert get_need_value(0, sleep) == 100.0 at ACTIVE' PASSES ON TODAY'S BROKEN BUILD. The divergence exists only under time: _pass_f1_decay iterates _need_records, so an unseeded villager never decays, never crosses urgency_threshold (25.0 at 0.07/tick = ~1072 ticks), never emits need_urgent, never triggers the tier-1 sleep priority. Use the time probe (drive N ticks, assert strictly < 100.0) or an additive read-only record predicate — and PROVE non-vacuity by deleting the production call once and recording the observed failure in the commit body. ⚑ ADR-0005 CONSTRAINT: needs-mood-006's own Control Manifest says initialization is 'never in _ready()'. _wire_villager_population() IS called from _ready(), so villager 0's seeding must MOVE to the boot path (_run_world_genesis is the natural home; exact method shape is the TD/implementer call, the constraint is not). The roster-loop site is already legal. Leave the needs_provider ASSIGNMENTS where they are — the crown's test_no_other_call_site_assigns_needs_provider grep-guards exactly one assigning file. USER DECISION SURFACED (story Open Decision 1): whether to fund a cheap dead-code guard — producer recommends option (b), a growing boot-invariant assertion block (~0.1 day), over option (a) a public-API call-site grep test (~1.0 day, high false-positive rate, would fire on generate_terrain which is CORRECTLY uncalled and grep-guarded to stay so)"
-    completed: ""
-  - id: "build-validation-007"
-    name: "room_recognized continuity & celebration pacing — lane A's gap-filler; unblocks bv-008 and bv-009"
-    file: "production/epics/build-validation-navigability/story-007-room-recognized-continuity-and-pacing.md"
-    priority: should-have
-    status: complete
-    owner: "ai-programmer"
-    estimate_days: 1.0
-    blocker: "Deps build-validation-004/005 both Complete — blocked on nothing. Runs on lane A in the gap between villager-ai-018 and the crown; it is NOT on the crown's path, so it is safe to trim. The snapshot is EDGE-DETECTION MEMORY ONLY, never a compute cache. NEVER re-fire room_recognized on a re-analysis that keeps a room valid, or on merges/splits of existing valid rooms. At most one celebration EVENT per room_cue_cooldown_ticks — READ THE CONFIG, never the prose: the knob (20) was authored against an earlier tick rate and the shipped rate is 4.0/s. The cue itself is CD-protected (Art Bible 5.6); this story owns the signal contract and pacing only. ⚑ FIXTURE TRAP (hit independently TWICE in S09): sealing a gap with a solid block creates a legal step-up that reopens the escape — assert the seal is still sealed AFTER the sealing write. ⚑ Open item D6(i): the celebration stagger is unspecified in every document that mentions it and still has no presentation-layer owner"
-    completed: ""
-  - id: "build-validation-008"
-    name: "Warning/Info tiers, exclusivity & load-pass emissions"
-    file: "production/epics/build-validation-navigability/story-008-warning-info-tiers-and-load-pass.md"
-    priority: should-have
-    status: complete
-    owner: "godot-gdscript-specialist"
-    estimate_days: 1.0
-    blocker: "HARD: build-validation-007 (in-sprint — AC31 asserts both silences). Deps bv-005/006 Complete. FIRST TRIM CANDIDATE after bv-009: its value is positional and bv-009 is its only consumer. Warning and Info are TWO SEPARATE TYPED SIGNALS, not severity payloads of one — do not collapse them. Level-triggered re-emission once per qualifying pass. There is deliberately NO 'cleared' signal — clearing IS the cessation of re-emission plus the queryable state. EXACTLY FOUR SIGNALS TOTAL from this system. Warning supersedes Info, mutually exclusive PER FURNITURE ITEM. shelter_status_changed (bv-006) is independent of both tiers. NO warning on a sealed space containing only decorative furniture or only a villager. Grace/dismissal-debounce/re-show timing is UI-owned (ADR-0011) — do NOT implement it here. Same fixture trap applies"
-    completed: ""
-  - id: "building-011"
-    name: "Plan-only undo/redo (criterion #12) — S09 CARRY-FORWARD, deferred not dropped"
-    file: "production/epics/building-system/story-011-plan-only-undo-redo.md"
-    priority: should-have
-    status: complete
-    owner: "godot-specialist"
-    estimate_days: 1.0
-    blocker: "Deps building-002 + 032 both Complete (S7). Deliberately moved out of S09 mid-sprint on the producer's own trim recommendation; the QA sign-off's section 13 says 'deferred, not dropped; pull early in S10'. DEFERRING IT A SECOND TIME IS A SIGNAL WORTH NOTICING, not a free move — prefer trimming bv-008 first. Undo NEVER mutates a Built cell (the existing non-writer grep guard extended to the undo path): full undo of built geometry is rejected because it would make built geometry non-authoritative and bypass ADR-0009's occupancy/seal semantics and the worker-executed mutation contract. Redo re-creates only STILL-VALID cells, dropping invalidated ones with feedback. Stack bounded (undo_stack_depth 50) and EXCLUDED from serialize() (ADR-0012, TR-033). Also unblocks building-012, whose own header depends on 009 + 011"
-    completed: ""
-  - id: "build-validation-009"
-    name: "Loop-payoff surface receives real signals (criterion #7) — ⚠ externally blocked"
-    file: "production/epics/build-validation-navigability/story-009-loop-payoff-real-signal-wiring.md"
-    priority: nice-to-have
-    status: not-delivered-carried-to-s11
-    owner: "godot-gdscript-specialist"
-    estimate_days: 0.5
-    blocker: "⛔ EXTERNAL: technical-director concurrence on CD Ruling 2's implementation form — DO NOT START WITHOUT IT. ⚑ THE COLLISION TO RESOLVE FIRST: CD Ruling 2 specifies PayoffDetail as a typed RefCounted sidecar, and S8 MEASURED that Godot 4.7 cannot @export RefCounted/Object. CD's own scope note permits TD to substitute an equivalent form (Resource vs RefCounted) provided the five assertable conditions hold — this is a DECISION, not a code workaround to improvise. FIRST TRIM CANDIDATE (it is externally blocked anyway; cutting it costs nothing this sprint). In-sprint dep: bv-007. Dep bv-006 Complete. Injected-tier binding only; grep-guard proves zero placeholder emitters remain on the payoff path; LoopPayoffSignalSurface's parameter list is NEVER reshaped (a new payoff kind is a new payoff_type value); NO CONNECT_DEFERRED on this path — it would break Rule 10's one-pass-one-frame reconciliation unit"
+    blocker: "START DAY ONE on lane R2 — its own header depends on building-021 + building-029, both Complete. ⚑ F5 — 031's Unlocks line names 'Story 015 (extends to Built -> demolition)', but building-015's OWN Dependencies read only 'Story 002, Story 009, Story 012'. THE CONSUMING STORY'S HEADER IS AUTHORITATIVE (the rule that found S09's building-012 inversion and S10's F1/F2), so 031 is NOT on the C1 serial chain and runs fully parallel. Scheduled anyway because criterion #11's own wording names the removal tool, and because it is what scene-007 hosts as the chain's caller. Removal tool as a ToolStateMachine mode over blueprint cells and their micro-states, revoking claims on cells it removes. DO NOT implement the Built->demolition extension here — that is building-015's scope."
     completed: ""
   - id: "building-009"
-    name: "Demolition orders (blocks) — the Cluster C tier C1 opener, criterion #11"
+    name: "Demolition orders (blocks) — C1's head, criterion #11; day one on lane C, it gates three in-sprint stories"
     file: "production/epics/building-system/story-009-demolition-orders-blocks.md"
-    priority: nice-to-have
-    status: not-delivered-carried-to-s11
+    priority: must-have
+    status: ready-for-dev
     owner: "godot-specialist"
     estimate_days: 1.0
-    blocker: "Its OWN header depends on building-002 (Complete) and NOTHING ELSE — clean. Worker-executed block demolition with restore_value write-back; job-based and uniform, no instant-removal carve-out. WHY IT IS WORTH PULLING EVEN AS A NICE: its Unlocks line names 010 (Abriss), 012 (floor-excavation restore), 015 (removal-tool branch) AND 017 (furniture demolition reuses this contract) — it is the single head of the four-story chain that USER RULING D8 would need if criterion #5 is ruled to require a demolishable bed. Landing it here de-risks that ruling for one story. ⚑ DO NOT TRIM THIS if D8 is ruled toward option (b) or (c) — it becomes the head of a mandatory chain. C1 is criterion-#11-protected and never on the cut lever"
+    blocker: "START DAY ONE on lane C — its own header depends on building-002 (Complete) AND NOTHING ELSE. Carried from S10 as an un-pulled Nice; now a Must and the head of the D8 option (c) chain. Worker-executed block demolition with restore_value write-back; DEMOLITION IS JOB-BASED AND UNIFORM — no instant-removal carve-out anywhere, which is the invariant building-017 later inherits to remove the last one. Its Unlocks line names 010, 012, 015 and 017: A SLIP HERE PUSHES THREE IN-SPRINT STORIES, which is why it starts day one on an otherwise-idle lane. Mid-sprint trip-wire: if building-015 has not started by ~day 6, trim building-ui-001 and villager-ai-013 immediately rather than compressing scene-007."
     completed: ""
+  - id: "building-012"
+    name: "Floor-excavation restore_value — Cluster 0 residue, unblocked by building-011 landing"
+    file: "production/epics/building-system/story-012-floor-excavation-restore-value.md"
+    priority: must-have
+    status: ready-for-dev
+    owner: "godot-specialist"
+    estimate_days: 1.0
+    blocker: "HARD: building-009 (in-sprint). Deps building-002 Complete and ⚑ F4 — building-011 IS COMPLETE (2026-07-27, 1355/1355) AND IT IS THE SAME 011 THE D8 CHAIN MEANT: 012's own header reads 'Story 002 (project entity), Story 009 (demolition writeback), Story 011 (undo restore)'. THE CHAIN IS THEREFORE 009 -> 012 -> 015 -> 017, DEPTH 4, NOT THE DEPTH-5 009 -> 011 -> 012 -> 015 -> 017 THAT D8 ASSUMED — one story cheaper than the ruling priced. restore_value recorded on floor-over-terrain excavation and written back on demolish/cancel so building over terrain is REVERSIBLE WITHOUT DESTROYING THE TERRAIN UNDERNEATH. Coordinates with TR-voxel-world-050. Depth-2 on lane C."
+    completed: ""
+  - id: "building-015"
+    name: "Draft-eraser / removal branch (Built -> demolition routing)"
+    file: "production/epics/building-system/story-015-draft-eraser-removal-branch.md"
+    priority: must-have
+    status: ready-for-dev
+    owner: "godot-specialist"
+    estimate_days: 1.0
+    blocker: "HARD: building-009 AND building-012 (both in-sprint). Dep building-002 Complete. ⚑ building-031 is NOT a dependency (F5) despite 031's Unlocks line — 015's own header does not list it. The eraser BRANCHES ON CELL MICRO-STATE: a not-yet-Built cell is CANCELLED (with 012's restore_value applied), a Built cell ROUTES INTO 009's demolition-order contract — never an instant removal. This is the story that makes 'tear it down' ONE UNIFORM VERB rather than two behaviours. Depth-3 on lane C."
+    completed: ""
+  - id: "building-017"
+    name: "Furniture demolition — closes criterion #6 to 4/4 and PAYS D8 option (c)'s OWED FOLLOW-ON AC"
+    file: "production/epics/building-system/story-017-furniture-demolition.md"
+    priority: must-have
+    status: ready-for-dev
+    owner: "godot-specialist"
+    estimate_days: 1.0
+    blocker: "HARD: building-009 AND building-015 (both in-sprint). Dep building-016 Complete (S10) — all three are its own header. Furniture demolition REUSES 009's job-based contract and 015's not-yet-Built branch, removing the LAST instant-removal carve-out; a multi-cell footprint demolishes as ONE ENTITY, never per-cell. ⚑ THE DEBT, NAMED: needs-mood-010's bed-revocation edge case is currently proven by firing FurnitureBedProvider.furniture_revoked DIRECTLY (QA-verified in the S10 sign-off Gate 2). THIS STORY OWES ITS NON-VACUOUS RE-VERIFICATION — re-run shelter_recovery_live_pair_test.gd's revocation case driven by a REAL DEMOLITION JOB COMPLETING, asserting wake + stop_recovery crediting ZERO that tick + ownership dissolving. This is the follow-on AC that D8 option (c) promised in exchange for letting the crown ship in S10; it is BLOCKING. Same discipline already applied twice (BV-1's furniture-transparency guard, bv-006's need-functional branch). ⚑ CROSS-LANE FILE HANDOFF: that test file belongs to the ai-programmer lane — serialize the re-run against anything lane B has open. Depth-4 on lane C."
+    completed: ""
+  - id: "scene-007"
+    name: "⚑ Build-tool & project-lifecycle hosting in the Valley scene — THE FOURTH SHIP-GREEN-AND-UNCALLED; sequenced LAST on lane C"
+    file: "production/epics/scene-world-management/story-007-build-tool-and-project-lifecycle-hosting.md"
+    priority: must-have
+    status: blocked
+    owner: "godot-specialist"
+    estimate_days: 1.0
+    blocker: "⛔ STORY FILE DOES NOT EXIST — DAY-ONE AUTHORING GATE G2, owner: producer. Unlike presentation-003 in S10 there is NO TD SPEC TO TRANSCRIBE: scope derives ONLY from production/epics/building-ui/EPIC.md Known Conflict 3's verified module list and ADR-0005's boot phases. INVENT NOTHING. Then /story-readiness before /dev-story. ⚑ F6, VERIFIED IN SOURCE 2026-07-27: valley.gd::get_injected_tier_modules() returns exactly 12 modules (voxel grid, mesher, mesh streamer, camera input, ToolStateMachine, PlacementPick, CommitPipeline, ConstructionTickLoop, NeedsMood, VillagerAi, TorchFlicker, VillagerBodyPresenter) and Valley.tscn's node list matches. BuildEditorMode, WallTool, FloorTool, RoofTool, BlockTool, FurnitureTool, GhostPreview and UndoRedoStack are IN NO SCENE; BuildProjectRegistry and ConstructionJobQueue are RefCounted and CONSTRUCTED NOWHERE IN src/. building-ui Known Conflict 3 recorded this on 2026-07-26 and IT SURVIVED building-001 (build editor mode) LANDING. CONSEQUENCE: without this story, rid-009's real bed sits in a palette no hosted tool can read, AND THE ENTIRE C1 DEMOLITION CHAIN SHIPS GREEN WITH ZERO PRODUCTION CALLERS — five stories of exactly the pattern the S10 sign-off named three times (generate_terrain, spawn_starting_roster, initialize_villager), at four times the scale. USER RULING D9. Hosting is NOT DI: Valley REPORTS the list via get_injected_tier_modules(); GameWorld calls setup(). ⚑ NON-VACUITY IS THE WHOLE STORY, exactly as in scene-006: the proof is an integration assertion that a placement/demolition intent driven through the HOSTED tool reaches the grid or the job queue — PROVE IT BY DELETING THE HOSTING CALL ONCE AND RECORDING THE OBSERVED FAILURE IN THE COMMIT BODY. Sequenced after building-031 so the removal tool is hosted with the rest. BUFFER'S SECONDARY NAMED CONSUMER; named lever = host the TOOL TIER ONLY and defer BuildProjectRegistry / ConstructionJobQueue / UndoRedoStack to S12 AS A NAMED DEBT — never ship the chain with no caller and no debt recorded."
+    completed: ""
+  - id: "rid-006"
+    name: "visual_asset resolution validation (two failure shapes) — sequenced strictly AFTER rid-009"
+    file: "production/epics/resource-item-database/story-006-visual-asset-validation.md"
+    priority: should-have
+    status: backlog
+    owner: "godot-gdscript-specialist"
+    estimate_days: 0.5
+    blocker: "ORDERING CONSTRAINT, NOT A STATED DEPENDENCY (F3): its own header depends only on rid-004 (Complete), but it MUST land AFTER rid-009. It makes a null visual_asset a TERMINAL BOOT HALT — vacuous before content exists, boot-halting after content authored without meshes. Its acceptance therefore includes: the four shipped entries pass it. ⚑ IF THE MESHES ARE NOT READY, SHIP rid-009 AND TRIM THIS — that ordering is safe; the reverse is not. Boot validation checks RESOURCE-LOAD SUCCESS FIRST, then visual_asset != null — two distinct diagnostics, both terminal, ORDER ASSERTED (a broken .tres must report 'entry failed to load', never 'visual_asset unresolved'). visual_asset is a typed Mesh, never a path string — NO filesystem existence check."
+    completed: ""
+  - id: "villager-ai-019"
+    name: "Wandering / idle micro-behaviors — Cluster B's opener, CD-protected, unblocks criterion #9"
+    file: "production/epics/villager-ai-behavior/story-019-wandering-micro-behaviors.md"
+    priority: should-have
+    status: backlog
+    owner: "ai-programmer"
+    estimate_days: 1.0
+    blocker: "Its own header depends on villager-ai-006 + 007, both Complete — BLOCKED ON NOTHING, day one on lane B. Deferred from S09 and S10; Cluster B is CD-PROTECTED and cutting it requires CD sign-off. Idle fall-through produces bounded, reachable wandering off the EXISTING graph — never a new pathfinder; deterministic under the tick contract, no wall-clock. THE MILESTONE'S OLDEST OPEN FINDING RIDES ON THIS: criterion #9 says the CD ruled the slice debrief's #1 'world lacks life' finding stays OPEN until presentation-001 Sub-B lands, and Sub-B is gated on exactly this story."
+    completed: ""
+  - id: "presentation-001-subB"
+    name: "Ambient life wave 1, Sub-scope B — villager idle behaviors in the composed Valley"
+    file: "production/epics/presentation-experience/story-001-ambient-life-wave-1.md"
+    priority: should-have
+    status: backlog
+    owner: "ai-programmer"
+    estimate_days: 1.0
+    blocker: "SUB-SCOPE B of an existing story (Sub-A Complete 2026-07-24; the file exists, this is not a fabricated story). HARD: villager-ai-019 (in-sprint) — its own header states 'the hook cannot play idle behaviors until an Idle/Wandering state exists to read'. Second prerequisite SATISFIED IN S10: presentation-003 (TD downstream item 16 added it; the villager body landed). The idle/wandering hook plays in game_world.tscn, not in a harness. ⚑ CRITERION #9 IS MET ONLY ON A WRITTEN, DATED CD CLOSE ENTRY in production/qa/evidence/ambient-life-wave-1-evidence.md — NEVER on a green suite. Do not mark the criterion met from tests passing. Advisory evidence (screenshots) per the testing standards. The four CD advisories on criterion #8 (golden-hour re-shoot, foliage hue, torch colour, Dusk/Horizon tests) remain outstanding and are NOT closed by this story."
+    completed: ""
+  - id: "needs-mood-009"
+    name: "Real-time-rate pass at ticks_per_second = 4.0 (criterion #4) — PURE DOCUMENTATION; gated on D6(ii)"
+    file: "production/epics/needs-mood-system/story-009-real-time-rate-pass.md"
+    priority: should-have
+    status: blocked
+    owner: "systems-designer"
+    estimate_days: 1.0
+    blocker: "⛔ EXTERNAL: USER RULING D6(ii) — cross-GDD authority. ⚑ F8 — THE CONTRADICTION IS INSIDE THE STORY FILE, not a tidiness question: its 5th AC REQUIRES correcting design/gdd/building-system.md's base_build_ticks and BOTH base_demolition_ticks mirrors, while its own Dependencies section says 'Coordinate (DO NOT EDIT FROM HERE): design/gdd/building-system.md's F3 variable table and both base_demolition_ticks mirrors ... are in the sweep's scope but not this epic's ownership.' Same document, opposite instructions. This is why the story has now been deferred TWICE. In-epic deps 002/003/005/008 are ALL Complete — nothing else blocks it. Scope: every Needs & Mood rate carries a stated real-time equivalent at 4.0/s; the pacing cross-reference resolved BY NAME (tick anchors CONFIRMED, feel targets RESTATED per CD Ruling 1 Option B); the Game Feel section's ~10-minute heartbeat / ~7-min stretch restated to ~4 min 45 s / ~3 min (CD: 'mine, not a mechanical conversion — do not skip it'); the REPO-WIDE 'at 1x' sweep across all of design/, including build-validation-navigability.md's room_cue_cooldown_ticks '20 (= 10s at 1x)' -> 5 s; the kill criterion recorded WITH its explicit non-trigger; the max_ticks_per_frame = 10 prose corrected to the landed 12; and a CONFIG-ANCHOR REGRESSION TEST so a future silent retune fails the suite. ⚑ HARD GUARD: NO .tres EDIT, NO AC ANCHOR MOVE, NO TEST EDIT. If this story produces a config diff, the ruling was not followed — which is also what makes option (a) of D6(ii) provably zero-blast-radius."
+    completed: ""
+  - id: "building-ui-001"
+    name: "HUD host scaffold — Cluster D's first stake (criterion #10); gated on the TD hosting ruling"
+    file: "production/epics/building-ui/story-001-hud-host-scaffold.md"
+    priority: nice-to-have
+    status: blocked
+    owner: "godot-specialist"
+    estimate_days: 1.0
+    blocker: "⛔ EXTERNAL: technical-director ruling on building-ui Known Conflict 1/3 — WHICH SCENE OWNS THE HUD NODE. ⚑ IT IS THE SAME ARCHITECTURAL QUESTION scene-007 ANSWERS FOR THE TOOL TIER — decide once, apply twice; sequence this AFTER scene-007. Dep building-001 (build editor mode) Complete. The HUD CanvasLayer/Control host with the Z-zone system every other building-ui story docks into; GREP PROVES THE HUD WRITES NO SIMULATION STATE (zero VoxelWorldGrid.set_cell / bulk_write / clear_cell, zero config-field writes). ⚑ src/ui/ DOES NOT EXIST — this epic starts from zero (KC1, recorded, NOT a defect; it is why the estimate reads as it does). ⚑ SCHEDULING RATIONALE: the milestone's cut-lever signal 'Cluster D has not started by S12' fires at the START of S12. This one story is what makes the honest answer 'started'. IT IS A NICE, SO IT IS BY DEFINITION THE FIRST THING TRIMMED — trimming it is what makes the lever fire. That may be the correct outcome; it must not be an accident. SEE USER RULING D3."
+    completed: ""
+  - id: "villager-ai-013"
+    name: "Nudge-aside / vacate (F4) — the CD's named pull-forward trigger"
+    file: "production/epics/villager-ai-behavior/story-013-nudge-aside-vacate-f4.md"
+    priority: nice-to-have
+    status: backlog
+    owner: "ai-programmer"
+    estimate_days: 0.5
+    blocker: "Its own header depends on villager-ai-004 + 006, both Complete — blocked on nothing. FIRST TRIM CANDIDATE: pure cost this sprint, no in-sprint consumer (villager-ai-020, the breather beat, depends on it and is S12). A blocked villager asks the occupant to STEP ASIDE rather than re-pathing or freezing; deterministic ordering per ADR-0009. The CD named the 013+019 seam as precisely the moment the settlement stops reading as mechanical, which is why it is scheduled at all alongside 019."
+    completed: ""
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SPRINT 10 HISTORY (retained; 14 of 16 TRACKED stories complete — the Sprint Result's own "16/16"
+# was CORRECTED by the QA sign-off: build-validation-009 (TD-gated, concurrence never given) and
+# building-009 (correctly deferred per D8 option (c)) never landed. Suite 1198 -> 1383 (the Result's
+# "1264" opening figure was also wrong), green 0 orphans on every story commit.
+# THE PAYOFF SPRINT — MILESTONE CRITERION #5 IS MET. QA verified the crown by reading the test file,
+# not the story's claim: real NeedsMood + real VillagerAi at the forbidden seam, real
+# FurnitureRegistry.place(), real BuildValidation shelter classification, the poll-not-event variant
+# green with need_urgent deliberately unconnected, x1.0 vs x0.7 both asserted. Villagers got BODIES
+# (presentation-003, with a genuine _visual_position call-site allowlist guard) and the loop can now
+# START in production (scene-006, non-vacuity proven by deletion).
+# Sign-off verdict: APPROVED WITH CONDITIONS. Condition #1 (the 16/16 and 1264 figures) is CLOSED —
+# sprint-10.md's Sprint Result has been corrected in place.)
+# ─────────────────────────────────────────────────────────────────────────────
+sprint_10_history:
+  sprint: 10
+  goal: "Close milestone criterion #5 — the payoff loop, live-pair, no mocks at the Needs<->Villager-AI seam. Complete the Needs & Mood formula surface (nm-005 mood smoothing FIRST since it gates 006/007/008; nm-004 recovery interruption in parallel), land the two halves the payoff needs from outside — bed claiming (villager-ai-018) and a real placeable multi-cell bed (building-028 -> 016) — then converge all three lanes in needs-mood-010, THE CROWN (AC34). In parallel give the villager a body (presentation-003) so criterion #5's run-level capture is a picture rather than a log and S11's three blocked villager-info-ui stories clear. Capacity-permitting extend Build Validation's signal surface (bv-007 -> 008, with bv-009 as the TD-gated criterion-#7 wiring) and clear the S09 carry-forward (building-011) plus the Cluster C tier C1 opener (building-009). END OF S10 IS THE MILESTONE'S CUT-LEVER CHECKPOINT #1 — its signal is criterion #5."
+  start: "2026-07-27"
+  end: "2026-07-27"
+  generated: "2026-07-27"
+  updated: "2026-07-27"
+  result: "14 of 16 TRACKED stories complete (10 Must + 3 Should + 2 Nice planned, plus scene-006 added mid-sprint). CORRECTED BY THE QA SIGN-OFF, which caught the Sprint Result overclaiming '16/16': build-validation-009 (Nice, externally gated on TD concurrence re: CD Ruling 2 vs the measured Godot 4.7 @export RefCounted collision — concurrence never given) and building-009 (Nice, correctly not pulled once D8 resolved toward option (c)) NEVER LANDED. Suite 1198 -> 1383 (+185 cases across 14 stories; the Result's '1264' opening figure was a mid-sprint checkpoint, not the start), green 0 orphans on every story commit, exit 0. THE CROWN LANDED — MILESTONE CRITERION #5 IS MET, and QA verified it by reading shelter_recovery_live_pair_test.gd directly rather than trusting the story header: a real NeedsMood and a real VillagerAi with needs_provider assigned to the real instance (no mock at the one forbidden seam), a real FurnitureRegistry.place() laying a genuine 2-cell bed, a real BuildValidation classifying an actual roofed/floored room on a real VoxelWorldGrid via a new FurnitureBedProvider adapter, the poll-not-event variant green with need_urgent DELIBERATELY UNCONNECTED, and x1.0 sheltered vs x0.7 unsheltered both asserted. ALSO LANDED: villagers became visible and clickable (presentation-003 — the hit proxy rides the visual position, and it wrote the _visual_position single-source-of-truth guard that had lived only as prose across three documents; QA independently confirmed it is a GENUINE CALL-SITE ALLOWLIST, not a filename check); the payoff loop can actually START in production (scene-006 — needs-mood-006 shipped initialize_villager green and uncalled, so F1 decay iterated nothing and a villager could never get tired in the shipped game; its probe is demonstrably non-vacuous because the obvious assertion PASSES ON THE BROKEN BUILD, so the test measures time instead and was shown to FAIL with the production call removed); furniture as a registry rather than voxels (028), a bed as one entity across two cells (016), bed claiming with ground-sleep fallbacks (villager-ai-018), the full needs formula surface (mood smoothing, recovery interruption, spawn init, why-strings, burst/pause/warp determinism), plan-only undo (011), and room-recognition pacing + warning tiers (bv-007/008). PROCESS FINDINGS: (1) THIRD OCCURRENCE of ship-green-and-uncalled after generate_terrain and spawn_starting_roster — countermeasure chosen was a growing boot-invariant assertion block plus the planning habit that every story adding a public API needs a caller story in the same sprint; the sign-off asked whether a FOURTH would land outside that guard's reach, and S11's F6 answers YES (the entire build-tool tier is in no scene). (2) A PARENT MISDIAGNOSIS, CORRECTED IN THE RECORD: an early scene-006 wiring attempt was reverted citing 18 errors and 1 failure; the producer re-applied the IDENTICAL change and measured green (1307/1307) — the red run had another lane's half-finished work in the same tree. Lesson: a suite run is only evidence about the change under test if nothing else in the tree is mid-edit; re-run in isolation before reverting. (3) The recurring fixture trap (sealing a gap with a solid block creates a legal step-up that reopens the escape) bit a FOURTH agent, who recognized it from the briefing — the briefing process working. QA SIGN-OFF: APPROVED WITH CONDITIONS (qa-signoff-sprint-10-2026-07-27.md), plus the first-ever consolidated smoke artifact (smoke-sprint-10-2026-07-27.md), satisfying Sprint 9's condition #4. OPEN CONDITIONS CARRIED TO S11: #1 CLOSED (the Sprint Result was corrected in place); #2 build-validation-006's is_need_functional TRUE branch REMAINS UNVERIFIED despite being a DoD line marked BLOCKING and despite building-028 landing — blocked by MISSING CONTENT, since res://data/items/ does not exist at all (this is S11's crown, rid-009); #3 NO qa-plan-sprint-10 was ever produced (S11 makes /qa-plan sprint a DAY-0 GATE, not a DoD line, so the same failure cannot repeat); #4 both pre-flight ruling documents still unratified after three sprints; #5 the multi-cell furniture REDO atomicity gap (redo re-validates every cell independently and can rebuild half a bed) and bv-007's unasserted tick-source production wiring, both real and both without an owning story. STALE CARRY-FORWARD CORRECTED IN S11 PLANNING: the sign-off's 'Cluster D UI epics — still no epics created' is FALSE as of 2026-07-27; building-ui (18 stories) and villager-info-ui (7) both exist at Status: Ready, and villager-info-ui's Known Conflict 1 was closed by presentation-003."
+
+  stories:
+    - id: "villager-ai-018"
+      name: "Sleep & home — bed claim (THE MOVE-IN MOMENT); the crown's villager half"
+      file: "production/epics/villager-ai-behavior/story-018-sleep-and-home.md"
+      priority: must-have
+      status: complete
+      owner: "ai-programmer"
+      estimate_days: 1.0
+      blocker: "START DAY ONE on lane A — deps villager-ai-006/009/011 all Complete, blocked on nothing. Bed claiming REUSES story-011's atomic-claim primitive; do NOT write a second claim mechanism. Needs rates stay MOCKED here (they go live in needs-mood-010, not here). AC24's widened source enum matters: ground_no_bed_owned vs ground_bed_unreachable — the distinction feeds the why-string (nm-007), not the rates"
+      completed: ""
+    - id: "needs-mood-005"
+      name: "F3 mood smoothing, snap rule, mean_active & band events — FIRST on lane B, it gates three Must stories"
+      file: "production/epics/needs-mood-system/story-005-mood-smoothing-and-band-events.md"
+      priority: must-have
+      status: complete
+      owner: "godot-gdscript-specialist"
+      estimate_days: 1.0
+      blocker: "START DAY ONE — gates nm-006, nm-007 and nm-008. Deps needs-mood-001/002 Complete. Domain review: systems-designer (per the S09 Lane-Korrektur — .gd implementation routes to godot-gdscript-specialist; the designer owns formulas and tuning tables, not the implementation). TRAP: use explicit float division (/ 40.0) — integer division on an int-typed mood_smoothing_ticks silently truncates the EMA step to zero. Band boundaries 70/40 are a DISPLAY CONTRACT shared verbatim with Villager Info UI — no second copy in UI code. Grep guard: zero mood references in work/scheduling code (Rule 8, statically checkable)"
+      completed: ""
+    - id: "needs-mood-004"
+      name: "Recovery interruption, mid-recovery re-rating & bed revocation — independent, run parallel to nm-005"
+      file: "production/epics/needs-mood-system/story-004-recovery-interruption-and-re-rating.md"
+      priority: must-have
+      status: complete
+      owner: "godot-gdscript-specialist"
+      estimate_days: 1.0
+      blocker: "Depends on needs-mood-003 (Complete) and NOTHING else — fully parallel-safe. Domain review: systems-designer. AC30: a source change applies from the NEXT tick with no restart, no signal, no lost progress (and the mirror downgrade identically). AC31: interrupted at/below threshold re-enters Urgent BY VALUE with ZERO second urgent emission. stop_recovery's reason arg is DIAGNOSTIC ONLY — proven by three-reason identical-outcome test. This system NEVER subscribes to furniture_revoked and NEVER holds a bed id (the circular punt closed 2026-07-10 — do not re-open it)"
+      completed: ""
+    - id: "building-028"
+      name: "Furniture placement base — single-cell support + palette query; FIRST on lane C, it is the bed"
+      file: "production/epics/building-system/story-028-furniture-placement-base.md"
+      priority: must-have
+      status: complete
+      owner: "godot-specialist"
+      estimate_days: 1.0
+      blocker: "START DAY ONE on lane C — deps building-021/022 + RID all Complete. ⚑ RE-READ AGAINST BV-1 BEFORE STARTING: it inherits TWO blocking ACs it did not have when it was written — (a) a FURNITURE-category completion NEVER bulk_writes to the grid (this is what makes build-validation-002's furniture-transparency guarantee true BY CONSTRUCTION; breaking it silently breaks a shipped, tested, green invariant with no test to catch it), and (b) the registry exposes a placed/removed signal + item enumeration as a duck-typed nil-safe provider. FOLD INTO ITS DoD: re-verify build-validation-006's is_need_functional TRUE branch non-vacuously against a real ItemDefinitionResource once this lands (sign-off section 13 carry-forward)"
+      completed: ""
+    - id: "needs-mood-006"
+      name: "F4 spawn initialization & new-need activation"
+      file: "production/epics/needs-mood-system/story-006-spawn-init-and-need-activation.md"
+      priority: must-have
+      status: complete
+      owner: "godot-gdscript-specialist"
+      estimate_days: 0.5
+      blocker: "HARD: needs-mood-005 (in-sprint — needs mean_active/bands). Dep needs-mood-002 Complete. Domain review: systems-designer. Initialization in an explicitly-callable method reached from the boot path — NEVER _ready(), never inferred from scene state. Inactive needs are ABSENT, not zeroed. Mood is never initialized to 0 or to a literal: the ordering trap this AC exists to prevent is a zero-default mood displaying Low for ~10s at ticks_per_second 4.0 while the EMA catches up — a cold-start VISUAL bug, not a math bug"
+      completed: ""
+    - id: "needs-mood-007"
+      name: "Why-string selection, templates & UI-slot precedence — consumed by the crown's unsheltered edge case"
+      file: "production/epics/needs-mood-system/story-007-why-string-templates-and-precedence.md"
+      priority: must-have
+      status: complete
+      owner: "godot-gdscript-specialist"
+      estimate_days: 1.0
+      blocker: "HARD: needs-mood-005 (in-sprint — mood band for the empty case). Dep needs-mood-003 Complete. Domain review: systems-designer. Composed HERE, consumed VERBATIM by Villager Info UI — the UI never assembles its own from need values (ADR-0001 leaf rule). Pure function of current state: no cached last-reason, no sticky string. A why-string must NEVER name a fix the player cannot take (a trapped villager is never told 'no bed'). All templates in ONE table for a future localization pass"
+      completed: ""
+    - id: "needs-mood-008"
+      name: "Burst ordering, pause & warp determinism (full-cycle tick anchors) — the crown's determinism harness"
+      file: "production/epics/needs-mood-system/story-008-burst-pause-and-warp-determinism.md"
+      priority: must-have
+      status: complete
+      owner: "godot-gdscript-specialist"
+      estimate_days: 1.0
+      blocker: "HARD: needs-mood-005 (in-sprint). Deps needs-mood-002/003 Complete. Domain review: systems-designer. ASSERT AGAINST TimeTickConfig.max_ticks_per_frame (landed default 12 per the S8 re-tune) — NEVER the literal 10 the GDD prose still says. Threshold signals are NEVER coalesced or deduplicated across a burst. SceneTree.paused and Engine.time_scale are project-wide forbidden — grep-guarded"
+      completed: ""
+    - id: "building-016"
+      name: "Multi-cell furniture placement (footprint) — the bed is 2 cells"
+      file: "production/epics/building-system/story-016-multi-cell-furniture-placement.md"
+      priority: must-have
+      status: complete
+      owner: "godot-specialist"
+      estimate_days: 1.0
+      blocker: "Its OWN header depends only on building-002 (Complete). Sequenced after building-028 per the epic's stated direction (028's Unlocks names 016) but NOT serially blocked by it — a 028 slip does not stall 016. footprint authored on ItemDefinitionResource, exposed via the getter-only ItemDefinition, typed Array[Vector3i]. A commit is valid IFF EVERY offset cell independently satisfies support + availability. All footprint cells are ONE entity sharing ONE occupant id — never N entities. NO partial placement"
+      completed: ""
+    - id: "presentation-003"
+      name: "Villager body view, hit proxy & slice hook — THE SUBSTRATE THREE EPICS ARE BLOCKED ON"
+      file: "production/epics/presentation-experience/story-003-villager-body-view-and-hit-proxy.md"
+      priority: must-have
+      status: complete
+      owner: "godot-specialist"
+      estimate_days: 1.0
+      blocker: "✅ AUTHORING GATE CLOSED 2026-07-26 — story file written by the producer, transcribed from production/architecture-decisions-m02-preflight-2026-07-26.md VB-1 (sections 1-6) + VB-2 (full AC list), nothing invented; registered in the presentation-experience EPIC.md. Next: /story-readiness, then /dev-story. Development dep: villager-ai-021 (Complete) is HARD for the integration AC only — every unit AC is testable against a mock roster. .gd review: godot-gdscript-specialist. Body lives in presentation-experience / src/presentation/, NEVER in the Core-layer villager-ai-behavior epic (VB-1 section 1 rejects that layering inversion by name). Area3D hit proxy on ADR-0004 layer 1; ADR-0009 two-layer position model with physics_interpolation_mode = OFF. ⚑ GREP-GUARD CROSS-CHECK DONE, PREMISE CORRECTED: the earlier note here said 'without TD item 13's re-scope this story's own grep AC contradicts a landed guard'. FALSE on both halves. (a) There is NO landed _visual_position grep guard anywhere in neues-spiel/tests/ — the only src/villager_ai grep guards are in tests/integration/villager_ai/config_and_scaffold_test.gd and assert only: no _physics_process, _process(_delta present, no Navigation*3D, no Thread/WorkerThreadPool. The invariant exists as PROSE only (ADR-0009 Validation Criteria, control-manifest.md, villager-ai-004's Forbidden line). (b) VB-2's AC list contains NO _visual_position grep AC — its three grep ACs (zero lerp( in villager_body_view.gd, zero Selection refs, zero mutating calls into VillagerAi) contradict nothing and do not depend on item 13. Nothing will trip in CI. REAL OPEN QUESTION, recorded in the story's Open Decisions for the user/TD: does THIS story own writing the re-scoped guard as an actual call-site-allowlist test (~+0.1 agent-day), or does item 13 stay a doc-only ADR amendment leaving the invariant unenforced-by-test? The producer deliberately did NOT invent that AC. Buffer's SECONDARY named consumer; named lever = ship VB-1 only (body + accessor) and defer the hit proxy/slice hook to S11"
+      completed: ""
+    - id: "needs-mood-010"
+      name: "⚑ THE CROWN — Live-pair shelter recovery round trip (AC34, MILESTONE CRITERION #5). Sequenced LAST"
+      file: "production/epics/needs-mood-system/story-010-live-pair-shelter-recovery.md"
+      priority: must-have
+      status: complete
+      owner: "ai-programmer"
+      estimate_days: 1.5
+      blocker: "THREE-LANE CONVERGENCE, SEQUENCED LAST. Deps verified in its own header: needs-mood-003 (Complete) + 004/006/007/008 (all in-sprint, lane B) + villager-ai-018 (in-sprint, lane A) + the furniture chain building-028 -> 016 (in-sprint, lane C) + build-validation-006 shelter classification (Complete). ⚑ F1 — the story file CONTRADICTS ITSELF on whether the bed must be real: Dependencies demand 028->016->017 'landed and REAL', Implementation Notes permit mocking 'the bed's existence', Out of Scope lists the chain. Resolved toward the Implementation Notes (the only seam it forbids mocking is Needs<->Villager AI); 017 deferred because its own header pulls building-009 + 015, which pull 012, which pulls 011 — four extra stories for the demolition half criterion #5 never exercises. ESCALATED AS USER RULING D8. ⚑ F2 — needs-mood-009 claims 'Unlocks: 010' but 010's own Dependencies omit it; the consuming header is authoritative, so 009 is NON-BLOCKING. BUFFER'S PRIMARY NAMED CONSUMER; named lever from the story itself = seed the need lower for the fast path and run the full ~1072-tick anchor exactly once, then escalate to TD rather than relaxing the ordering assertion. THE SINGLE MOST VALUABLE ASSERTION is the poll-not-event variant: re-run with need_urgent deliberately UNCONNECTED and the round trip must still complete identically (state is truth, the event is a latency hint). CROSS-LANE FILE HANDOFF: the production-wiring AC edits GameWorld's Booting path — a godot-specialist file changed from the ai-programmer lane; serialize against anything lane C has open in game_world.gd. Evidence requires BOTH the integration test AND a run-level capture in production/qa/evidence/"
+      completed: ""
+    - id: "scene-006"
+      name: "⚑ Villager need seeding in the boot sequence — THE CROWN'S PRODUCTION COUNTERPART; the payoff loop cannot start in the shipped game today"
+      file: "production/epics/scene-world-management/story-006-villager-need-seeding-in-boot-sequence.md"
+      priority: must-have
+      status: complete
+      owner: "godot-specialist"
+      estimate_days: 0.5
+      blocker: "ADDED 2026-07-27 by the producer. Blocked on NOTHING — deps needs-mood-006, villager-ai-021, scene-005, scene-004 all Complete. .gd review: godot-gdscript-specialist. ⚑ THIRD OCCURRENCE OF THE SAME PATTERN: VoxelWorldGrid.generate_terrain() shipped green and uncalled, Valley.spawn_starting_roster() shipped green and uncalled (both fixed by scene-005), and now NeedsMood.initialize_villager(). Each was found only when something actually RAN. The rule the story records: A NEW PRODUCTION API NEEDS A PROVEN CALLER IN THE SAME SPRINT, OR IT IS DEAD CODE WITH GREEN TESTS. ⚑ FILED IN scene-world-management, NOT needs-mood: the deliverable is a boot-phase ordering change in valley.gd/game_world.gd under ADR-0005 (this epic's own governing ADR and own files) driving an already-landed needs-mood surface; needs_mood.gd is expected NOT to change. Same reasoning that homed scene-005 here. ⚑ PREMISE CORRECTED, MEASURED NOT ASSUMED: the reported 'first wiring attempt turned the suite red (18 errors, 1 failure)' DID NOT REPRODUCE. The producer applied initialize_villager at BOTH assignment sites and ran both suites headless on 2026-07-27 — unit 878/878 and integration 429/429, 0 errors 0 failures 0 orphans exit 0 (the same 1307 needs-mood-006 closed against); the probe edit was reverted, valley.gd is unchanged on disk. All three named failure candidates ruled out: (a) config is Inspector-wired in valley.tscn line 75 so it is non-null at @onready — seeding runs pre-setup() WITHOUT erroring (still a real silent-correctness defect, see AC-SEED-AFTER-SETUP, but not a crash); (b) NO test asserts needs are untouched at spawn; (c) the crown test builds its own NeedsMood via _make_needs_mood and never touches Valley's hosted instance, so it cannot double-seed. THEREFORE the work is NOT 'fix 18 errors' — it is making the call site ADR-0005-legal and making it PROVABLE, because a green suite is exactly what this defect already produces. +0.5 contingency reserved if the failure resurfaces; on red, DIAGNOSE and record the cause, never revert the wiring. ⚑ THE ONE TRAP THAT DECIDES THIS STORY: the obvious assertion is VACUOUS. NeedsMood's whole read surface answers benign defaults for untracked ids by design (get_need_value -> 100.0, get_need_state -> SATISFIED, get_mood_band -> HAPPY, has_urgent_need -> false, none creating a record), so 'assert get_need_value(0, sleep) == 100.0 at ACTIVE' PASSES ON TODAY'S BROKEN BUILD. The divergence exists only under time: _pass_f1_decay iterates _need_records, so an unseeded villager never decays, never crosses urgency_threshold (25.0 at 0.07/tick = ~1072 ticks), never emits need_urgent, never triggers the tier-1 sleep priority. Use the time probe (drive N ticks, assert strictly < 100.0) or an additive read-only record predicate — and PROVE non-vacuity by deleting the production call once and recording the observed failure in the commit body. ⚑ ADR-0005 CONSTRAINT: needs-mood-006's own Control Manifest says initialization is 'never in _ready()'. _wire_villager_population() IS called from _ready(), so villager 0's seeding must MOVE to the boot path (_run_world_genesis is the natural home; exact method shape is the TD/implementer call, the constraint is not). The roster-loop site is already legal. Leave the needs_provider ASSIGNMENTS where they are — the crown's test_no_other_call_site_assigns_needs_provider grep-guards exactly one assigning file. USER DECISION SURFACED (story Open Decision 1): whether to fund a cheap dead-code guard — producer recommends option (b), a growing boot-invariant assertion block (~0.1 day), over option (a) a public-API call-site grep test (~1.0 day, high false-positive rate, would fire on generate_terrain which is CORRECTLY uncalled and grep-guarded to stay so)"
+      completed: ""
+    - id: "build-validation-007"
+      name: "room_recognized continuity & celebration pacing — lane A's gap-filler; unblocks bv-008 and bv-009"
+      file: "production/epics/build-validation-navigability/story-007-room-recognized-continuity-and-pacing.md"
+      priority: should-have
+      status: complete
+      owner: "ai-programmer"
+      estimate_days: 1.0
+      blocker: "Deps build-validation-004/005 both Complete — blocked on nothing. Runs on lane A in the gap between villager-ai-018 and the crown; it is NOT on the crown's path, so it is safe to trim. The snapshot is EDGE-DETECTION MEMORY ONLY, never a compute cache. NEVER re-fire room_recognized on a re-analysis that keeps a room valid, or on merges/splits of existing valid rooms. At most one celebration EVENT per room_cue_cooldown_ticks — READ THE CONFIG, never the prose: the knob (20) was authored against an earlier tick rate and the shipped rate is 4.0/s. The cue itself is CD-protected (Art Bible 5.6); this story owns the signal contract and pacing only. ⚑ FIXTURE TRAP (hit independently TWICE in S09): sealing a gap with a solid block creates a legal step-up that reopens the escape — assert the seal is still sealed AFTER the sealing write. ⚑ Open item D6(i): the celebration stagger is unspecified in every document that mentions it and still has no presentation-layer owner"
+      completed: ""
+    - id: "build-validation-008"
+      name: "Warning/Info tiers, exclusivity & load-pass emissions"
+      file: "production/epics/build-validation-navigability/story-008-warning-info-tiers-and-load-pass.md"
+      priority: should-have
+      status: complete
+      owner: "godot-gdscript-specialist"
+      estimate_days: 1.0
+      blocker: "HARD: build-validation-007 (in-sprint — AC31 asserts both silences). Deps bv-005/006 Complete. FIRST TRIM CANDIDATE after bv-009: its value is positional and bv-009 is its only consumer. Warning and Info are TWO SEPARATE TYPED SIGNALS, not severity payloads of one — do not collapse them. Level-triggered re-emission once per qualifying pass. There is deliberately NO 'cleared' signal — clearing IS the cessation of re-emission plus the queryable state. EXACTLY FOUR SIGNALS TOTAL from this system. Warning supersedes Info, mutually exclusive PER FURNITURE ITEM. shelter_status_changed (bv-006) is independent of both tiers. NO warning on a sealed space containing only decorative furniture or only a villager. Grace/dismissal-debounce/re-show timing is UI-owned (ADR-0011) — do NOT implement it here. Same fixture trap applies"
+      completed: ""
+    - id: "building-011"
+      name: "Plan-only undo/redo (criterion #12) — S09 CARRY-FORWARD, deferred not dropped"
+      file: "production/epics/building-system/story-011-plan-only-undo-redo.md"
+      priority: should-have
+      status: complete
+      owner: "godot-specialist"
+      estimate_days: 1.0
+      blocker: "Deps building-002 + 032 both Complete (S7). Deliberately moved out of S09 mid-sprint on the producer's own trim recommendation; the QA sign-off's section 13 says 'deferred, not dropped; pull early in S10'. DEFERRING IT A SECOND TIME IS A SIGNAL WORTH NOTICING, not a free move — prefer trimming bv-008 first. Undo NEVER mutates a Built cell (the existing non-writer grep guard extended to the undo path): full undo of built geometry is rejected because it would make built geometry non-authoritative and bypass ADR-0009's occupancy/seal semantics and the worker-executed mutation contract. Redo re-creates only STILL-VALID cells, dropping invalidated ones with feedback. Stack bounded (undo_stack_depth 50) and EXCLUDED from serialize() (ADR-0012, TR-033). Also unblocks building-012, whose own header depends on 009 + 011"
+      completed: ""
+    - id: "build-validation-009"
+      name: "Loop-payoff surface receives real signals (criterion #7) — ⚠ externally blocked"
+      file: "production/epics/build-validation-navigability/story-009-loop-payoff-real-signal-wiring.md"
+      priority: nice-to-have
+      status: not-delivered-carried-to-s11
+      owner: "godot-gdscript-specialist"
+      estimate_days: 0.5
+      blocker: "⛔ EXTERNAL: technical-director concurrence on CD Ruling 2's implementation form — DO NOT START WITHOUT IT. ⚑ THE COLLISION TO RESOLVE FIRST: CD Ruling 2 specifies PayoffDetail as a typed RefCounted sidecar, and S8 MEASURED that Godot 4.7 cannot @export RefCounted/Object. CD's own scope note permits TD to substitute an equivalent form (Resource vs RefCounted) provided the five assertable conditions hold — this is a DECISION, not a code workaround to improvise. FIRST TRIM CANDIDATE (it is externally blocked anyway; cutting it costs nothing this sprint). In-sprint dep: bv-007. Dep bv-006 Complete. Injected-tier binding only; grep-guard proves zero placeholder emitters remain on the payoff path; LoopPayoffSignalSurface's parameter list is NEVER reshaped (a new payoff kind is a new payoff_type value); NO CONNECT_DEFERRED on this path — it would break Rule 10's one-pass-one-frame reconciliation unit"
+      completed: ""
+    - id: "building-009"
+      name: "Demolition orders (blocks) — the Cluster C tier C1 opener, criterion #11"
+      file: "production/epics/building-system/story-009-demolition-orders-blocks.md"
+      priority: nice-to-have
+      status: not-delivered-carried-to-s11
+      owner: "godot-specialist"
+      estimate_days: 1.0
+      blocker: "Its OWN header depends on building-002 (Complete) and NOTHING ELSE — clean. Worker-executed block demolition with restore_value write-back; job-based and uniform, no instant-removal carve-out. WHY IT IS WORTH PULLING EVEN AS A NICE: its Unlocks line names 010 (Abriss), 012 (floor-excavation restore), 015 (removal-tool branch) AND 017 (furniture demolition reuses this contract) — it is the single head of the four-story chain that USER RULING D8 would need if criterion #5 is ruled to require a demolishable bed. Landing it here de-risks that ruling for one story. ⚑ DO NOT TRIM THIS if D8 is ruled toward option (b) or (c) — it becomes the head of a mandatory chain. C1 is criterion-#11-protected and never on the cut lever"
+      completed: ""
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SPRINT 9 HISTORY (retained; 18 stories shipped - 17/17 scheduled Complete + build-validation-006
