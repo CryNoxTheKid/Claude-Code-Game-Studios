@@ -189,7 +189,7 @@ stories:
     name: "Loop-payoff surface receives real signals (criterion #7) — ⚠ externally blocked"
     file: "production/epics/build-validation-navigability/story-009-loop-payoff-real-signal-wiring.md"
     priority: nice-to-have
-    status: blocked
+    status: not-delivered-carried-to-s11
     owner: "godot-gdscript-specialist"
     estimate_days: 0.5
     blocker: "⛔ EXTERNAL: technical-director concurrence on CD Ruling 2's implementation form — DO NOT START WITHOUT IT. ⚑ THE COLLISION TO RESOLVE FIRST: CD Ruling 2 specifies PayoffDetail as a typed RefCounted sidecar, and S8 MEASURED that Godot 4.7 cannot @export RefCounted/Object. CD's own scope note permits TD to substitute an equivalent form (Resource vs RefCounted) provided the five assertable conditions hold — this is a DECISION, not a code workaround to improvise. FIRST TRIM CANDIDATE (it is externally blocked anyway; cutting it costs nothing this sprint). In-sprint dep: bv-007. Dep bv-006 Complete. Injected-tier binding only; grep-guard proves zero placeholder emitters remain on the payoff path; LoopPayoffSignalSurface's parameter list is NEVER reshaped (a new payoff kind is a new payoff_type value); NO CONNECT_DEFERRED on this path — it would break Rule 10's one-pass-one-frame reconciliation unit"
@@ -198,7 +198,7 @@ stories:
     name: "Demolition orders (blocks) — the Cluster C tier C1 opener, criterion #11"
     file: "production/epics/building-system/story-009-demolition-orders-blocks.md"
     priority: nice-to-have
-    status: backlog
+    status: not-delivered-carried-to-s11
     owner: "godot-specialist"
     estimate_days: 1.0
     blocker: "Its OWN header depends on building-002 (Complete) and NOTHING ELSE — clean. Worker-executed block demolition with restore_value write-back; job-based and uniform, no instant-removal carve-out. WHY IT IS WORTH PULLING EVEN AS A NICE: its Unlocks line names 010 (Abriss), 012 (floor-excavation restore), 015 (removal-tool branch) AND 017 (furniture demolition reuses this contract) — it is the single head of the four-story chain that USER RULING D8 would need if criterion #5 is ruled to require a demolishable bed. Landing it here de-risks that ruling for one story. ⚑ DO NOT TRIM THIS if D8 is ruled toward option (b) or (c) — it becomes the head of a mandatory chain. C1 is criterion-#11-protected and never on the cut lever"

@@ -513,7 +513,7 @@ this now blocks S11 scheduling of `nm-009`, not just tidiness.**
 
 ## Sprint Result — CLOSED 2026-07-27
 
-**16/16 scheduled stories complete** (15 planned + scene-006, authored mid-sprint). Suite grew 1264 -> 1383, green with 0 orphans on every story commit.
+**14/16 stories complete.** CORRECTED 2026-07-27 by the QA sign-off, which caught this summary overclaiming: two Nice-tier stories (build-validation-009, building-009) never landed — consistent with the plan's own trim guidance, but they were not delivered. Suite grew 1198 -> 1383 (the earlier figure was also wrong), green with 0 orphans on every story commit.
 
 **THE CROWN LANDED: milestone M02 criterion #5 is met.** A villager gets tired, polls its own need (proven with the signal deliberately disconnected), walks to a bed it claims as its own, sleeps in a room the real Build Validation calls sheltered, and recovers at exactly the full rate — while the same villager in an unsheltered bed recovers at 0.7x. That difference is why a player builds a roof.
 
