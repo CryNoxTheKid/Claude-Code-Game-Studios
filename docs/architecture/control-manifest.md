@@ -1,11 +1,11 @@
 # Control Manifest
 
 > **Engine**: Godot 4.7-stable
-> **Last Updated**: 2026-07-23
-> **Manifest Version**: 2026-07-23
+> **Last Updated**: 2026-07-27
+> **Manifest Version**: 2026-07-27
 > **ADRs Covered**: ADR-0001 … ADR-0016 (0003 Superseded by 0014; ADR-0014's full-world-at-boot storage clause Superseded by ADR-0015; ADR-0015 Accepted spike-validated 2026-07-23; ADR-0016 Accepted; the rest Accepted)
 > **Status**: Active — regenerate with `/create-control-manifest update` when ADRs change
-> **Provenance**: TD-MANIFEST gate skipped — Lean mode (no `production/review-mode.txt`); regenerated 2026-07-23 during the user-delegated autonomous slice-propagation run. Deltas since v2026-07-11: ADR-0015 (Accepted), ADR-0016 (Accepted), and the `(Slice propagation 2026-07-23)` amendments to ADR-0009/0010/0014 + ADR-0012/0013 resolution notes (see `change-impact-2026-07-23-slice-batch.md`).
+> **Provenance**: TD-MANIFEST gate skipped — Lean mode (no `production/review-mode.txt`). Deltas since v2026-07-23: ADR-0009's story `villager-ai-024` addendum (mutation points (c)/(d)) and **ADR-0007 v1.1's scaffolding amendment** (§1a/§1b/§2a/§2b — technical-director rulings D1/D2/D8 on story `building-034`, 2026-07-27). Prior deltas since v2026-07-11: ADR-0015 (Accepted), ADR-0016 (Accepted), and the `(Slice propagation 2026-07-23)` amendments to ADR-0009/0010/0014 + ADR-0012/0013 resolution notes (see `change-impact-2026-07-23-slice-batch.md`).
 
 `Manifest Version` is the date this manifest was generated. Story files embed
 this date when created. `/story-readiness` compares a story's embedded version
@@ -110,7 +110,10 @@ rule, see the referenced ADR.
 *Applies to: AI systems, pathfinding, villager behavior*
 
 ### Required Patterns
-- **Walkability = two shared pure functions** owned by Villager AI: `is_standable(cell) -> bool` (solid below + clearance for the 2-block body) and `is_step_legal(from, to) -> bool` (|dy| ≤ 1; diagonal only if both flanking orthogonals passable). EVERY consumer (pathfinder, Build Validation, watchdog rescue-target BFS) calls these — single source of truth — source: ADR-0007
+- **Walkability = two shared pure functions** owned by Villager AI: `is_standable(cell) -> bool` (solid below **OR the cell is a scaffold cell** + clearance for the 2-block body) and `is_step_legal(from, to) -> bool` (|dy| ≤ 1; diagonal only if both flanking orthogonals passable; **a same-column step (`dx = dz = 0`, `|dy| = 1`) is legal ONLY if BOTH endpoints are scaffold cells — it must be refused explicitly, it is no longer prevented structurally**). EVERY consumer (pathfinder, Build Validation, watchdog rescue-target BFS) calls these — single source of truth — source: ADR-0007 (§1/§1a/§2a, scaffolding amendment 2026-07-27)
+- **Scaffold occupancy is a second occupancy source, passed as an explicit predicate PARAMETER** — never voxel data (`CellContents.is_empty()` is unchanged; a scaffold cell is never solid, never a wall, never a roof), never a module-global, never a singleton read. A caller that passes nothing sees exactly pre-amendment behaviour, so Build Validation stays scaffold-blind structurally; its blindness is provably conservative (scaffolding can only ever ADD standable cells/edges, so a blind consumer never under-reports "sealed"). The lookup must be **O(1) keyed** — no cantilever/support/connectivity search inside any predicate, ever — source: ADR-0007 §1a/§1b
+- **The `after_write` twins MUST receive the scaffold source too** (`_is_standable_after_write` and friends, the inputs to `would_trap_builder`): a villager on a scaffold cell has air below, so a scaffold-blind twin would report "trapped" on nearly every write. This preserves seal prevention, it does not weaken it. **SC-INV-1**: no scaffold cell is ever removed while any villager's body-column occupies it — dismantle is top-down and worker-first; bottom-up collapse only when no villager occupies the structure — source: ADR-0007 §1b + story building-034 D4/D10
+- **Scaffold changes patch the nav graph via the scaffold source's OWN signal**, connected with default (synchronous) flags — never `CONNECT_DEFERRED` — routed into the existing bounded `patch_cells` path; a scaffold write is not a `VoxelWorldGrid` write and `cell_changed` will never fire for it — source: ADR-0007 §2b
 - **Travel pathfinding via `AStar3D`**: graph built once at boot, incrementally patched on `cell_changed` (never rebuilt); point IDs are deterministic bit-packed `Vector3i → int64` (`x&0x1FFFFF | y<<21 | z<<42`), never an incrementing counter — source: ADR-0007
 - **Build Validation runs its own independent BFS** calling the shared predicates; it never touches Villager AI's `AStar3D` instance — source: ADR-0007
 - **AI is a plain explicit FSM**: state enum + `match`, strict discrete priority (Urgent need > Work > Idle/Wander); tick-driven via Time & Tick's signal, never raw delta in `_physics_process` — source: ADR-0008
@@ -122,6 +125,7 @@ rule, see the referenced ADR.
 - **Zero `NavigationServer3D`/`NavigationAgent3D`/`NavigationRegion3D`** anywhere in Villager AI or Build Validation (grep-verifiable) — navmesh cannot express the exact cell rules — source: ADR-0007
 - **Zero `Thread`/`WorkerThreadPool` in Villager AI** for MVP/VS (grep-verifiable) — occupancy dict, AStar3D graph, Needs state are not thread-safe; threading is the escape hatch only on measured need. (NOTE: the `WorkerThreadPool` used for voxel residency I/O per ADR-0015 lives in Voxel World's storage tier, NOT in Villager AI) — source: ADR-0008
 - **Never duplicate walkability rules or constants** — no plain 4/8-neighbor flood-fill in Build Validation, no second copy of clearance/step values — source: ADR-0007
+- **Never make scaffolding solid** — no `block_type_id` for scaffolding, no entry in `VoxelWorldGrid`, no passability flag on `CellContents`, no scaffold read in the mesher's face-culling or in `src/build_validation/`. Scaffolding is passable in every solidity read, which is the ONLY reason phantom rooms and self-sealing are impossible for free. **Never generalize the vertical edge** — no ladders, stairs, jumping, falling, or gravity; no raise of `max_step_height` or `villager_clearance` — source: ADR-0007 §1a/§2a + story building-034
 - **Never a behavior tree or utility-AI addon** (would breach the empty Allowed-Libraries list; priorities are discrete, not scored) — source: ADR-0008
 
 ### Performance Guardrails

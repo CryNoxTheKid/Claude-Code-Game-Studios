@@ -60,6 +60,32 @@
 <!-- Add approved third-party dependencies here -->
 - **GdUnit4 v6.1.3** (`neues-spiel/addons/gdUnit4/`) — test framework, approved 2026-07-11
 
+## Bundled Fonts
+
+All SIL Open Font License, free for commercial use, licence files stored
+alongside the fonts in `neues-spiel/assets/fonts/`. Source:
+`github.com/google/fonts`. Downloaded and glyph-verified 2026-07-27
+(extended Latin incl. ä/ö/ü/ß, French accents, typographic quotes).
+
+| Font | Role | Files |
+|---|---|---|
+| Cinzel | UI display — names, labels, menu items | `Cinzel[wght].ttf` |
+| Cinzel Decorative | Title only | `CinzelDecorative-Regular/Bold.ttf` |
+| EB Garamond | UI body text | `EBGaramond[wght].ttf`, `-Italic[wght].ttf` |
+| MedievalSharp | Rubrics | `MedievalSharp.ttf` |
+| Caveat | Villager diary hand | `Caveat[wght].ttf` |
+| Uncial Antiqua | Held in reserve, unused | `UncialAntiqua-Regular.ttf` |
+
+## UI Quality Gates
+
+- **`tools/ui-contrast-check.py`** — must pass (exit 0) after ANY change to
+  the UI palette. Enforces `accessibility-requirements.md` A3 (4.5:1 for
+  text, 3:1 for non-text separation). This check had never been run before
+  2026-07-27 and immediately found three failures.
+- **Greyscale pass** — `?gray=1` on the mockups, plus
+  `design/art/state-shape-table.md`. Enforces A1: no state may be carried by
+  hue alone.
+
 ## Architecture Decisions Log
 
 <!-- Quick reference linking to full ADRs in docs/architecture/ -->
@@ -69,7 +95,7 @@
 - ADR-0004 Physics Backend & Picking Strategy — **Accepted**
 - ADR-0005 Boot Sequencing & Initialization Gate — **Accepted**
 - ADR-0006 Data Definition Immutability & Reference Format — **Accepted**
-- ADR-0007 AI Pathfinding, Navigation & Room Analysis — **Accepted** (spike QQ3 PASS)
+- ADR-0007 AI Pathfinding, Navigation & Room Analysis — **Accepted** (spike QQ3 PASS; amended 2026-07-27 v1.1 — scaffolding §1a/§1b/§2a/§2b: scaffold cells are self-supporting and passable, occupancy is an injected non-voxel source, exactly one new edge class (scaffold-to-scaffold vertical). Not general climbing.)
 - ADR-0008 Villager AI Execution & Threading — **Accepted** (spike QQ3 PASS; `max_deciding_per_tick = 1`)
 - ADR-0009 Deterministic Movement & Occupancy Ordering — **Accepted**
 - ADR-0010 Cross-System UI/World Input Arbitration — **Accepted**

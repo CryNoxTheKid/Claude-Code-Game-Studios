@@ -3,8 +3,13 @@
 ## Status
 Accepted (2026-07-11 — pre-VS performance spike QQ3 PASSED at ADR-ceiling scale; see prototypes/perf-spike-qq3/REPORT.md. User-delegated decision.)
 
+**(Scaffolding amendment, 2026-07-27, technical-director ruling D1/D8 on story `building-034`)** Remains Accepted. Extended in place with **§1a** (scaffold standability — a scaffold cell supports itself), **§1b** (scaffold occupancy is a second, explicitly-injected occupancy source, never voxel data, never a second copy of the rules) and **§2a** (exactly one new edge class: a same-column vertical step between two scaffold cells). The amendment is deliberately the smallest change that admits the missing edge class named by `villager-ai-024`'s AC2 — it is **not** general climbing, and §3 (Build Validation's independent BFS) is unchanged and stays scaffold-blind. Determinism guarantees (ADR-0009) and seal prevention are unchanged; see §1b's `after_write` clause for the one place scaffold-awareness is *required* to keep seal prevention correct rather than optional. Rationale, options and rejected alternatives: `production/epics/building-system/story-034-scaffolding.md` § *Technical Director Rulings (2026-07-27)*.
+
 ## Date
-2026-07-11
+2026-07-11 (amended 2026-07-27 — scaffolding, §1a/§1b/§2a)
+
+## Version
+1.1 (2026-07-27) — scaffolding amendment. 1.0 (2026-07-11) — original acceptance.
 
 ## Engine Compatibility
 
@@ -55,7 +60,33 @@ func is_step_legal(from_cell: Vector3i, to_cell: Vector3i) -> bool
 ```
 Both consult Voxel World's occupancy data directly and the shared movement constants (`villager_clearance`, `max_step_height`) from the registry — no duplicated logic, no duplicated constants, anywhere. Every consumer of walkability (Villager AI's own pathfinder, Build Validation's flood-fill) calls these same two functions.
 
+**1a. Scaffold standability (amendment 2026-07-27, story `building-034`).** A cell occupied by a **scaffold** is standable **without** a solid cell beneath it — scaffolding supports itself. The standability predicate reads:
+
+> `cell` is standable iff **(** the cell directly below it is solid **OR** `cell` itself is a scaffold cell **)** AND `cell` plus the `villager_clearance - 1` cells directly above it are all passable.
+
+A scaffold cell is **passable**. It is never solid, never occludes, and never satisfies any consumer's solidity read (`_is_solid`, the roof scan, the chunked mesher's face-culling occupancy read). It therefore can never contribute a wall or a roof to Build Validation's Room/Sealed verdict, and can never entrap a villager for the purposes of ADR-0009's seal-prevention gate.
+
+**Scaffold membership must be an O(1) keyed lookup.** The predicates are called ~10⁴–10⁵ times per graph build and on every patch; the scaffold source must answer "is this cell a scaffold cell" by direct dictionary read. **No structural validation (cantilever reach, support chains, connectivity) may ever be evaluated inside a predicate** — those are erection-time planning rules, enforced where the erection plan is produced, never in a query on the hot path.
+
+**1b. The predicates keep their single-source-of-truth status.** Scaffold occupancy is **not** voxel data (the same TD ruling BV-1 already applies to furniture: "furniture is not voxel data — it never enters `VoxelWorldGrid`"; `CellContents.is_empty()` is `block_type_id == 0`, so any non-zero id would be solid to *every* reader and there is no passable-block concept to borrow). §1a therefore requires the shared predicates to read a **second occupancy source** alongside `VoxelWorldGrid`. That source is supplied as an **explicit, defaulted parameter** on the shared predicate functions — never a module-global, never a singleton read, never a second copy of the rules living in a consumer. Both consumers (Villager AI's `AStar3D` graph and Build Validation's BFS) continue to call one implementation.
+
+- **A caller that supplies no scaffold source observes exactly today's behaviour.** Build Validation supplies none and stays scaffold-blind — structurally, not by discipline.
+- **The resulting divergence is deliberate and provably one-directional.** Scaffold-awareness only ever *adds* standable cells and edges. A scaffold-blind consumer therefore always returns the **more conservative** verdict: fewer candidate interior cells, fewer escape routes, more "sealed", never fewer. Scaffolding can make a space read as a Room, or as unsealed, in **no** case.
+- **`after_write` twins must be scaffold-aware.** Villager AI's override-aware `_is_standable_after_write` / `_is_step_legal_after_write` / `_is_solid_after_write` / `_is_passable_after_write` — the predicates `would_trap_builder` reads, and hence the inputs to the seal-prevention gate — **must** receive the same scaffold source. This is not optional: a villager standing on a scaffold cell has air beneath it, so a scaffold-blind `_is_standable_after_write` would report it unstandable and `would_trap_builder` would return `true` for essentially every write, firing the self-seal exemption continuously. Scaffold-awareness here *preserves* seal prevention; it does not weaken it. The gate's own file is unchanged.
+- **The escape route may never be pulled (invariant SC-INV-1).** Because scaffold cells count as escape routes for `would_trap_builder`, no scaffold cell may be removed while any villager's body-column (`VillagerWalkabilityRules.body_column`) occupies it. Dismantling is top-down and worker-first (story `building-034` D4/D10); a bottom-up collapse is permitted **only** when no villager's body-column occupies any cell of that scaffold structure.
+- Unifying this parameter with the `after_write` overlay mechanism into one general overlay-predicate abstraction remains **named, deferred tech debt** (`villager_walkability_rules.gd`'s own Out-of-Scope block, BV-4 §6). This amendment threads the scaffold source through both shapes; it does not merge them.
+
 **2. Villager AI's travel pathfinding: `AStar3D`, incrementally maintained.** Godot's `AStar3D` is a standalone graph-search utility (unrelated to `NavigationServer3D`/navmesh baking) — Villager AI adds one point per standable cell (`add_point(id, position)`) and connects legal-step pairs (`connect_points(id1, id2)`), then queries shortest paths via `get_id_path()`/`get_point_path()`. This graph is built once at boot (from Voxel World's initial terrain) and incrementally patched — not rebuilt — whenever a Voxel World write changes standability or step-legality in the affected region (adding/removing points and connections only for the cells actually touched), consistent with Villager AI's already-specified re-path-filtering contract (TR-villager-ai-behavior-012).
+
+**2a. Scaffold vertical edges (amendment 2026-07-27, story `building-034`).** The travel graph gains **exactly one** new edge class and no other: a **vertical edge between two scaffold cells in the same column** — `Δx = 0`, `Δz = 0`, `Δy = ±1`, and **both** endpoints are scaffold cells — is a legal step. Three clauses make that precise, and the second is load-bearing:
+
+1. **The graph builder must offer the candidate.** `(0, ±1, 0)` is absent from `HORIZONTAL_HALF_OFFSETS` / `HORIZONTAL_FULL_OFFSETS` by construction, so no same-column pair is ever *evaluated* today. The full-scan connection pass adds `(0, +1, 0)` only (its "each unordered pair exactly once" invariant); the incremental patch pass adds both `(0, +1, 0)` and `(0, -1, 0)`, matching its own full-direction discipline.
+2. **The step-legality predicate must now REFUSE same-column steps explicitly.** Today `is_step_legal` would *already* return `true` for a `Δy = ±1`, `Δx = Δz = 0` pair — `|Δy| ≤ max_step_height` passes and the diagonal flank check does not run — and the only thing preventing such an edge is that two stacked cells can never both be standable. **§1a removes exactly that structural prevention.** The predicate must therefore gain an explicit gate: a step with `Δx = 0 and Δz = 0` is legal **iff both endpoints are scaffold cells**. Without this gate the amendment silently widens beyond scaffolding — a non-scaffold cell standing on solid ground directly beneath a scaffold cell is a reachable configuration, and it must not connect.
+3. **Nothing else changes.** `max_step_height` stays 1. `villager_clearance` stays 3. The diagonal flanking rule is untouched (a vertical step is never diagonal, so the flank check never runs on it). Two stacked **non-scaffold** cells still can never both be standable.
+
+**This amendment is bounded and is not general climbing.** It introduces no ladder, stair, jump, fall, or gravity mechanic; it grants no vertical traversal to any cell that is not a scaffold cell.
+
+**2b. Scaffold writes patch the graph on their own signal.** A scaffold erection/removal is not a `VoxelWorldGrid` write, so `cell_changed` / `cells_changed_batch` never fire for it. The scaffold occupancy source must expose its own change signal, and the graph must subscribe to it with Godot's **default (synchronous) connection flags — never `CONNECT_DEFERRED`**, the same race-closure discipline the voxel-write subscription already relies on — routing into the **existing** `patch_cells` path (bounded neighborhood, add/remove points and connections, never `_astar.clear()`, never a rebuild). Consumers re-query current state; they never read the signal payload.
 
 **3. Build Validation's room/enclosure analysis: independent BFS, not a shared graph.** Build Validation's reachability trace ("graph walk from region interior to any open-sky standable cell," TR-build-validation-navigability-009) is a full-connectivity question, not a shortest-path one — a plain breadth-first or depth-first walk over cells that pass `is_standable`/`is_step_legal` is the right tool, and it's cheaper to write and reason about than extracting an equivalent answer from `AStar3D`'s shortest-path-oriented API. Build Validation never touches Villager AI's `AStar3D` instance — it calls the two shared predicate functions directly, which is sufficient to satisfy "reuse the exact rules" without coupling the two systems' internal data structures. This preserves the already-established "read-only reference, zero calls into Villager AI's mutators" boundary (`architecture.md` Module Ownership) — predicate functions are pure queries, not mutators, and Build Validation's own BFS state is entirely its own.
 
@@ -90,6 +121,25 @@ full-graph rebuild or full-world recompute per edit.
 # Villager AI's shared predicate API (extends architecture.md's API Boundaries):
 func is_standable(cell: Vector3i) -> bool
 func is_step_legal(from_cell: Vector3i, to_cell: Vector3i) -> bool
+
+# Scaffolding amendment (§1a/§1b, 2026-07-27) — the shared static predicates gain
+# ONE explicit, DEFAULTED occupancy parameter. A caller passing nothing observes
+# exactly pre-amendment behaviour (Build Validation passes nothing, and is therefore
+# scaffold-blind structurally, not by discipline):
+static func is_standable(
+    voxel_world: VoxelWorldGrid, cell: Vector3i, scaffold_source = null
+) -> bool
+static func is_step_legal(
+    voxel_world: VoxelWorldGrid, from_cell: Vector3i, to_cell: Vector3i,
+    scaffold_source = null
+) -> bool
+# `scaffold_source` is duck-typed against ONE method, an O(1) keyed read:
+#     func has_scaffold(cell: Vector3i) -> bool
+# Injection point: VillagerAi's existing one-line delegations supply the registry,
+# so every consumer holding a VillagerAi (nav graph, rescue-target BFS, re-path
+# filter) is scaffold-aware consistently and for free. The `*_after_write` twins on
+# VillagerAi MUST receive the same source (§1b) — they are `would_trap_builder`'s
+# inputs, and a villager on scaffolding has air beneath it.
 
 # Villager AI's internal pathfinding (implementation detail, not a public API):
 var _astar: AStar3D = AStar3D.new()
@@ -185,6 +235,10 @@ func _trace_reachability(region_interior: Vector3i) -> bool:
 - **Memory**: One `AStar3D` instance holding the settlement-core region's standable cells (spike QQ3 measured 11k points / 278 ms build at the old bound; region bound to be set by the QQ5 spike — never the full ~128M-cell world, per ADR-0014).
 - **Load Time**: Initial graph construction at boot is proportional to standable-cell count — expected fast for MVP's small starting structure, unmeasured at scale.
 - **Network**: N/A — single-player project.
+- **Scaffolding amendment (2026-07-27)**: the predicates gain one `Dictionary` lookup per solid-below miss and one per same-column step evaluation. Against the QQ3-measured baseline (patch avg 0.46 ms, query p95 1.9 ms; boot build 1.1 s at the 200×200 region bound) the added cost must stay within noise — **budget: no more than +5% on patch-average cost, measured, before the story may close.** The `O(1)` clause in §1a is what makes that achievable; a support/cantilever search inside a predicate would multiply the boot build by the scaffold-structure size and is forbidden for that reason. Scaffold point/edge count is bounded by `scaffold_max_cantilever_cells` × structure height and is negligible against the 47k-point region ceiling.
+
+### Engine Verification (2026-07-27, scaffolding amendment)
+Checked against `docs/engine-reference/godot/` (Godot 4.7-stable pin, VERSION.md / breaking-changes.md / current-best-practices.md / modules/navigation.md) before ruling: this amendment uses **no new engine API**. It adds candidate offsets and predicate branches to already-shipped, already-4.7-verified `AStar3D` calls (`add_point`, `remove_point`, `connect_points`, `disconnect_points`, `are_points_connected`, `get_id_path`) — the 2026-07-11 `godot-specialist` validation of that surface therefore still stands unmodified. The one engine-behavioural assumption the amendment newly leans on is that a *directed* `connect_points(a, b, false)` pair composes into a bidirectional edge, which `villager_nav_graph.gd` records as already verified against the live 4.7 engine. Signal-connection flags (default = synchronous) are unchanged 4.4→4.7. **No post-cutoff API is introduced by this amendment.**
 
 ## Migration Plan
 N/A — no existing code.
@@ -193,6 +247,15 @@ N/A — no existing code.
 - A unit test constructs a small synthetic Voxel World region and asserts `is_standable`/`is_step_legal` produce identical results whether called from Villager AI's own pathfinding path or from a mock Build Validation caller — proving the shared-predicate contract holds.
 - The pre-VS performance spike (already tracked, `architecture.md` QQ3) measures `AStar3D` graph-patch cost and Build Validation BFS cost at Township scale; a PASS keeps this ADR Accepted as-is.
 - Grep-verifiable: zero `NavigationServer3D`/`NavigationAgent3D`/`NavigationRegion3D` usage anywhere in Villager AI's or Build Validation's implementation.
+
+**Scaffolding amendment (§1a/§1b/§2a/§2b, 2026-07-27):**
+- A unit test asserts a scaffold cell is standable with **air** beneath it and — in the **same** test — that two stacked **non-scaffold** cells are still never both standable. The amendment must not widen beyond scaffolding.
+- A unit test asserts the same-column vertical step is refused when **only one** endpoint is a scaffold cell, **in both directions** — including the specific reachable configuration §2a clause 2 names (a non-scaffold standable cell directly beneath a scaffold cell).
+- A unit test asserts `CandidateCellRules.is_roofed` returns `false` for a column whose only occupant above the query cell is scaffolding, and that a bed under such a column is not sheltered.
+- A unit test asserts `would_trap_builder` is `false` for a villager standing on a scaffold cell with air beneath it, for a write that does not touch its body-column — i.e. the `after_write` twins received the scaffold source (§1b).
+- A unit test asserts erecting/removing a scaffold cell patches the graph in the **same call stack** as the change (§2b), and that no `build()`/`_astar.clear()` occurs on a scaffold change.
+- Grep-verifiable: the scaffold occupancy source appears as a **parameter** on the shared predicates and nowhere as a second implementation of standability or step-legality; `VillagerWalkabilityRules` is still never instantiated.
+- Grep-verifiable: zero scaffold-aware code in `src/build_validation/` (the transparency property must hold because there is nothing for it to read).
 
 ## Related Decisions
 - Depends on ADR-0014 (formerly ADR-0003) for Voxel World's occupancy data as the graph's data source.

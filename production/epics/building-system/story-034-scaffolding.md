@@ -10,7 +10,8 @@
 >   erect/dismantle lifecycle. Nothing in the chain parallelises. The real critical
 >   path is the four **Open Decisions** below, not throughput — three of them are TD
 >   rulings and one is a creative/design value.
-> **Manifest Version**: 2026-07-23
+> **Manifest Version**: 2026-07-27 *(bumped by the TD rulings below — ADR-0007 v1.1
+>   landed the scaffolding amendment and `control-manifest.md` followed)*
 > **Last Updated**: 2026-07-27
 
 > **Numbering note**: this story was requested as `story-032-scaffolding.md`. `032` is
@@ -137,6 +138,18 @@ ruling** — this story proposes the wording, it does not edit the ADR.
 ---
 
 ## PROPOSED ADR-0007 AMENDMENT (exact wording — for TD ruling; DO NOT self-apply)
+
+> ⚠️ **SUPERSEDED 2026-07-27 — the amendment has LANDED, and it is not verbatim this
+> text.** `docs/architecture/adr-0007-ai-pathfinding-navigation-room-analysis.md` is now
+> **v1.1** carrying §1a/§1b/**§2a**/**§2b**. The technical-director took this proposal as
+> the base and changed it in three load-bearing places: (1) §1b now **requires** the
+> `*_after_write` twins to receive the scaffold source — without it `would_trap_builder`
+> fires on nearly every write; (2) §2a now **explicitly refuses** same-column steps whose
+> endpoints are not both scaffold — `is_step_legal` would otherwise already accept them
+> once §1a removes the structural prevention; (3) a new **§2b** requires the scaffold
+> source to carry its own synchronous change signal, because a scaffold write is not a
+> `VoxelWorldGrid` write and `cell_changed` will never fire for it. **Implement against
+> the ADR, not against the text below.** Retained for provenance only.
 
 > **Owner**: technical-director. **This story does not edit
 > `docs/architecture/adr-0007-ai-pathfinding-navigation-room-analysis.md`.** The text
@@ -587,8 +600,10 @@ should, and the retirement must wait.
 | `scene-007` (build-tool + project-lifecycle hosting) | The lever boots the **hosted** tool chain; an unhosted chain makes both levers untestable | Verify on disk before scheduling |
 | `scene-008` (gates hosting) | Supplies the real-boot integration harness the lever reuses | Complete (2026-07-27) |
 | `building-029` / `building-030` (tick loop, job queue) | Scaffold erection is a job on this loop | Complete |
-| **ADR-0007 amendment ruling** | AC8 cannot be implemented before the TD rules | **BLOCKING — not yet requested** |
-| **D1 ruling (where a scaffold cell lives)** | Every other AC depends on it | **BLOCKING** |
+| **ADR-0007 amendment ruling** | AC8 cannot be implemented before the TD rules | **RESOLVED 2026-07-27** — ADR-0007 **v1.1** landed §1a/§1b/§2a/§2b; `control-manifest.md` bumped to 2026-07-27. See *Technical Director Rulings* below |
+| **D1 ruling (where a scaffold cell lives)** | Every other AC depends on it | **RESOLVED 2026-07-27** — Option (a), injected at `VillagerAi`'s delegation; see D1 below |
+| **D7 value (`base_build_ticks_scaffold`)** | AC2's tick cost | **OPEN — user/design call.** Structure ruled; provisional `1`. Does not block implementation of D1–D6/D8–D10 |
+| **D2 visual identity** | AC1 legibility | **OPEN — art call.** Rendering mechanism and owner ruled; does not block implementation |
 
 ## QA Test Cases
 
@@ -639,3 +654,435 @@ should, and the retirement must wait.
 **AC9 — determinism**
 - Given: the same world, villager, and job order, run twice.
 - Then: identical scaffold cell sets, identical erection order, identical dismantle order.
+
+---
+
+## Technical Director Rulings (2026-07-27)
+
+> **Authority**: technical-director. These rulings resolve **D1–D10** and the coupled
+> retirement recommendation. The user's four rulings (AC1–AC4) and the defining
+> non-solid property are **inputs**, not subjects — nothing below reopens them.
+>
+> **ADR-0007 has been amended by me, not by this story.**
+> `docs/architecture/adr-0007-ai-pathfinding-navigation-room-analysis.md` is now **v1.1
+> (2026-07-27)**, carrying **§1a** (scaffold standability), **§1b** (second occupancy
+> source + the `after_write` clause + SC-INV-1), **§2a** (exactly one new edge class) and
+> **§2b** (scaffold changes patch the graph on their own synchronous signal), plus new
+> Validation Criteria, a performance budget, and a Godot 4.7 engine-verification note.
+> `docs/architecture/control-manifest.md` is bumped to **Manifest Version 2026-07-27**
+> with four new Feature-Layer bullets and one new Forbidden bullet.
+> `.claude/docs/technical-preferences.md`'s ADR log records the amendment.
+>
+> I took the story's proposed wording as the base and **changed it in three places** —
+> see D1 (the `after_write` finding), the §2a clause 2 finding, and §2b (the missing
+> patch trigger). Those three are the load-bearing corrections.
+>
+> **Engine cross-reference (required, and it mattered)**: checked
+> `docs/engine-reference/godot/` (4.7-stable pin) before ruling. This amendment
+> introduces **no new engine API** — it adds candidate offsets and predicate branches to
+> `AStar3D` calls whose surface was already 4.7-verified on 2026-07-11, and relies on
+> default (synchronous) signal-connection flags, unchanged 4.4→4.7. Nothing here depends
+> on a post-cutoff behaviour I could not verify against the pinned reference.
+
+---
+
+### D1 — Where a scaffold cell lives — **RULED: Option (a)**, with a named injection point
+
+**Choice.** A Building-System-owned `ScaffoldRegistry` (`RefCounted`, mirroring
+`FurnitureRegistry` exactly: keyed occupancy store, `Dictionary[Vector3i, …]` cell index,
+one `scaffold_changed` signal, consumers re-enumerate and never read the payload). The
+shared predicates gain **one explicit, defaulted parameter** carrying that occupancy
+source. **Option (b) is rejected outright** — it redefines `CellContents.is_empty()`
+project-wide and drags in storage, the mesher, the DDA pick and the save format for a
+concept that is transient by construction.
+
+**The injection point is `VillagerAi`'s existing one-line delegation**, not every call
+site. `VillagerAi` holds the registry as an injected-tier `@export`-adjacent reference
+(ADR-0001, wired exactly like `voxel_world`) and passes it into
+`VillagerWalkabilityRules.is_standable(voxel_world, cell, scaffold_source = null)`. This
+is not a stylistic preference — it is what makes the split *structural*:
+
+- Every consumer that holds a `VillagerAi` becomes scaffold-aware **consistently and for
+  free**: `VillagerNavGraph` (its `predicate_source`), `VillagerRescueTargetSearch`
+  (same), the re-path filter. That matters: a scaffold-blind rescue-target BFS could never
+  rescue a villager *onto* scaffolding and would read a villager *standing on* scaffolding
+  as occupying a non-standable cell.
+- Every consumer that calls the static class with only `voxel_world` — `BuildValidation`,
+  `BuildValidationReachability`, `CandidateCellRules`, `Valley`'s boot invariant — stays
+  **scaffold-blind by passing nothing**. AC6 holds because there is nothing to read, as
+  the story argued.
+
+**Reason.** Preserves ADR-0007's single-source-of-truth guarantee structurally; matches
+the landed BV-1 precedent; and the resulting divergence between the two consumers is
+**provably one-directional** — scaffold-awareness only ever *adds* standable cells and
+edges, so the blind consumer always returns the more conservative verdict (fewer rooms,
+fewer escape routes, more "sealed"). Scaffolding can never make a space read as a Room or
+as unsealed. That asymmetry is why two different answers are safe here.
+
+**The correction the story missed — and it is the sharpest one.** `would_trap_builder`
+reads `VillagerAi._is_standable_after_write`, *not* the shared predicates. A villager
+standing on a scaffold cell has **air beneath it**, so a scaffold-blind
+`_is_standable_after_write` returns `false` at its very first line and
+`would_trap_builder` returns `true` for essentially **every** write that villager
+evaluates — firing the self-seal exemption continuously. **The `after_write` twins MUST
+receive the same scaffold source.** The story's AC7 survives intact (zero lines change in
+`villager_seal_prevention_gate.gd`), but its claim that "seal prevention needs no
+scaffold-awareness" is true only of the *gate*, not of the gate's *inputs*. Making the
+twins scaffold-aware **preserves** seal prevention; leaving them blind would break it.
+
+**On the named `*_after_write` tech debt: do NOT unify.** Thread the scaffold parameter
+through both shapes; leave the general overlay-predicate abstraction as the still-named,
+still-deferred debt (BV-4 §6). Reason: unifying an override-mechanism and an
+occupancy-source mechanism inside the story that first introduces the second one is how a
+bounded amendment becomes an unbounded refactor, and the seal-prevention path is the worst
+possible place to discover that mid-story.
+
+**Performance clause (binding).** Scaffold membership must be an **O(1) keyed lookup**.
+**No support, cantilever, or connectivity search may ever run inside a predicate** — those
+are erection-time planning rules. `is_standable` is called ~47k times per graph build and
+on every patch; a structural search there multiplies boot build by structure size.
+Measured budget: **≤ +5% on the QQ3 patch-average (0.46 ms)** before this story may close.
+
+**Forbids**: any `block_type_id` for scaffolding; any passability flag on `CellContents`;
+a `ScaffoldRegistry` autoload/singleton/module-global; any scaffold read anywhere in
+`src/build_validation/` or in the mesher; a second implementation of standability or
+step-legality; any structural search inside a predicate.
+
+---
+
+### D2 — What the mesher sees — **RULED (technical): Building System owns a pooled presentation tier. Visual identity LEFT TO THE USER.**
+
+**Choice.** Because D1 keeps scaffolding out of `VoxelWorldGrid`, the chunked mesher
+never sees it — correct, and it must stay that way. Scaffolding is rendered by a
+**Building-System-owned per-cell pooled `MeshInstance3D` tier**, mirroring
+`GhostPreview._blueprint_ghost_pool`'s exact shape (`Dictionary[Vector3i, entry]`, pooled,
+created/hidden rather than freed), driven by `ScaffoldRegistry.scaffold_changed` with a
+re-enumeration — never a signal payload read. **Ownership is Building System, not
+Presentation**: Building System already owns the only per-cell pooled world-space visual
+mechanism in this codebase, and the scaffold's lifetime is exactly a build project's
+lifetime.
+
+**Material tier is distinct from a ghost.** Scaffolding is *built, real* geometry, not a
+preview — it must not reuse the translucent ghost tint, or the player will read it as
+"planned" and expect it to become a wall.
+
+**Named escape hatch (not built now)**: if concurrent scaffold cell count ever exceeds
+**256**, switch this tier to a single `MultiMesh` instance. At the cantilever-bounded
+sizes this story can produce (≤ `scaffold_max_cantilever_cells` × structure height per
+project), pooled instances stay far inside the 2000-draw-call budget.
+
+**LEFT TO THE USER**: the visual identity — silhouette, material, colour, whether it reads
+as timber poles, planks, or lashed frame. That is an art-direction call and the user is
+the art authority; the story already scoped it out. My ruling constrains only *where the
+pixels come from*, not *what they look like*. **"Renders as nothing" is not an acceptable
+outcome and is not among the options.**
+
+**Forbids**: a `BlockAppearanceConfig` entry or any terrain block type for scaffolding;
+the mesher or any chunk-meshing code reading the scaffold registry; one un-pooled node
+created per cell per change; reusing the ghost's translucent preview material.
+
+---
+
+### D3 — Ownership — **RULED: Option (a), its own entity, linked by owner id**
+
+**Choice.** A scaffold structure is its own `BuildProject` with a **third
+`BuildProject.Kind` value (`SCAFFOLD`)** and an `owner_project_id` link field, registered
+in the same `BuildProjectRegistry`. Its cells are `BlueprintCell`s of a **third
+`Category` value (`SCAFFOLD`)**, and a completing scaffold job routes to
+`ScaffoldRegistry` **instead of** `VoxelWorldGrid` — the identical routing
+`Category.FURNITURE` → `FurnitureRegistry` already established.
+
+**Reason.** Option (b) is genuinely circular, as the story found: `recompute_state()`
+reaches `DONE` iff every tracked cell is `BUILT`, and `DONE` is the dismantle trigger. It
+also demands a per-cell exception inside a method whose doc comment states the rule with
+no exceptions — the invisible special case that produces the next `villager-ai-024`. A
+third `Kind` is cheap here (`kind` is read in exactly three places) and buys a real
+guarantee for free: `BuildProjectRegistry.assign_cells` already gates grouping on
+`existing_project.kind == kind`, so a scaffold project can **never** merge into the
+structure it serves.
+
+**Save/load — RULED, and against the "don't persist it" instinct: scaffolding IS
+persisted.** `ScaffoldRegistry` gets `serialize()`/`deserialize()` under ADR-0012's
+per-system contract, and scaffold projects persist like any other project. Reason: a
+villager standing on scaffolding at save time would, on a non-persisting load, wake up on
+a cell that no longer exists — **the exact stranding class this story exists to abolish,
+reintroduced across the save boundary.** The payload is trivial (cells + owner id). "It's
+transient so skip it" is precisely the reasoning that would cost a bug report.
+
+**Forbids**: adding scaffold cells to the owning project's `cells`; any scaffold exception
+branch in `recompute_state()`; a scaffold project that outlives its owner (its dismantle
+is triggered by the owner reaching `DONE`, or by the owner's cancel).
+
+---
+
+### D4 — Cancel with a worker aboard — **RULED: Option (i)**
+
+**Choice.** A player cancel checks the scaffold structure for occupancy first (any
+villager whose **body-column** — `VillagerWalkabilityRules.body_column`, not its feet
+cell — intersects any scaffold cell of that structure). Occupied ⇒ fall back to the
+**top-down, worker-ridden dismantle** of AC3. Unoccupied ⇒ the fast **bottom-up collapse
+with no worker**, exactly as ruling 3 permits.
+
+**Reason.** This project has **no gravity** — villagers are `Area3D`-only with no
+colliders (ADR-0004, technical-preferences). A Minecraft player falls; this villager does
+not. It would simply be left on a cell that stopped being standable: a zero-edge graph
+point. Option (ii) knowingly reintroduces the bug the story exists to fix and makes the
+fix depend on the safety net we intend to delete. Option (iii) spends a **fifth** ADR-0009
+sanctioned `current_cell` mutation point on a case that needs no mutation at all. Ruling 3
+says a cancel **MAY** collapse bottom-up — permission, not obligation — and (i) honours it
+in the common case (nobody on the scaffold) while never paying for it in the rare one.
+
+**This ruling also decouples D4 from the retirement question**: the bottom-up-with-worker
+path never occurs, so `_relocate_if_marooned` is no longer needed as a cancel safety net.
+The story's "countervailing evidence" is now retired. See the retirement ruling below.
+
+**Formalised as ADR-0007 §1b invariant SC-INV-1**: *no scaffold cell is ever removed while
+any villager's body-column occupies it.* This is load-bearing, not hygiene — once
+`would_trap_builder` counts scaffold cells as escape routes (D1), an escape route that can
+be yanked away **would** weaken seal prevention. SC-INV-1 is what keeps it honest.
+
+**Forbids**: options (ii) and (iii); a fifth sanctioned mutation point; any dismantle path
+that removes a cell occupied by a body-column; a feet-cell-only occupancy check.
+
+---
+
+### D5 — Who detects the unreachable cell — **RULED: Option (b), with a named seam**
+
+**Choice.** F2's silent pre-claim reachability skip becomes a **reporting** skip. Concretely:
+
+1. `VillagerJobSelector.select_job` returns, alongside its existing result, the
+   **deterministic list of candidates it probed and found unreachable** (it already
+   computes exactly this set inside its round loop and throws it away). `select_job` stays
+   a **pure static function** — it reports nothing itself and gains no dependency.
+2. `VillagerAi` forwards that list to the existing `job_queue.report_unreachable(cell)`
+   seam, throttled by the **already-landed** `_unreachable_retry_after_tick` cooldown map
+   at the already-landed `unreachable_retry_ticks` (= 20) cadence, so a report can never
+   storm per tick.
+3. The **Building System** subscribes to the existing `job_reported_unreachable` signal
+   and owns the erection response. **The AI detects; the Building System builds.**
+
+**Reason.** (b) reuses a landed seam, a landed cadence, a landed signal and a landed
+throttle rather than inventing a fourth reachability concept, and it makes
+`BlueprintCell.is_unreachable`'s existing pulsing-orange ghost tint honest at the same
+time. (c) is a periodic Building-System sweep over every `PLANNED` cell — an unbounded
+per-tick cost and a second, competing definition of "reachable". (a) is (c) wearing the
+job queue's clothes.
+
+**This ruling explicitly amends F2's documented "silent" contract.** `VillagerAi
+._report_job_unreachable`'s doc comment currently states — correctly, today — that it is
+"never [called] for F2's own silent pre-claim reachability skip". That sentence must be
+rewritten to record this ruling and its date. A doc comment that contradicts the code is
+how `villager-ai-024` lost a day.
+
+**Bound the response (required).** A cell can be unreachable for reasons scaffolding
+cannot fix — walled off, or no support within the cantilever limit. The erection planner
+must be allowed to return **"no plan"**, leave the cell flagged unreachable, and **not
+re-plan** until the flag clears. Never erect a structure that does not make the target
+reachable; never loop.
+
+**Forbids**: options (a) and (c); `select_job` acquiring a job-queue reference or emitting
+anything; Villager AI erecting scaffolding itself; an unthrottled per-tick report; a
+scaffold plan produced for a cell no plan can serve.
+
+---
+
+### D6 — What the 6-limit measures — **RULED (mechanics). The value 6 is the user's, already ruled.**
+
+**Choice, and it corrects the story's recommendation.**
+
+1. **Metric: horizontal Chebyshev — `max(|Δx|, |Δz|)`, with Y excluded.** The story
+   proposed reusing `VillagerJobSelector.chebyshev_distance`, but that function is **3D**
+   (`maxi(|dx|, maxi(|dy|, |dz|))`). Using it would let height enter the limit and would
+   silently convert ruling 4's *overhang* cap into a *height* cap — flatly contradicting
+   "scaffold height is unbounded by this rule". Use a distinct horizontal helper, or the
+   same function with Y zeroed at the call site, and say which in the code.
+2. **Support**: a cell is *directly supported* if the cell directly below it is **solid**
+   (terrain or a Built block — never another scaffold cell's "solidity", since scaffolding
+   is never solid). A scaffold cell is *supported* if it is directly supported, or if the
+   cell directly below it is a supported scaffold cell, or if it is horizontally adjacent
+   at the same Y to a supported scaffold cell.
+3. **Cantilever distance** is a plan-time BFS property: **0** for a cell with direct
+   support or with a supported scaffold cell directly below it; otherwise **1 + the
+   minimum** over its same-Y horizontally-adjacent supported scaffold cells. A vertical
+   step never increases it (height is free); a horizontal step always does. Constraint:
+   `cantilever_distance ≤ scaffold_max_cantilever_cells`.
+4. **Config**: `scaffold_max_cantilever_cells: int = 6` on its own `ScaffoldConfig`
+   `ConfigResource` (ADR-0002 one-config-per-module), safe range **1–32** with a
+   `validate()` clamp — headroom for the progression stat ruling 4 requires. The **6** is
+   the user's ruling, transcribed, not mine.
+
+**Reason.** Ruling 4 fixed the intent (overhang, config, raisable); the mechanics had to
+be pinned before AC4's "raise the knob to 7 and the same target is reached" test can even
+be written. Computing it at plan time, never in a predicate, is what keeps D1's O(1)
+clause true.
+
+**Forbids**: 3D Chebyshev; Euclidean or Manhattan; any literal `6` governing cantilever
+anywhere in `src/`; treating a scaffold cell as *solid* support; evaluating cantilever
+inside `is_standable`/`is_step_legal`.
+
+---
+
+### D7 — `base_build_ticks[scaffold]` — **LEFT OPEN. This one is the user's.**
+
+**Not ruled, deliberately.** How fast a scaffold cell goes up is a pacing/feel value, and
+the user has been ruling on exactly this class of question all day. Ruling 2 already fixed
+the two things that are *not* negotiable — a real job, never zero — and the rest is taste.
+
+**What I DO rule (the structure it must land in):**
+- A third `BlueprintCell.Category` value (`SCAFFOLD`) and a third branch in **both**
+  `ConstructionTickLoop.required_ticks_for` and `required_demolition_ticks_for` (both are
+  `match` with a `_` default — one line each).
+- Two new `ConstructionTickLoopConfig` fields, `base_build_ticks_scaffold` and
+  `base_demolition_ticks_scaffold`, each with `_MIN`/`_MAX` constants and a `validate()`
+  clamp, siblings of the four that exist. Two new rows in the building-system GDD's Tuning
+  Knobs table.
+- **Hard technical constraints on whatever value the user picks**: `≥ 1` (ruling 2 —
+  never zero, nothing appears from nothing) and **strictly `< base_build_ticks_block`**
+  (AC2). The strict-inequality property is asserted by the AC2 test, **not** enforced as a
+  BLOCKING cross-value invariant in `validate()` — ADR-0002 reserves that tier for
+  GDD-declared invariants, and this is not one.
+- **Provisional until the user rules**: `base_build_ticks_scaffold = 1`,
+  `base_demolition_ticks_scaffold = 1`, range 1–20 to match siblings. Marked provisional
+  in the config doc comment, in the GDD row, and in the commit body.
+
+**My non-binding read, for whenever the user does rule it**: 1 tick (0.25 s at the shipped
+4.0 ticks/sec) may be *too* fast to read as construction at all — the player may just see
+scaffolding blink into existence, which is what ruling 2 was guarding against. **2** would
+still be half a wall cell and would actually be visible. But that is a feel judgement, and
+it is the user's.
+
+---
+
+### D8 — The erection route — **RULED: fully specified, deterministically**
+
+AC9 requires this to be pinned before implementation, so it is pinned here.
+
+1. **Target = a staging cell, not the blueprint cell's own address.** For an unreachable
+   blueprint cell `C`, the plan targets a cell `A` such that `A` is **orthogonally**
+   adjacent to `C` in X/Z with `|Δy| ≤ 1`. **Orthogonal only** — a diagonal `A` would
+   invoke `is_step_legal`'s flanking rule and make reachability depend on two more cells
+   for no gain. `A` must read empty in `VoxelWorldGrid`, carry no blueprint cell (D9), and
+   not already be scaffold.
+   *This clarifies AC1's "erects scaffolding exactly there": scaffolding is erected where
+   it makes `C` reachable — beside `C` — never at `C`'s own address. That is the only
+   reading consistent with ruling 1 ("only where a cell is unreachable") and with D9.*
+2. **Column choice.** Prefer the column **directly below `A`**, descending to the first
+   cell whose below-neighbour is solid (cantilever 0). If no support exists in that column
+   within the world's vertical bounds, use the **nearest supported column by horizontal
+   Chebyshev** within `scaffold_max_cantilever_cells`, and connect with a same-Y
+   cantilever run.
+3. **Selection order among valid plans**: (1) fewest scaffold cells; (2) smallest maximum
+   cantilever distance; (3) `VillagerJobSelector.lexicographic_cell_less_than` on `A` —
+   the codebase's one established tie-break, reused, never a second one.
+4. **Erection order**: strictly ascending Y within a column, then the cantilever run,
+   emitted from an **explicitly sorted** list.
+5. **The plan is a pure function of (world state, target cell)** — never of the requesting
+   villager. Two villagers asking about the same cell must get the same plan.
+
+**Forbids**: RNG, wall-clock, frame counters; relying on `Dictionary` iteration/discovery
+order for any emitted order; per-villager state in the planner; a diagonal staging cell; a
+second tie-break convention.
+
+---
+
+### D9 — Overlap with a planned cell — **RULED: Option (a), forbid it**
+
+**Choice.** A scaffold cell may only be created at an address that (i) reads **empty** in
+`VoxelWorldGrid`, (ii) has **no blueprint cell in any non-`SCAFFOLD` project** —
+`BuildProjectRegistry.project_at_cell(cell)` returns `-1` or resolves to a `SCAFFOLD`-kind
+project — and (iii) holds **no furniture** (`FurnitureRegistry.has_occupant`). Checked in
+**one** place, at plan time.
+
+**Reason.** (b) creates a claim-order race between a dismantle job and a build job on the
+same address. (c) leaves a scaffold record pointing at a cell that is now solid — an
+occupancy source disagreeing with the voxel world, which is the failure mode D1's whole
+shape exists to avoid. (a) costs one O(1) lookup and makes AC5's "never solid" guarantee
+free of any ordering hazard. It composes cleanly with D8: the staging cell is beside the
+target, so the constraint is satisfiable in practice, not merely safe.
+
+*(iii) is belt-and-braces — furniture is passable, so a scaffold over a bed harms nothing
+physically — but a scaffold cell sharing an address with a bed is a bookkeeping question
+nobody should have to answer at 2am.*
+
+**Forbids**: options (b) and (c); a construction write landing on an address that holds a
+live scaffold record; performing this check anywhere but the plan-time gate.
+
+---
+
+### D10 — Dismantling the cell underfoot — **RULED: Option (i)**
+
+**Choice.** The worker **descends one scaffold cell first** — an ordinary
+scaffold-to-scaffold vertical step that ADR-0007 §2a now makes legal — and then dismantles
+the cell **above** it. Dismantle order is strictly **descending Y**, ties broken
+lexicographically on `(x, z)`.
+
+**Reason.** It uses the edge class this story adds instead of a teleport, needs **no**
+ADR-0009 amendment and no fifth mutation point, and is what makes AC3's "the worker rides
+it down" literally rather than figuratively true. Option (ii) buys nothing and costs a
+permanent widening of the discrete-mutation surface at the exact moment we are trying to
+shrink it.
+
+**Forbids**: option (ii); a fifth sanctioned `current_cell` mutation; dismantling any cell
+inside the worker's own body-column (SC-INV-1); an ascending or unordered dismantle.
+
+---
+
+### COUPLED RULING — retiring `climb_onto_self_sealed_cell` / `_relocate_if_marooned`
+
+**RULED: retire on evidence, not on landing. Not in this story. ADR-0009 is NOT amended today.**
+
+The story is right that two mechanisms answering "the builder is somewhere the graph
+cannot reach" will diverge, and that the discrete one firing first is what made a stranding
+bug read as a pacing bug for a full day. It is **not** right that the cure is to delete the
+net the moment the geometry lands — that is a single-step migration on the exact code path
+whose failure mode is an unrecoverable villager, validated by a demo that has never yet
+completed end to end.
+
+**Two steps.**
+
+- **Step 1 (with this story).** ADR-0009 points **(c)** and **(d)** stay, behaviourally
+  unchanged. Each gains a **telemetry counter** in the existing `villager_unstuck` family,
+  and **Lever 3's report must record both counters**. The masking objection is answered not
+  by deletion but by **loudness**: the anti-vacuity levers assert both counters are
+  **ZERO** for the build phase, so any firing **fails the lever**. A safety net that fails
+  the build when it fires cannot hide anything.
+- **Step 2 (a separate story, not this one).** After **two consecutive** green end-to-end
+  payoff-demo runs with both counters at zero, delete both methods, amend ADR-0009 back to
+  two sanctioned mutation points, and update `control-manifest.md`'s "EXACTLY four
+  sanctioned points" bullet. Not before.
+
+**D4's ruling removes the story's own countervailing evidence**: with cancel-with-worker
+falling back to top-down dismantle, `_relocate_if_marooned` is no longer needed as a cancel
+safety net. The two rulings are consistent — the net is kept for *evidence*, not for
+*function*.
+
+**We will know this was right if**: both counters read zero across the two runs and the
+deletion in Step 2 changes no test's behaviour. **We will know it was wrong if** a counter
+fires — in which case scaffolding is failing to cover a case it should, and the failure is
+visible on the first run instead of hidden for a day.
+
+---
+
+### What I left to the user, and why
+
+| Item | Why it is not mine |
+|---|---|
+| **D7's tick values** (`base_build_ticks_scaffold`, `base_demolition_ticks_scaffold`) | Pacing/feel. Ruling 2 fixed the constraints; the number is a design call. Structure is ruled, provisional 1/1 is marked provisional. |
+| **D2's visual identity** (silhouette, material, colour, tier) | Art direction. I ruled *where the pixels come from* (pooled Building-System tier) and that "invisible" is not an option; what it looks like is the user's. |
+| **D6's value `6`** | Already the user's ruling (AC4). I ruled only the metric, the support definition, the config shape and the safe range. |
+
+Everything else in D1–D10 is a technical decision with a defensible right answer, and
+leaving those open would only have cost another day.
+
+### We will know these rulings were right if
+
+- **Lever 1 and Lever 2 both pass on the real booted game**, and Lever 3's deletion probe
+  reproduces the empty `find_path` with the scaffold call site removed.
+- `seal_prevention_test.gd` (13/13) and `unstuck_watchdog_test.gd` (12/12) pass
+  **unchanged**, and `would_trap_builder` does **not** start firing once villagers stand on
+  scaffolding — the D1 `after_write` correction is the thing that makes this a real test.
+- Nav patch-average cost stays within **+5%** of the QQ3 baseline.
+- `src/build_validation/` still greps clean of any scaffold reference, and a half-built
+  house wrapped in scaffolding still classifies as **not** a Room.
+- Both `villager_unstuck` counters read **zero** for the build phase — which is what
+  unlocks the retirement story.
