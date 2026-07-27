@@ -604,3 +604,295 @@ games.** Creative-director tone decision, not an engineering default.
 - **Next step:** run **`/qa-plan sprint` (G1)** and **author `scene-007` (G2)** — both before any
   `/dev-story`. Then start `rid-008` + `rid-007` (lane R), `building-031` (lane R2) and
   `building-009` (lane C) **in parallel on day one**; all four are blocked on nothing.
+
+---
+
+## Sprint Result — CLOSED 2026-07-27
+
+> **Counting method, stated because this project got it wrong once.** Every figure below was counted
+> from `production/sprint-status.yaml` **and** from each story file's own `Status` line, read
+> independently on disk. Nothing here is taken from a narrative or a commit message's own summary.
+> Sprint 10's Result claimed 16/16 when the truth was 14/16, and the QA sign-off caught it.
+
+**18 of 20 tracked stories complete.**
+
+- **15 planned. 13 landed.**
+- **2 did not land, and both are decision-blocked, not capacity-trimmed:** `needs-mood-009` (waiting
+  on **D6(ii)**, the cross-GDD authority ruling — third sprint) and `building-ui-001` (waiting on the
+  **TD HUD-hosting ruling** — second sprint). Neither was trimmed. Both sat idle with capacity
+  available. **This distinction is load-bearing at the S12 checkpoint** — see the Cluster D reading
+  below.
+- **5 were added mid-sprint and all 5 landed:** `cam-013`, `presentation-004`, `villager-ai-022`,
+  `scene-008`, `build-validation-009`.
+
+**Suite: 1383 → 1541 (+158).** Verified on a clean single run: 1541 cases, 0 errors, 0 failures,
+0 flaky, 0 skipped, **0 orphans, exit 0**.
+
+### Three of the eighteen are complete-but-qualified. Named, not averaged in.
+
+| Story | What is actually true |
+|---|---|
+| **`building-031`** | Closed as **absorbed by `building-015`**, verified AC-by-AC (commit `8a12604`). Its ACs are covered; **it shipped no distinct code of its own.** Counted complete because the acceptance criteria are met, named here because "18" would otherwise imply eighteen separate deliverables. |
+| **`presentation-001` Sub-B** | Landed **with a flagged scope gap**. The art bible also names *"glancing at an unfinished build"* and *"brief exchanges between bonded villagers"*. Neither has any FSM state behind it — **no build awareness and no bond concept exist in the simulation** — and inventing them would be new simulation, which the story forbids itself. Recorded in the story file as a decision owed to producer/CD, not quietly dropped. ⚑ **Separately: the story file's own `Status` header was never updated** — it still reads *"Sub-scope A Complete (2026-07-24) … Sub-B awaits villager-ai-019"*. The yaml and the file disagree. Fix at S12 planning. |
+| **`presentation-004`** | **AC3 (art-director sign-off on the shipped 0.95 energy / 0.28 ambient) is deliberately OPEN.** The values ship provisional and are overturnable by a `.tres` edit. It also carries a **recorded deviation**: the anti-vacuity lever asked for luminance measured on **rendered** output; what shipped is a computed Lambertian estimate. It was shown to discriminate (shipped values inside the band, the art bible's 1.7/0.5 over the top, near-zero under the bottom), but it is **not what was written**, and the rendered proof is still owed. |
+
+### ⛔ A DoD line this sprint set for itself and then broke
+
+The plan's own DoD reads: *"Any story added to S11 after this plan is written is entered in
+`sprint-status.yaml` AND re-checked against the QA plan before sign-off (S09 condition #2, carried)."*
+**None of the five mid-sprint additions was entered in `sprint-status.yaml`** — verified by grep on
+2026-07-27; the file's `stories:` block still ends at `villager-ai-013`. The five stories exist on
+disk, are Complete, and are traceable through git; the *index* is what is wrong. This is the second
+consecutive sprint in which a process line was written as a DoD item and nothing gated on it.
+**S12 turns the yaml back-fill into a Day-0 gate, exactly as S11 did for the QA plan after S10's
+condition #3.**
+
+---
+
+## ⚑ The story of this sprint: nine instances of shipped-green-and-uncalled, six closed in a day
+
+This project's dominant failure mode is not bugs. It is **code that is green-tested, correct, and
+never called by the running game.** Sprint 11 brought the running count to **nine**, and closed
+**six of them on a single day**.
+
+| # | What was green and uncalled | Found in | Closed by |
+|---|---|---|---|
+| 1 | `generate_terrain` | pre-S10 | earlier sprint |
+| 2 | `spawn_starting_roster` | pre-S10 | earlier sprint |
+| 3 | `initialize_villager` (needs-mood-006) — F1 decay iterated nothing, so no villager could ever get tired | S10 | `scene-006` (S10) |
+| 4 | **The entire build-interaction tier** — `BuildEditorMode`, `WallTool`, `FloorTool`, `RoofTool`, `BlockTool`, `FurnitureTool`, `GhostPreview`, `UndoRedoStack` in no scene; `BuildProjectRegistry` / `ConstructionJobQueue` constructed nowhere in `src/` | S11 planning (F6) | **`scene-007`** |
+| 5 | **`FurnitureRegistry`** — constructed nowhere, so `ConstructionTickLoop.furniture_registry` and `FurnitureBedProvider.furniture_registry` were null in production and **no villager could claim a bed in the shipped game at all** | found while *authoring* `scene-007` | **`scene-007`** (`valley.gd:1005`) |
+| 6 | **No `Camera3D` anywhere in the production scene chain.** The world generated, villagers spawned and wandered, the whole build chain was hosted — and **the shipped game rendered nothing to anybody** | S11, by counting the live tree | **`cam-013`** |
+| 7 | **No `DirectionalLight3D` and no `WorldEnvironment` anywhere.** The game's only light was the torch | S11 | **`presentation-004`** |
+| 8 | **`BuildValidation` constructed nowhere in `src/`** — 0 call sites in `src/`, 16 in `tests/` | S11, from a screenshot | **`scene-008`** |
+| 9 | **`VillagerOnSiteGate` + `VillagerSealPreventionGate` constructed nowhere** | S11, same screenshot | **`scene-008`** |
+
+### How they were found matters more than that they were found
+
+**Not one of instances 4–9 was found by a test.** The suite was green at 1383 before this sprint and
+green at 1541 after it, and it was green *through* every one of these defects.
+
+- **`cam-013`** was found by **counting nodes in the live scene tree**: *"Counted at runtime, not
+  inferred: the live tree reported zero."* It now reports one.
+- **`villager-ai-022`** was found by **booting the game and asking where everyone stands.** Two
+  villagers spawned; one stood at cell `(0,0,0)` — the far corner of a 2000×2000 world, ~1400 cells
+  from the settlement, needs seeded, body attached, deciding and ticking every frame in a place
+  nobody would ever look. The commit's own honest note: *"No test could have caught it — every
+  placement test builds its villagers on purpose."*
+- **`scene-008`** was found by **reading a screenshot against its own report.** `04-built.png` showed
+  walls rising **while the villager stood well away from them.** Both work gates defaulted
+  *permissively* when unwired, so `ConstructionTickLoop` credited a claimed job every tick whether or
+  not the villager had ever arrived.
+- **`presentation-004`** was found by noticing that **three separate capture tools each applied the
+  art bible's golden-hour recipe themselves.** Every screenshot this project ever produced looked
+  lit because *the tool* supplied the lighting — so the product could stay pitch dark indefinitely
+  without a single piece of evidence looking wrong.
+
+### The lesson, drawn explicitly
+
+**A passing test proves code is correct. It cannot prove code is reached.** Everything in instances
+4–9 was correct. All of it was tested. None of it ran.
+
+Three mechanisms let correctness masquerade as reach, and each has a countermeasure:
+
+1. **Permissive defaults make a missing wire invisible to every query.** Both villager gates returned
+   "allowed" when unwired; `BuildValidation`'s bed provider returned `is_bed_sheltered() == false`
+   for *every* bed regardless of the room — which meant **Sprint 10's crown, milestone criterion #5,
+   was inert in the actual product while its test was green.** A nil-safe default is a decision to
+   fail silently. → **Practice change: any injected collaborator whose absence changes behaviour must
+   either assert at boot or be listed in the boot-invariant block. Never both optional and
+   consequential.**
+2. **Dev tools that compensate for a missing product feature hide it forever.** `presentation-004`'s
+   AC6 is the part that closes the hole rather than the symptom: **all three capture tools now light
+   nothing.** If a capture looks unlit again, that is a real regression in the game. →
+   **Practice change: a capture tool may supply nothing the product is supposed to supply — no
+   lighting, no cells, no props, no clock. Generalise AC6 to every tool this project ever writes.**
+3. **The S10 countermeasure was necessary and insufficient.** S10 chose "a growing boot-invariant
+   assertion block, plus the planning habit that every story adding a public API needs a caller story
+   in the same sprint." That habit is what produced `scene-007` — it worked. But it caught **none** of
+   instances 6, 7, 8 or 9, because those modules added no new API this sprint; they had been quietly
+   uncalled for many sprints. → **Practice change: the caller check must run against the *whole*
+   module list at sprint planning, not only against stories in the current sprint. Ask "what does the
+   live scene tree contain?" — not "what did this sprint add?"**
+
+**The single most valuable practice this sprint, and the one to keep:** every story carried an
+**anti-vacuity lever** — a named assertion that *demonstrably fails on today's build*, proven by
+deleting the production call and recording the observed failure. `scene-007`'s deletion probe,
+`rid-009`'s three pinned-test flips, `villager-ai-022`'s "every villager must stand on a cell the
+voxel world calls standable" (which the old build fails at the origin), `scene-008`'s regression *in
+the picture*. **That discipline surfaced most of this sprint's real findings and it is mandatory on
+every Sprint 12 story.**
+
+Three self-caught test defects are worth recording for the same reason. `scene-008`'s on-site test
+first drove a mock clock while the hosted tick loop binds to the real autoload, so progress was
+always zero and **the test would have passed against a completely unfixed build** — a vacuous test of
+exactly the kind this project keeps hunting, caught by its own author. `build-validation-009`'s
+idempotency test roofed only the escape cell and read ROOM because the analysis pass never reseeded
+the region. And a grep guard looked for `BuildValidation.new(`, which never appears, because it is
+scene-hosted like every other module.
+
+---
+
+## What landed
+
+**The crown — `rid-009`, the project's first authored game content.** `res://data/items/` came into
+existence: three tier-0 materials (`wood_block`, `stone_block`, `thatch_block`) plus the `bed`, with
+the tier-0 materials committed first so no intermediate commit could halt boot on a family-coverage
+gap. `is_need_functional(&"bed")` is now TRUE in production, and the three pinned deliberately-false
+assertions Sprint 10 left in the suite were flipped to genuine two-branch tests, with the flip
+demonstrated rather than asserted (`production/qa/evidence/rid-009-bed-functional-flip-evidence.md`).
+
+**The reverse verb — the C1 demolition chain, `009 → 012 → 015 → 017`.** Tearing down is a job, not a
+delete: worker-executed block demolition with `restore_value` write-back, floor excavation that
+remembers what the ground was, a draft eraser that branches on cell micro-state, and furniture
+demolition that removes the last instant-removal carve-out. `building-031` was verified absorbed by
+`015` rather than duplicated. **`building-017` paid D8 option (c)'s owed follow-on AC**: Sprint 10's
+crown proved bed revocation by firing `furniture_revoked` directly; it is now driven by a **real
+demolition job completing**, so the crown stops taking its own word for it.
+
+**The build chain became reachable — `scene-007`.** The whole build-interaction tier gained a scene
+home, with non-vacuity proven by deleting the hosting call and recording the observed failure.
+
+**The game became something a person can look at.** `cam-013` gave the shipped game a camera (it had
+none). `presentation-004` gave the world a sun and an environment (it had neither), as a config
+Resource rather than literals, and made all three capture tools stop lighting anything.
+`villager-ai-022` stopped a villager from living in the world corner and pinned the count convention:
+villager 0 **counts toward** `starting_villager_count` — a configured 1 used to hand the player 2.
+
+**Work stopped being credited to workers who did not show up — `scene-008`.** Three fully-built,
+fully-tested classes the running game never constructed are now hosted and wired, with a boot
+invariant for all three. The proof is a **regression in the picture**: the same demo now builds
+**19 of 30** wall cells instead of 20, because the villager must actually walk there and stay to earn
+credit. Less house, more truth.
+
+**The payoff signal finally carries a payoff — `build-validation-009`.** Carried twice from Sprint 10
+and delivered: milestone criterion **#7** closes. A `LoopPayoffAdapter` translates the genuine
+`room_recognized` and `shelter_status_changed` emissions into real payoff types, non-vacuous by
+construction — the crown test boots the real `GameWorld`, forces real chunk residency, writes real
+cells, and **does not compile against the pre-story codebase.**
+
+**Life — `villager-ai-019` and `villager-ai-013`.** Idle villagers wander off the existing graph
+(never a new pathfinder), and a blocked villager asks the occupant to step aside rather than
+freezing. `presentation-001` Sub-B poses the body while wandering, in the real game rather than a
+harness.
+
+Also written down for the first time, because two agents hit it independently in one day: **the world
+is not empty after boot.** Chunks lazily regenerate real terrain the moment residency is requested,
+so tests building geometry against a real booted grid must build above `base_height + amplitude` or
+probe for clear cells.
+
+---
+
+## New tooling and evidence — and the honest limit of what it proves
+
+Two capture tools now exist and are the project's primary reach-verification instruments:
+
+- **`neues-spiel/tools/settlement_overview_capture.tscn`** — photographs the settlement through the
+  game's own camera and **counts things in the live scene tree**. This is the tool that reported
+  `Camera3D nodes hosted by the shipped Valley: 1`.
+- **`neues-spiel/tools/payoff_loop_demo.tscn`** — **drives the real shipped build chain end to end.**
+  It reads `wall_height` live from the hosted config (never hardcoded), arms only through
+  `BuildEditorMode`, commits through `CommitPipeline`, releases into `ConstructionJobQueue`, then
+  waits on the real tick loop and a real villager. **It never writes a cell into `VoxelWorldGrid`,
+  never supplies its own lighting, never stages a prop.**
+
+It produced `production/qa/evidence/01-before.png` through `05-furnished.png`.
+
+> ### ⚑ Do not overclaim this. The payoff loop is demonstrated as far as *"house built, bed placed."*
+>
+> **It does NOT prove that the villager claims that bed and sleeps in it.** The tool has no claim
+> stage and no sleep stage; it ends after the furniture stage and quits. A villager claiming a bed in
+> a room it helped build, and sleeping there, **has never been observed in the running game** — only
+> in an integration test. That is Sprint 12's headline.
+>
+> Two further honesty notes on this evidence. `04-built.png` was **kept as-is rather than re-shot
+> after the fix**, because it is a picture of the bug — walls rising while the villager stands away
+> from them — and a picture of the bug is worth having. And the tool **stops honestly**: when the
+> wait cap hits, it prints that it refuses to fake the rest and **skips the screenshot entirely**
+> rather than shoot a room that is not furnished.
+
+---
+
+## ⚑ Open, unresolved, and carried to Sprint 12 — nothing absorbed silently
+
+| Item | State |
+|---|---|
+| **The 19/30 construction plateau** | Walls plateau at 19/30 for **~180 s**, most likely the villager cycling through seal-prevention refusals as the room closes around it. **Flagged, not investigated.** ⚑ **Producer note added at close:** `villager-ai-016` (seal prevention **and livelock escape**) is **Complete since 2026-07-25** and ships an escape hatch — `abandon_count >= seal_prevention_abandon_limit` flips `allow_write` true. A 180 s stall implies either the escape is not being reached in the shipped game, or the limit is large relative to the demo's cap. **That makes this more interesting, not less. Spike it before anyone reads it as a performance problem.** |
+| **The hen-and-egg pacing finding** | The villager gets tired and sleeps **before** the room that would let it sleep well exists. **This is a creative-director question about pacing, not a bug.** Surfaced as a decision in the S12 plan. |
+| **Furniture still has no view layer (F7)** | Re-verified on disk at close: `src/presentation/` contains **no furniture presenter** and zero references to furniture. A placed, built bed is still **invisible**. Blocks criterion #6's human-observable half and **R8, the external playtest, for a second sprint.** |
+| **Criterion #9 does not close** | `villager-ai-019` and Sub-B both landed, but `production/qa/evidence/ambient-life-wave-1-evidence.md` reads *"awaiting art-director/creative-director review"*. The criterion is met **only on a written, dated CD close entry** — it is now **owed**, and it is a signature, not work. |
+| **Criterion #8's four CD advisories** | Still outstanding — and the **golden-hour re-shoot is now mandatory rather than advisory**, because `presentation-004` changed what "lit" means: the tools no longer supply lighting, so every prior golden-hour capture was shot under tool light that no longer exists. |
+| **`bv-007`'s tick-source production-wiring guard** | **S11 DoD line, NOT met.** Verified: `build_validation.gd:348` self-wires from `/root/TimeTickSystem`, but that code landed in **S10** (`f61d1b3`), and no guard test pins it. Worse, until `scene-008` landed today, `BuildValidation.setup()` was never called in production at all, so the self-wire never ran in the shipped game either. **Second lapse. Make it a real task, not a folded DoD line.** |
+| **`presentation-004` AC3 + its rendered-luminance deviation** | Both open. See the qualified-completion table above. |
+| **`presentation-001` Sub-B's scope gap** | Decision owed to producer/CD: accept Sub-B as the two FSM-backed behaviours, or schedule the simulation the other two would require. |
+| **`rid-008`'s AC31a** | Shipped "documented as structurally unreachable". **Verify or retire that claim** — an AC that cannot fail is not an AC. |
+| **`needs-mood-009` / `building-ui-001`** | Not landed. **Decision-blocked, not capacity-trimmed.** D6(ii) is now on its **third** sprint; the TD HUD ruling on its **second**. |
+| **Criterion #13 (mid-range hardware baseline)** | **No story, two unowned TD decisions (hardware class, VSync), for the FIFTH consecutive sprint.** It is a **protected** criterion — it cannot be traded on the cut lever, so an unowned decision converts one-for-one into milestone risk. |
+| **Both pre-flight ruling documents** | Unratified for a **fourth** sprint. User-owned. Not schedulable work. |
+| **Multi-cell furniture REDO atomicity** | Still no story. Trigger (a second multi-cell item) not met. Correctly deferred. |
+| **`sprint-status.yaml` back-fill** | The five mid-sprint additions. Day-0 gate in S12. |
+| **Story-file ID collision** | `production/epics/villager-ai-behavior/` contains **two** files numbered `story-022`: `story-022-max-deciding-retune.md` (Not yet created) and `story-022-stray-default-villager-at-world-origin.md` (Complete). Renumber one. |
+
+---
+
+## Cut-Lever Checkpoint #2 — recorded affirmatively
+
+**The lever is NOT pulled.** Its signal is *"criterion #5 still not green"* at the end of S11.
+Criterion #5 is **green** (met in S10) — and this sprint went further: `scene-008` revealed criterion
+#5 was **inert in the shipped product** (a null validation made `is_bed_sheltered()` return false for
+every bed regardless of the room), and fixed it. Criterion #5 is now green *and* live. Recorded
+affirmatively rather than left to silence, exactly as the plan required.
+
+### ⚑ The separate Cluster D signal fires at the START of S12 — and it is a genuine producer call
+
+The milestone's lever table says: *"Cluster D has not started by S12 → trim steps 4–5 (both UIs to
+minimum viable)."* **Cluster D has not started.** `building-ui-001` was the single story that would
+have made "started" honest, and it did not land.
+
+**But the milestone's own anti-signal covers exactly this case:** *"do NOT pull the lever for a sprint
+that lands fewer stories than planned for **decision** reasons… every slip on this project came from
+blocked decisions, never from capacity."* `building-ui-001` did not land because the **TD HUD-hosting
+ruling never arrived** — while `scene-007` answered *the same architectural question* for the tool
+tier and landed comfortably. Capacity was not the constraint; it was never close.
+
+**The literal signal and the anti-signal point in opposite directions. That is a decision for the
+S12 checkpoint, not something to resolve by reading one clause and ignoring the other.** It is
+surfaced as decision **D3** in the Sprint 12 plan with options and a recommendation.
+
+---
+
+## Milestone criteria — S11 movement, counted honestly
+
+| # | Criterion | Movement |
+|---|---|---|
+| #1 | Build Validation implemented | **9/9 stories** — `bv-009` landed. `bv-006`'s and `bv-008`'s mocked branches became real via `rid-009`. |
+| #2 | Reachability corpus ≤ 60 s in CI | **HELD, unchanged.** Still *"5,000-verdict spec not met; the 1,000-verdict shipped configuration is 0/0 disagreement."* Not silently upgraded. |
+| #3 | Needs & Mood implemented | MVP-complete since S10. Unchanged. |
+| #4 | Real-time-rate pass | **DID NOT CLOSE** — `needs-mood-009` decision-blocked on D6(ii), third sprint. |
+| #5 | Payoff loop live-pair | **Green in S10, and made LIVE in the product this sprint** (`scene-008` — it was inert). Its owed debt is **paid** (`building-017`). |
+| #6 | Furniture placeable/buildable/claimable | **Code-complete 4/4.** ⚑ **Still human-unobservable**: no furniture view layer exists (F7). |
+| #7 | `presentation-002` signals something real | **✅ CLOSES** — `build-validation-009`, carried twice, delivered. |
+| #8 | Ambient life wave 1 in the composed Valley | **ADVANCES** (Sub-B). Four CD advisories outstanding; the golden-hour re-shoot is now **mandatory**. |
+| #9 | "World lacks life" formally CLOSED by CD | **NOT CLOSED.** Both prerequisites landed; the **written, dated CD close entry does not exist.** Owed. |
+| #10 | Building UI + Villager Info UI | **DID NOT START** — `building-ui-001` decision-blocked. See the Cluster D reading above. |
+| #11 | Lifecycle breadth — demolition | **✅ CLOSES on code** — `009` + `015` (absorbing `031`) + `017`. Check `building-027`'s remove-mode wording at S12 planning. |
+| #12 | Plan-only undo | Met (S10). Redo-atomicity edge still open, trigger not met. |
+| #13 | Mid-range hardware baseline | **STILL NO STORY. Fifth consecutive sprint. Protected — this is pure milestone risk.** |
+| #14 | `/team-qa sprint` sign-off every sprint | QA plan existed as a **gate** this time and it held. Sign-off + consolidated smoke artifact due at hand-off. |
+
+## Retrospective — what to keep, what to change
+
+**Keep.** (1) The **anti-vacuity lever on every story** — it found more real defects than the test
+suite did. (2) **Day-0 gates instead of DoD lines** for anything process-shaped; the QA plan existed
+this sprint precisely because it was a gate. (3) **Authoring gates** — `scene-007`'s estimate rose
+1.0 → 2.0 *during authoring*, and authoring is where the `FurnitureRegistry` instance was found.
+(4) **Reading story headers and source rather than tables** — third consecutive sprint where it
+changed the plan. (5) **Publishing the picture of the bug.**
+
+**Change.** (1) The caller check must run against the **whole hosted module list**, not just this
+sprint's new APIs — that is what instances 6–9 slipped through. (2) **No optional-and-consequential
+collaborators**: assert at boot or list in the boot invariant. (3) **Tools supply nothing the product
+should supply** — generalise `presentation-004`'s AC6. (4) **Back-fill `sprint-status.yaml` as a
+gate**, since a DoD line has now failed twice. (5) **Stop scheduling decision-blocked stories a third
+time** — `needs-mood-009` and `building-ui-001` have now consumed planning attention across three and
+two sprints respectively while never being workable. Get the ruling or drop them from the plan.
