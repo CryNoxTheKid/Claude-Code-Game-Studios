@@ -193,6 +193,14 @@ func _focus_point() -> Vector3:
 ## the last camera position win before any of them rendered, and all three PNGs
 ## would be the identical frame (observed — this is a fix, not a precaution).
 func _capture_all() -> void:
+	# THE IMPORTANT ONE, and it must come first: photograph through the game's
+	# OWN camera, untouched. Since camera-input story-013 landed, Valley hosts a
+	# real Camera3D driven by CameraInput, and it takes the viewport on entering
+	# the tree — so this frame is literally what a player sees on launch, with
+	# nothing staged by this tool. Everything after this point is a staged
+	# diagnostic angle and is labelled as such.
+	await _shoot_through_the_games_own_camera()
+
 	var focus: Vector3 = _focus_point()
 	print("settlement_overview_capture: focusing on %s" % str(focus))
 
@@ -214,13 +222,56 @@ func _capture_all() -> void:
 	get_tree().quit()
 
 
+## Captures the shipped camera's own view — the player's view — by leaving it
+## alone entirely. This tool's own camera is stood down for the shot so it
+## cannot win the viewport, then restored for the staged angles that follow.
+##
+## If the shipped scene hosts no camera (as was true before camera-input
+## story-013), this says so and captures nothing rather than quietly
+## substituting its own camera and passing the result off as the player's view.
+func _shoot_through_the_games_own_camera() -> void:
+	var valley: Node = _world.get_valley() if _world.has_method("get_valley") else null
+	var game_camera: Camera3D = null
+	if valley != null:
+		game_camera = _find_camera(valley)
+
+	if game_camera == null:
+		print("settlement_overview_capture: the shipped scene hosts no camera — no player-view frame to capture")
+		return
+
+	_camera.current = false
+	game_camera.current = true
+	await RenderingServer.frame_post_draw
+	_save(get_viewport().get_texture().get_image(), "player-view-on-launch")
+	print("settlement_overview_capture: player view at %s looking toward %s" % [
+		str(game_camera.global_position),
+		str(-game_camera.global_transform.basis.z),
+	])
+	_camera.current = true
+
+
+func _find_camera(node: Node) -> Camera3D:
+	if node is Camera3D:
+		return node as Camera3D
+	for child in node.get_children():
+		var found: Camera3D = _find_camera(child)
+		if found != null:
+			return found
+	return null
+
+
 func _shoot(camera_position: Vector3, look_at_point: Vector3, name_stem: String) -> void:
+	# The shipped camera also claims `current`; re-assert ours for staged angles.
+	_camera.current = true
 	_camera.position = camera_position
 	_camera.look_at(look_at_point, Vector3.UP)
 	# Force the just-moved camera's own frame to be the one rendered.
 	await RenderingServer.frame_post_draw
 
-	var image: Image = get_viewport().get_texture().get_image()
+	_save(get_viewport().get_texture().get_image(), name_stem)
+
+
+func _save(image: Image, name_stem: String) -> void:
 	var evidence_dir: String = ProjectSettings.globalize_path(EVIDENCE_DIR)
 	DirAccess.make_dir_recursive_absolute(evidence_dir)
 	_shot_index += 1
