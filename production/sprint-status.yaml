@@ -179,7 +179,7 @@ stories:
     name: "visual_asset resolution validation (two failure shapes) — sequenced strictly AFTER rid-009"
     file: "production/epics/resource-item-database/story-006-visual-asset-validation.md"
     priority: should-have
-    status: backlog
+    status: complete
     owner: "godot-gdscript-specialist"
     estimate_days: 0.5
     blocker: "ORDERING CONSTRAINT, NOT A STATED DEPENDENCY (F3): its own header depends only on rid-004 (Complete), but it MUST land AFTER rid-009. It makes a null visual_asset a TERMINAL BOOT HALT — vacuous before content exists, boot-halting after content authored without meshes. Its acceptance therefore includes: the four shipped entries pass it. ⚑ IF THE MESHES ARE NOT READY, SHIP rid-009 AND TRIM THIS — that ordering is safe; the reverse is not. Boot validation checks RESOURCE-LOAD SUCCESS FIRST, then visual_asset != null — two distinct diagnostics, both terminal, ORDER ASSERTED (a broken .tres must report 'entry failed to load', never 'visual_asset unresolved'). visual_asset is a typed Mesh, never a path string — NO filesystem existence check."

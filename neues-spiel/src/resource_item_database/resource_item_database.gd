@@ -19,10 +19,10 @@
 ## record (see [method _make_issue]) to the result -- entry id, source
 ## file, violated check, offending field -- never a log string, and the
 ## pipeline never short-circuits on the first failure (every entry is
-## checked). `visual_asset` resolution is Story 006's scope; the
-## `missing_item` fallback is Story 007's; `footprint` category-pairing/
-## presence validation is Story 008's -- none of those checks are
-## implemented here.
+## checked). `visual_asset` resolution is Story 006's scope (see that
+## story's own scope note below); the `missing_item` fallback is Story 007's;
+## `footprint` category-pairing/presence validation is Story 008's -- none of
+## those checks are implemented here.
 ##
 ## Story rid-005 scope note: this story adds the CROSS-CATALOG invariants on
 ## top of rid-004's per-entry pass (GDD Core Rules 5/6, Edge Case 6,
@@ -44,6 +44,25 @@
 ## needed no new production code: rid-004's pipeline already accumulates
 ## every issue without short-circuiting; Story 005 only raises the
 ## regression proof from rid-004's own 2-class fixture to 3.
+##
+## Story rid-006 scope note: this story adds `visual_asset` resolution
+## validation (GDD AC22, TR-resource-item-database-023; ADR-0006 Decision §3
+## and Risk 2 mitigation) via [method _validate_single_entry]'s new [constant
+## CHECK_VISUAL_ASSET_UNRESOLVED] check -- a loaded entry whose typed
+## `visual_asset` [Mesh] field is null halts boot naming the entry. This is
+## deliberately distinct from [constant CHECK_RESOURCE_LOAD_FAILED] (the
+## entry's backing `.tres` failing to load entirely, e.g. a missing/broken
+## `[ext_resource]`) -- ADR-0006 Risk 2 calls out that these are two different
+## failure shapes and the resource-load check must run FIRST. No runtime
+## `if`/`else` ordering was needed to enforce that here: [method
+## _load_entries] already excludes any entry that failed to load from the
+## `entries` list passed into [method _validate_entries] / [method
+## _validate_single_entry], so a broken-load entry structurally can never
+## reach the `visual_asset` check and be mislabeled -- the two diagnostics
+## are mutually exclusive by construction, not by a first-failure guard.
+## `visual_asset` is never treated as a path string or filesystem-existence-
+## checked -- it is a typed [Mesh] reference (Story 001/ADR-0006); a null
+## field is the only unresolved state this check observes.
 ##
 ## Story rid-008 scope note: this story adds the category<->footprint
 ## pairing/presence validation the rid-004 note above deferred (GDD Core
@@ -214,6 +233,7 @@ const CHECK_RETIRED_ID_CONFLICT: StringName = &"retired_id_conflict"
 const CHECK_TIER0_COVERAGE_GAP: StringName = &"tier0_coverage_gap"
 const CHECK_INVALID_FOOTPRINT: StringName = &"invalid_footprint"
 const CHECK_CATEGORY_FOOTPRINT_PAIRING: StringName = &"category_footprint_pairing"
+const CHECK_VISUAL_ASSET_UNRESOLVED: StringName = &"visual_asset_unresolved"
 
 ## Directory this instance scans at [method setup]. Production leaves this
 ## at [constant DEFAULT_DATA_DIR]; a headless test assigns a fixture
@@ -556,12 +576,14 @@ func _validate_entries(entries: Array[Dictionary], retired_ids: Array[StringName
 
 
 ## Per-entry schema checks (Story 004 Implementation Notes, extended by
-## Story 005): required-field presence, id snake_case format, RESERVED id
-## (`missing_item`) rejection, retired-ids ledger conflict, known category/
-## material_family, RESERVED category (`missing`) rejection, category<->
-## material_family pairing, `tier >= 0`, and `max_stack_size >= 1` where
-## `stackable`. Every violated check appends its own structured record -- an
-## entry with multiple problems reports all of them, never just the first.
+## Stories 005/008/006): required-field presence, id snake_case format,
+## RESERVED id (`missing_item`) rejection, retired-ids ledger conflict, known
+## category/material_family, RESERVED category (`missing`) rejection,
+## category<->material_family pairing, `tier >= 0`, `max_stack_size >= 1`
+## where `stackable`, category<->footprint pairing/presence, and
+## `visual_asset` resolution. Every violated check appends its own structured
+## record -- an entry with multiple problems reports all of them, never just
+## the first.
 func _validate_single_entry(
 	resource: ItemDefinitionResource, source_file: String, retired_ids: Array[StringName]
 ) -> Array[Dictionary]:
@@ -662,6 +684,18 @@ func _validate_single_entry(
 			)
 	elif resource.footprint != Vector2i(1, 1):
 		issues.append(_make_issue(id, source_file, CHECK_CATEGORY_FOOTPRINT_PAIRING, &"footprint"))
+
+	# --- visual_asset resolution (GDD AC22 / TR-resource-item-database-023, --
+	# Story rid-006): a loaded entry whose `visual_asset` field is null halts
+	# boot naming the entry, distinct from [constant
+	# CHECK_RESOURCE_LOAD_FAILED] (ADR-0006 Risk 2's "entry failed to load"
+	# shape). Order is guaranteed by construction, not a runtime branch here --
+	# [method _load_entries] already excludes any entry whose backing `.tres`
+	# failed to load entirely from the `entries` list this method is called
+	# over, so a broken-load entry can never reach this check and be
+	# mislabeled as "visual_asset unresolved."
+	if resource.visual_asset == null:
+		issues.append(_make_issue(id, source_file, CHECK_VISUAL_ASSET_UNRESOLVED, &"visual_asset"))
 
 	return issues
 

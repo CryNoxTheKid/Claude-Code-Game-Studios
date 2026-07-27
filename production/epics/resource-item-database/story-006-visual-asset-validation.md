@@ -1,7 +1,7 @@
 # Story 006: visual_asset resolution validation (typed Mesh, two failure shapes)
 
 > **Epic**: Resource & Item Database
-> **Status**: Ready
+> **Status: Complete (2026-07-27 — 1467/1467 suite green 0 orphans, parent-verified)
 > **Layer**: Foundation
 > **Type**: Config/Data
 > **Estimate**: 0.5 day
