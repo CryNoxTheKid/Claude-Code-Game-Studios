@@ -653,7 +653,14 @@ func _report_sleep_event_log() -> void:
 	for i in range(_sleep_event_log.size()):
 		var entry: Dictionary = _sleep_event_log[i]
 		if entry["owned_bed"] == null:
-			print("payoff_loop_demo: REPORT —   episode %d: GROUND sleep at %s (no bed owned yet — D10's own 'first sleep is unsheltered' pacing finding, reported not suppressed)." % [
+			# Say BEDLESS, never "GROUND". The old wording said "GROUND sleep",
+			# meaning only "no bed owned" — and it was read literally, by me,
+			# as "asleep on the ground". It was not: the cells were y=9 and y=10
+			# against a build site at y=6, i.e. the villager was stranded on top
+			# of its own structure. That misreading sent a pacing question to the
+			# creative director that was never the real cause. A label that can
+			# be read as a location must not describe an inventory fact.
+			print("payoff_loop_demo: REPORT —   episode %d: BEDLESS sleep at cell %s (no bed owned — note the CELL, especially its height: a villager asleep above the build site is stranded, not merely tired)." % [
 				i + 1, str(entry["cell"]),
 			])
 		else:
