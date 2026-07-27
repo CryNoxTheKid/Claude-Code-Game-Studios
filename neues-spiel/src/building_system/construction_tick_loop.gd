@@ -142,12 +142,12 @@
 ##   seam that layers those concerns on top, calling [method claim_job]/
 ##   [method release_job]/[method set_occupancy_predicate] exactly as any
 ##   other caller would.
-## - Story 009 (demolition / removal writes): this story's batching +
-##   self-write-tag mechanics (Story building-033, point 5 above) are
-##   generic to ANY completion this class issues -- a future demolition-job
-##   completion path is expected to reuse the SAME [BuildingSystemWriteTag]
-##   instance and the SAME batched-write discipline, not invent a second
-##   one. No removal/demolition write path exists in this class yet.
+## - Story 009 (demolition / removal writes, LANDED this revision -- see the
+##   dedicated "Story building-009" doc-comment block below): this story's
+##   batching + self-write-tag mechanics (Story building-033, point 5 above)
+##   turned out to be exactly generic enough to reuse verbatim for demolition
+##   completions too -- the SAME [BuildingSystemWriteTag] instance and the
+##   SAME batched-write discipline, never a second one.
 ## - Story 002/003: the persistent Build Project entity and its cell
 ##   registry/grouping -- this class has no concept of a project; it is
 ##   handed bare [BlueprintCell] references directly (mirrors
@@ -202,6 +202,96 @@
 ## regardless of claim/completion order or timing across ticks. See
 ## [FurnitureFootprintGroup]'s own doc comment for the full mechanism.
 ##
+## **Story building-009 (this revision, ADR-0016 primary, GDD Rule 14j,
+## [TR-building-system-114]/[TR-building-system-115]): demolition orders for
+## BLOCK-category Built cells, mirroring Rule 12's construction job contract
+## in reverse.** A demolition order is created ALREADY released -- no
+## staging step, unlike a build project's Draft phase, since tearing
+## something down needs no blueprint to reconsider ([method
+## create_demolition_order] realizes this: it is both "the order exists" and
+## "it is immediately job-eligible" in one call, collapsing what construction
+## splits into [method BuildProject.release] + [method
+## ConstructionJobQueue.claim_job]). [method claim_demolition_job] is the
+## per-villager execution claim (mirrors [method claim_job]'s own shape and
+## AC20's established mocked-claim test pattern, per this story's own
+## Implementation Notes: "Test the tick loop with a mocked on-site claim").
+## Three ways this deliberately mirrors construction's mechanics and one way
+## it deliberately does NOT:
+## 1. **No per-cell state transition on claim/progress.** [method
+##    claim_job] flips [member BlueprintCell.state] PLANNED -> UNDER_
+##    CONSTRUCTION because a not-yet-built cell needs a distinct "in
+##    progress" state. A demolished cell has no such need: the GDD's own
+##    "Built (terminal for the cell; not for the project)" States table row
+##    says a Built cell's demolition "moves the PROJECT onward," never a
+##    fifth [enum BlueprintCell.MicroState] value -- [member
+##    BlueprintCell.is_demolition_queued] (a plain bookkeeping flag, mirrors
+##    [member BlueprintCell.is_unreachable]'s own "annotation, not a state"
+##    precedent) is the ONLY per-cell bookkeeping a demolition order adds;
+##    [member BlueprintCell.state] stays [constant
+##    BlueprintCell.MicroState.BUILT] for the order's entire lifetime.
+## 2. **Same [_ActiveJob]/[method _on_tick] crediting loop, same batched
+##    completion write, same [BuildingSystemWriteTag].** A demolition job is
+##    tracked in the SAME [member _active_jobs] dictionary as a construction
+##    job (keyed by cell -- never a collision, since a BUILT cell can never
+##    ALSO be an active construction job, which always retires to BUILT
+##    before this story's code path can ever see it) with [_ActiveJob.is_demolition]
+##    `true` (set ONLY by [method claim_demolition_job], never [method
+##    claim_job] -- deliberately NOT keyed off [enum JobType.DEMOLISH]/
+##    [_ActiveJob.job_type], which is a SEPARATE, pre-existing seal-prevention
+##    exemption tag [method claim_job] can also be passed explicitly, per
+##    `villager-ai-016`'s own established test precedent -- see
+##    [_ActiveJob.job_type]'s own doc comment for why conflating the two would
+##    break that still-valid test). [method _on_tick] and [method
+##    _complete_jobs] branch on [_ActiveJob.is_demolition] only where the two
+##    mechanics genuinely differ (which per-category tick total applies; what
+##    gets written; whether [member BlueprintCell.state] changes) -- occupancy
+##    defer ([member _occupancy_predicate]) and seal-prevention ([member
+##    _seal_prevention_predicate]) already applied uniformly to every
+##    completing job regardless of kind before this story, and continue to
+##    apply completely unchanged, still keyed off [_ActiveJob.job_type]
+##    exactly as before (Rule 12's "same on-site rules" holds structurally,
+##    not via a second implementation of either gate).
+## 3. **The Voxel World clear, via the SAME batched [method
+##    VoxelWorldGrid.bulk_write] call.** A completing DEMOLISH job's write
+##    value is [member BlueprintCell.restore_value] if the cell carries one
+##    (Rule 14l floor-excavation, Story 012's future capturing half -- this
+##    story is the CONSUMING half) or [method CellContents.empty] otherwise
+##    ("the Voxel World clear occurs and the cell is gone," [TR-building-system-115]).
+##    Unlike a FURNITURE construction completion (which is EXCLUDED from
+##    [param changes] entirely, see the "Story building-028" block above), a
+##    BLOCK demolition completion is ALWAYS included -- there is no
+##    "furniture never enters VoxelWorldGrid" carve-out on the demolition
+##    side within this story's own scope, because this story implements
+##    BLOCK-category demolition only ([method create_demolition_order]
+##    refuses a [constant BlueprintCell.Category.FURNITURE] cell outright,
+##    returning `false` -- Story 017 is the future caller that extends
+##    demolition to furniture, reusing this SAME mechanism per that story's
+##    own Implementation Notes: "furniture reuses the same execution
+##    contract").
+## 4. **Duplicate guard (Edge 17, [TR-building-system-114]).** [method
+##    create_demolition_order] returns `false` (no-op, nothing mutated) if
+##    [member BlueprintCell.is_demolition_queued] is already `true` --
+##    "a second demolition request on an already-queued demolition cell is a
+##    no-op... mirrors Core Rule 3's 'already holds a blueprint cell'
+##    invalid-commit rule, applied to the demolition queue." [method
+##    claim_demolition_job]'s OWN [member _active_jobs] double-claim guard
+##    (shared with [method claim_job]) additionally prevents two villagers
+##    from claiming the SAME already-queued order.
+## 5. **[signal demolition_completed]** -- mirrors [signal
+##    construction_completed] exactly (same batching guarantee: fired at
+##    most once per [method _on_tick] dispatch, never for a zero-cell
+##    dispatch, carrying every cell demolished in THIS SAME dispatch) but
+##    kept as a SEPARATE, distinctly-named signal rather than folding
+##    demolitions into [signal construction_completed] -- a demolished cell
+##    is semantically the opposite event (a cell LEAVING a project, per
+##    [method BuildProject.demolish_cell]) from a completed one, and this
+##    class's own "no project concept" invariant (see the "Story 002/003"
+##    Out-of-scope bullet above) means it cannot call that method itself;
+##    this signal is the seam a FUTURE registry-aware caller (Story 010/015,
+##    not yet wired -- mirrors every other not-yet-assembled seam in this
+##    codebase) consumes to remove the cell from its owning [BuildProject]
+##    and [BuildProjectRegistry]'s reverse index.
+##
 ## Injected-tier module (ADR-0001): [member voxel_world]/[member config] are
 ## wired via a scene file's Inspector in production (once a future
 ## scene-assembly story attaches this node), or assigned directly in a
@@ -218,18 +308,16 @@ extends Node
 ## Story villager-ai-016 (GDD F6: `job_type` variable, `{build, dig,
 ## demolish}`) -- which seal-prevention exemption bucket a claimed job falls
 ## into. Defaults to [constant JobType.BUILD] everywhere [method claim_job]
-## is called without an explicit value -- every job this codebase can
-## currently ORIGINATE (Building System's dig/demolition project kinds,
-## Story building-013/014, are not yet landed) is a build job, so this
-## default changes NO existing caller's behavior. [constant JobType.DIG]/
-## [constant JobType.DEMOLISH] exist now so [method
-## VillagerSealPreventionGate]'s own exemption check (`job_type != build`,
-## Rule 16) has a real value to compare against the moment a future dig/
-## demolition job queue starts passing one explicitly -- this class itself
-## assigns no special MEANING to either value beyond that comparison; it
-## still writes every completing job through the exact same batched
-## [method _complete_jobs] path regardless of kind (class doc comment
-## point 5).
+## is called without an explicit value, so this default changes NO existing
+## caller's behavior. [constant JobType.DEMOLISH] is now [method
+## claim_demolition_job]'s own OWN job kind (Story building-009, landed this
+## revision -- see that story's dedicated doc-comment block above) -- both
+## [method VillagerSealPreventionGate]'s exemption check (`job_type != build`,
+## Rule 16) and this class's own `_on_tick`/`_complete_jobs` branch on it now
+## have a real caller passing it. [constant JobType.DIG] remains reserved for
+## a future terrain dig-order queue (Story building-013/014, not yet landed)
+## -- this class itself still assigns no special MEANING to any value beyond
+## those two consumers' own comparisons.
 enum JobType {
 	BUILD,
 	DIG,
@@ -277,6 +365,14 @@ var furniture_registry: FurnitureRegistry = null
 ## region re-analysis per completing cell.
 signal construction_completed(cells: Array[Vector3i])
 
+## Story building-009 addition ([TR-building-system-115]) -- mirrors [signal
+## construction_completed] exactly (fired at most once per [method _on_tick]
+## dispatch, never for a zero-cell dispatch, carrying every cell demolished
+## in THIS SAME dispatch) but kept distinct -- see the "Story building-009"
+## class doc comment block, point 5, for why this is a separate signal
+## rather than folded into [signal construction_completed].
+signal demolition_completed(cells: Array[Vector3i])
+
 ## Time & Tick System dependency (ADR-0001 Autoload tier) -- see class doc
 ## comment. Duck-typed against the one member this class depends on:
 ## `signal tick()`.
@@ -306,17 +402,40 @@ class _ActiveJob:
 	var progress_ticks: int = 0
 
 	## See [enum JobType] (Story villager-ai-016). Defaults to
-	## [constant JobType.BUILD] -- see that enum's own doc comment.
+	## [constant JobType.BUILD] -- see that enum's own doc comment. **Purely
+	## a seal-prevention exemption tag** (Rule 16/F6, forwarded verbatim to
+	## [member _seal_prevention_predicate]) -- deliberately NOT what [method
+	## _on_tick]/[method _complete_jobs] branch on to decide whether THIS job
+	## is a real demolition (see [member is_demolition] below for that).
+	## `villager-ai-016`'s own established test precedent claims a job
+	## through [method claim_job] (the CONSTRUCTION path: PLANNED ->
+	## UNDER_CONSTRUCTION -> BUILT) while passing [constant JobType.DEMOLISH]
+	## purely to exercise the seal-prevention exemption bucket -- that job is
+	## NOT a real demolition and must still flip to BUILT/write [member
+	## BlueprintCell.contents] normally. Conflating the two (branching
+	## `_on_tick`/`_complete_jobs` on [member job_type] directly) would break
+	## that pre-existing, still-valid test.
 	var job_type: ConstructionTickLoop.JobType = ConstructionTickLoop.JobType.BUILD
+
+	## Story building-009 addition -- `true` ONLY for a job started via
+	## [method claim_demolition_job] (never [method claim_job], regardless of
+	## what [member job_type] it was passed). THIS is what [method _on_tick]/
+	## [method _complete_jobs] branch on for demolition-specific mechanics
+	## (required-tick knob, write value, state-flip skip, which completion
+	## signal fires) -- see [member job_type]'s own doc comment for why that
+	## field is the wrong thing to branch on instead.
+	var is_demolition: bool = false
 
 	func _init(
 		p_blueprint_cell: BlueprintCell,
 		p_villager_id: int,
-		p_job_type: ConstructionTickLoop.JobType = ConstructionTickLoop.JobType.BUILD
+		p_job_type: ConstructionTickLoop.JobType = ConstructionTickLoop.JobType.BUILD,
+		p_is_demolition: bool = false
 	) -> void:
 		blueprint_cell = p_blueprint_cell
 		villager_id = p_villager_id
 		job_type = p_job_type
+		is_demolition = p_is_demolition
 
 ## True once [method setup] has completed at least once.
 var _is_set_up: bool = false
@@ -456,6 +575,57 @@ func is_job_active(cell: Vector3i) -> bool:
 	return _active_jobs.has(cell)
 
 
+## Creates a demolition order for [param blueprint_cell] (Story building-009,
+## AC65, GDD Rule 14j, [TR-building-system-114]) -- see the "Story
+## building-009" class doc comment block above for the full mechanism.
+## Requires [param blueprint_cell] to be currently [constant
+## BlueprintCell.MicroState.BUILT] (a not-yet-Built cell is canceled via
+## [BuildProject.cancel_cell]/Story 015's Draft-eraser branch, never
+## demolished) and [constant BlueprintCell.Category.BLOCK] (Story 017 is the
+## future caller that extends this to [constant
+## BlueprintCell.Category.FURNITURE]). Returns `false` (no-op, nothing
+## mutated) if either of those does not hold, or if [param blueprint_cell]
+## already has a demolition order queued (Edge 17's duplicate guard --
+## [member BlueprintCell.is_demolition_queued] already `true`). On success,
+## sets that flag -- the order is immediately job-eligible, no separate
+## release step ("already released" per AC65) -- and [param blueprint_cell]'s
+## own [member BlueprintCell.state] is left completely untouched (stays
+## BUILT; the cell is NOT cleared yet, per AC65's own wording).
+func create_demolition_order(blueprint_cell: BlueprintCell) -> bool:
+	if blueprint_cell.state != BlueprintCell.MicroState.BUILT:
+		return false
+	if blueprint_cell.category != BlueprintCell.Category.BLOCK:
+		return false
+	if blueprint_cell.is_demolition_queued:
+		return false
+	blueprint_cell.is_demolition_queued = true
+	return true
+
+
+## The demolition job-claim seam (AC66, mirrors [method claim_job]'s own
+## shape and AC20's established mocked-claim test pattern -- see the "Story
+## building-009" class doc comment block above). Requires [param
+## blueprint_cell] to already carry a demolition order ([member
+## BlueprintCell.is_demolition_queued], via [method create_demolition_order])
+## and its cell address to have no other active job (mirrors [method
+## claim_job]'s own double-claim guard, reusing the SAME [member
+## _active_jobs] dictionary -- a collision is structurally impossible here,
+## since a BUILT cell can never simultaneously be an active CONSTRUCTION
+## job). Returns `false` (no-op) otherwise. On success, begins crediting
+## [param blueprint_cell] ticks via [method _on_tick] with [enum
+## JobType.DEMOLISH] -- [member BlueprintCell.state] is NOT transitioned (see
+## class doc comment point 1: demolition adds no per-cell state, only the
+## [member BlueprintCell.is_demolition_queued] bookkeeping flag already set).
+func claim_demolition_job(blueprint_cell: BlueprintCell, villager_id: int) -> bool:
+	assert(is_set_up(), "ConstructionTickLoop.claim_demolition_job called before setup()")
+	if not blueprint_cell.is_demolition_queued:
+		return false
+	if _active_jobs.has(blueprint_cell.cell):
+		return false
+	_active_jobs[blueprint_cell.cell] = _ActiveJob.new(blueprint_cell, villager_id, JobType.DEMOLISH, true)
+	return true
+
+
 ## Wires the occupied-cell defer seam (Story building-030, class doc comment
 ## point 2b) -- [ConstructionJobQueue]'s real caller, or a test's mocked
 ## occupied-state stand-in, supplies `Callable(cell: Vector3i) -> bool`.
@@ -498,6 +668,19 @@ static func required_ticks_for(category: BlueprintCell.Category, ticks_config: C
 			return ticks_config.base_build_ticks_block
 
 
+## GDD Formula F3 addendum's `cell_demolition_ticks = base_demolition_ticks
+## [category]` (Story building-009, [TR-building-system-114]/115) -- mirrors
+## [method required_ticks_for]'s own pure/static/testable shape exactly.
+static func required_demolition_ticks_for(
+	category: BlueprintCell.Category, ticks_config: ConstructionTickLoopConfig
+) -> int:
+	match category:
+		BlueprintCell.Category.FURNITURE:
+			return ticks_config.base_demolition_ticks_furniture
+		_:
+			return ticks_config.base_demolition_ticks_block
+
+
 ## [signal TimeTickSystem.tick] handler -- see class doc comment point 2 for
 ## why no burst loop/delta/warp handling belongs here. Credits every
 ## currently-active job exactly one tick. Iterates a SNAPSHOT of [member
@@ -524,6 +707,24 @@ static func required_ticks_for(category: BlueprintCell.Category, ticks_config: C
 ## job that reaches threshold and is NOT refused is collected (never written
 ## individually) and handed to [method _complete_jobs] once the credit pass
 ## is done.
+##
+## Story building-009 addition -- a job with [member _ActiveJob.is_demolition]
+## `true` (started via [method claim_demolition_job] -- see that member's own
+## doc comment for why this is NOT the same thing as [member
+## _ActiveJob.job_type] `== ` [constant JobType.DEMOLISH]) is credited
+## against [method required_demolition_ticks_for] instead of [method
+## required_ticks_for]; the occupancy/seal-prevention predicates above are
+## consulted identically regardless (Rule 12's "same on-site rules," no
+## second implementation) -- [member _ActiveJob.job_type] is still forwarded
+## to [member _seal_prevention_predicate] completely unchanged. On threshold,
+## a completing real-demolition job's write value is [member
+## BlueprintCell.restore_value] if set (Rule 14l floor-excavation) or
+## [method CellContents.empty] otherwise ("the Voxel World clear occurs and
+## the cell is gone") -- ALWAYS included in [param changes] (unlike a
+## FURNITURE construction completion's grid-write exclusion just below; this
+## story implements BLOCK-category demolition only, so this branch never
+## sees a FURNITURE cell -- see [method create_demolition_order]'s own
+## category guard).
 func _on_tick() -> void:
 	var changes: Dictionary[Vector3i, CellContents] = {}
 	var completed_jobs: Array[_ActiveJob] = []
@@ -532,18 +733,32 @@ func _on_tick() -> void:
 			continue
 		var job: _ActiveJob = _active_jobs[cell]
 		job.progress_ticks += 1
-		if job.progress_ticks >= ConstructionTickLoop.required_ticks_for(job.blueprint_cell.category, config):
+		var required_ticks: int
+		if job.is_demolition:
+			required_ticks = ConstructionTickLoop.required_demolition_ticks_for(job.blueprint_cell.category, config)
+		else:
+			required_ticks = ConstructionTickLoop.required_ticks_for(job.blueprint_cell.category, config)
+		if job.progress_ticks >= required_ticks:
 			if _seal_prevention_predicate.is_valid():
 				var allow_write: bool = bool(
 					_seal_prevention_predicate.call(cell, job.villager_id, job.job_type)
 				)
 				if not allow_write:
 					continue
+			if job.is_demolition:
+				# Story building-009 (Rule 14j/14l, TR-115) -- always included:
+				# the restore_value snapshot if this was a floor-excavation
+				# entry, otherwise an explicit empty cell ("the clear occurs").
+				changes[cell] = (
+					job.blueprint_cell.restore_value
+					if job.blueprint_cell.restore_value != null
+					else CellContents.empty()
+				)
 			# Story building-028 (ADR-0016 BV-1 ruling) -- a FURNITURE-category
-			# completion is EXCLUDED from the bulk_write payload entirely; it
-			# is routed to [member furniture_registry] instead, in [method
-			# _complete_jobs]. Every other category is unaffected.
-			if job.blueprint_cell.category != BlueprintCell.Category.FURNITURE:
+			# construction completion is EXCLUDED from the bulk_write payload
+			# entirely; it is routed to [member furniture_registry] instead, in
+			# [method _complete_jobs]. Every other category is unaffected.
+			elif job.blueprint_cell.category != BlueprintCell.Category.FURNITURE:
 				changes[cell] = job.blueprint_cell.contents
 			completed_jobs.append(job)
 	_complete_jobs(changes, completed_jobs)
@@ -558,10 +773,12 @@ func _on_tick() -> void:
 ## BlueprintCell.MicroState.BUILT] and retires it from [member _active_jobs]
 ## -- AFTER the write, matching this class's pre-033 ordering (the write's
 ## own signal always observed a completing cell still UnderConstruction).
-## Fires [signal construction_completed] with every completed cell, but only
-## when [param completed_jobs] is non-empty -- a dispatch with nothing to
-## complete emits neither signal, matching [method VoxelWorldGrid.bulk_write]'s
-## own "nothing changed, nothing emitted" contract.
+## Fires [signal construction_completed] with every completed CONSTRUCTION
+## cell and [signal demolition_completed] with every completed DEMOLITION
+## cell (Story building-009), each only when its own set is non-empty -- a
+## dispatch with nothing to complete of a given kind emits neither signal,
+## matching [method VoxelWorldGrid.bulk_write]'s own "nothing changed,
+## nothing emitted" contract.
 func _complete_jobs(changes: Dictionary[Vector3i, CellContents], completed_jobs: Array[_ActiveJob]) -> void:
 	if completed_jobs.is_empty():
 		return
@@ -574,17 +791,26 @@ func _complete_jobs(changes: Dictionary[Vector3i, CellContents], completed_jobs:
 		write_tag.begin()
 		voxel_world.bulk_write(changes)
 		write_tag.end()
-	# First pass: flip EVERY completing cell to BUILT and retire its active
-	# job before any furniture-footprint completeness check runs below
-	# (Story building-016). A multi-cell footprint's siblings can complete in
-	# the SAME dispatch -- checking group completeness must see every
-	# sibling's freshly-flipped state, never a stale UNDER_CONSTRUCTION read
-	# that would depend on [param completed_jobs]' iteration order.
-	var completed_cells: Array[Vector3i] = []
+	# First pass: retire every completing job from [member _active_jobs].
+	# A CONSTRUCTION job additionally flips to BUILT before any furniture-
+	# footprint completeness check runs below (Story building-016) -- a
+	# multi-cell footprint's siblings can complete in the SAME dispatch, so
+	# checking group completeness must see every sibling's freshly-flipped
+	# state, never a stale UNDER_CONSTRUCTION read that would depend on
+	# [param completed_jobs]' iteration order. A DEMOLISH job (Story
+	# building-009) does NOT flip state (see class doc comment point 1 --
+	# it stays BUILT for its entire lifetime) and instead clears [member
+	# BlueprintCell.is_demolition_queued], the order's own fulfillment.
+	var completed_construction_cells: Array[Vector3i] = []
+	var completed_demolition_cells: Array[Vector3i] = []
 	for job: _ActiveJob in completed_jobs:
-		job.blueprint_cell.state = BlueprintCell.MicroState.BUILT
 		_active_jobs.erase(job.blueprint_cell.cell)
-		completed_cells.append(job.blueprint_cell.cell)
+		if job.is_demolition:
+			job.blueprint_cell.is_demolition_queued = false
+			completed_demolition_cells.append(job.blueprint_cell.cell)
+		else:
+			job.blueprint_cell.state = BlueprintCell.MicroState.BUILT
+			completed_construction_cells.append(job.blueprint_cell.cell)
 	# Second pass: route furniture completions. A single-cell item
 	# ([member BlueprintCell.footprint_group] `null`) routes immediately --
 	# Story building-028's exact pre-016 behavior, unchanged. A multi-cell
@@ -593,9 +819,15 @@ func _complete_jobs(changes: Dictionary[Vector3i, CellContents], completed_jobs:
 	# construction -- see [FurnitureFootprintGroup]'s own doc comment);
 	# [member FurnitureFootprintGroup.is_registered] guards against a double
 	# [method FurnitureRegistry.place] call when two or more siblings
-	# complete in this SAME dispatch.
+	# complete in this SAME dispatch. A DEMOLISH job is never routed here --
+	# this story implements BLOCK-category demolition only (Story 017 is
+	# furniture demolition's own future extension).
 	for job: _ActiveJob in completed_jobs:
-		if job.blueprint_cell.category != BlueprintCell.Category.FURNITURE or furniture_registry == null:
+		if (
+			job.is_demolition
+			or job.blueprint_cell.category != BlueprintCell.Category.FURNITURE
+			or furniture_registry == null
+		):
 			continue
 		# Story building-028 (ADR-0016 BV-1 ruling) -- route a completing
 		# FURNITURE cell to the furniture registry INSTEAD OF the grid (see
@@ -620,4 +852,7 @@ func _complete_jobs(changes: Dictionary[Vector3i, CellContents], completed_jobs:
 		for sibling: BlueprintCell in group.cells:
 			footprint_cells.append(sibling.cell)
 		furniture_registry.place(job.blueprint_cell.furniture_definition_id, footprint_cells)
-	construction_completed.emit(completed_cells)
+	if not completed_construction_cells.is_empty():
+		construction_completed.emit(completed_construction_cells)
+	if not completed_demolition_cells.is_empty():
+		demolition_completed.emit(completed_demolition_cells)

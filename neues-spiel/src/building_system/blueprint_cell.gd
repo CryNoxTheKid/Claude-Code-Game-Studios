@@ -141,16 +141,45 @@ var claimed_by_villager_id: int = -1
 ## exactly ONE furniture entity.
 var footprint_group: FurnitureFootprintGroup = null
 
+## Story building-009 addition (GDD Rule 14l, [TR-building-system-120]) --
+## the captured terrain [CellContents] for a floor-excavation blueprint entry
+## (Story 012's future capturing half, at floor-tool commit time on a
+## terrain-top-surface start cell). `null` for every ordinary cell (the
+## overwhelming majority). When non-null, [ConstructionTickLoop]'s demolition
+## completion writes THIS value back to [VoxelWorldGrid] instead of an empty
+## [CellContents] (Rule 14j/14l: "the original terrain's restore_value is
+## written back instead of leaving an empty cell") -- this story (009) is the
+## CONSUMING half of the contract; Story 012 is the future capturing half.
+## A snapshot, never re-derived -- whichever future caller sets this must set
+## it once, at capture time, and never recompute it later (Edge 18).
+var restore_value: CellContents = null
+
+## Story building-009 addition (GDD Rule 14j, [TR-building-system-114],
+## Edge 17) -- `true` once a demolition order exists for this (necessarily
+## [constant MicroState.BUILT]) cell. Deliberately a plain rendering/
+## bookkeeping-style flag, NOT a fifth [enum MicroState] value -- mirrors
+## [member is_unreachable]'s own "annotation, not a state" precedent exactly:
+## the cell stays fully [constant MicroState.BUILT] (still the per-cell
+## terminal state per the GDD's own "Built (terminal for the cell; not for
+## the project)" table row) for as long as its demolition job is queued or
+## in progress; only [ConstructionTickLoop] mutates this field ([method
+## ConstructionTickLoop.create_demolition_order] sets it, that same class's
+## demolition-completion path clears it). A freshly-created cell always
+## starts `false`.
+var is_demolition_queued: bool = false
+
 
 func _init(
 	p_cell: Vector3i,
 	p_state: MicroState = MicroState.PLANNED,
 	p_category: Category = Category.BLOCK,
 	p_contents: CellContents = null,
-	p_furniture_definition_id: StringName = &""
+	p_furniture_definition_id: StringName = &"",
+	p_restore_value: CellContents = null
 ) -> void:
 	cell = p_cell
 	state = p_state
 	category = p_category
 	contents = p_contents if p_contents != null else CellContents.new(1, 0)
 	furniture_definition_id = p_furniture_definition_id
+	restore_value = p_restore_value

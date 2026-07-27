@@ -1,7 +1,7 @@
 # Story 009: Demolition orders — block teardown job contract
 
 > **Epic**: Building System
-> **Status**: Ready
+> **Status: Complete (2026-07-27 — 1404/1404 suite green 0 orphans, parent-verified)
 > **Layer**: Core
 > **Type**: Logic
 > **Estimate**: 1 day
