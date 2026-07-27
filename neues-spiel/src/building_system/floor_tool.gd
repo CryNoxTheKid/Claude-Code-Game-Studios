@@ -44,15 +44,79 @@
 ## documented "future tool story overrides this" seam exactly.
 ##
 ## Unlike [WallTool] (an injected-tier module per ADR-0001 with a `config`
-## dependency to wire/validate in `setup()`), this class has no dependency of
-## any kind -- there is nothing to wire and nothing to validate, so no
-## `setup()`/`is_set_up()` gate exists here. [method resolve_cell_set] is
-## callable immediately after construction. A future scene-assembly story
-## still attaches this as a plain `Node` (matching [WallTool]'s shape for
-## the tool family's uniformity, e.g. a future ghost-preview call site,
-## Story 023), it just never needs to call `setup()` on it first.
+## dependency to wire/validate in `setup()`), this class has no REQUIRED
+## dependency -- there is nothing that must be wired for the plain F2 formula
+## itself, so no `setup()`/`is_set_up()` gate exists here. [method
+## resolve_cell_set] is callable immediately after construction with both new
+## deps left `null` (every pre-012 caller/test behaves identically). A future
+## scene-assembly story still attaches this as a plain `Node` (matching
+## [WallTool]'s shape for the tool family's uniformity, e.g. a future
+## ghost-preview call site, Story 023), it just never needs to call `setup()`
+## on it first.
+##
+## **Story building-012 (this revision, ADR-0016 primary, GDD Rule 14l,
+## [TR-building-system-120]): the terrain-start excavation branch.** [member
+## voxel_world]/[member commit_pipeline] are two NEW, OPTIONAL (nullable, never
+## asserted) dependencies -- mirrors [FurnitureTool]'s own combined-view
+## support-check shape ([method FurnitureTool.is_cell_supported]) exactly,
+## reused here for the SAME "raw grid OR blueprint-tracked" read, just to
+## answer a different question. A `null` value on either restores this
+## story's pre-012 behavior exactly (excavation never triggers, [method
+## resolve_cell_set] behaves exactly as it always did) -- there is no
+## `setup()` gate to enforce wiring because a bare `FloorTool.new()` (this
+## project's own established direct-construction test convention, and every
+## pre-012 test in `floor_tool_test.gd`) must keep working unchanged.
+##
+## [method starts_on_terrain_top_surface] answers Rule 14l's own trigger
+## condition: does [param press_cell] (the drag's ATTACH cell, ALWAYS one cell
+## above whatever [PlacementPick] actually hit -- see that class's own doc
+## comment) sit directly above **raw, untracked terrain** -- raw Voxel World
+## data that is non-empty AND carries no [CommitPipeline]-tracked
+## [BlueprintCell] at all (a CANCELED entry counts as untracked too, mirroring
+## [method CommitPipeline._is_cell_available]'s own "canceled cells free up
+## their address" precedent)? [CommitPipeline]'s own doc comment already
+## establishes the load-bearing fact this reuses without reinventing it: "a
+## raw-grid-occupied cell this pipeline does NOT itself track... can only be
+## terrain" (this system is the sole writer of every cell it ever tracks). A
+## cell BELOW press_cell that IS tracked (Draft/UnderConstruction/Built, e.g.
+## an existing floor or block THIS system already built) therefore fails this
+## check -- exactly the QA plan's own named edge case: "a floor drag starting
+## on a BUILT floor (not terrain) does NOT capture `restore_value` (normal
+## stacking)."
+##
+## [method resolve_cell_set] consults this ONCE, against [param press_cell]
+## only (Core Rule 3: the working plane -- and therefore this decision -- is
+## locked to the drag's START cell for its entire duration, exactly mirroring
+## the existing Y-anchor discipline this class's doc comment already
+## documents): when it triggers, the WHOLE F2 rectangle is generated one cell
+## LOWER (at the terrain cell's own Y, never the attach cell's) so the floor
+## replaces the terrain flush instead of stacking a step on top of it. [method
+## resolve_terrain_replace_cells] is the companion seam
+## [CommitPipeline.set_terrain_replace_resolver] consumes (mirrors [method
+## resolve_cell_set]'s own [method CommitPipeline.set_cell_set_resolver]
+## registration precedent) -- it reports exactly WHICH of [method
+## resolve_cell_set]'s own returned cells are eligible for [CommitPipeline]'s
+## narrow, tracked terrain-replace-in-place exception (Rule 14l's own
+## documented carve-out from Core Rule 15/Edge Case 2's general "terrain is
+## never replace-in-place-able" rule): either ALL of them (the excavation
+## branch triggered) or NONE (ordinary stacking, [TR-building-system-084]'s
+## general rule applies unchanged). [CommitPipeline] is the sole place that
+## actually reads raw terrain content and writes [member
+## BlueprintCell.restore_value] -- this class only ever decides WHICH cells
+## qualify, never touches [VoxelWorldGrid] itself (grep-guard, unchanged).
 class_name FloorTool
 extends Node
+
+## Read-only occupancy dependency (ADR-0001, Story building-012) -- see class
+## doc comment. This tool never writes to it (grep-guard, unchanged).
+@export var voxel_world: VoxelWorldGrid = null
+
+## The SAME [CommitPipeline] instance this tool registers [method
+## resolve_cell_set]/[method resolve_terrain_replace_cells] into (ADR-0001,
+## Story building-012) -- also read for the blueprint half of [method
+## starts_on_terrain_top_surface]'s combined-view check ([method
+## CommitPipeline.get_blueprint_cell_at]).
+@export var commit_pipeline: CommitPipeline = null
 
 
 ## The [method CommitPipeline.set_cell_set_resolver]-compatible bound entry
@@ -62,8 +126,59 @@ extends Node
 ## Ignores [param _is_drag] entirely -- see class doc comment for why the
 ## SAME F2 formula call correctly resolves both the drag (AC7) and
 ## click/degenerate-drag cases with no branch.
+##
+## Story building-012 addition: when [param press_cell] starts on a terrain
+## top surface ([method starts_on_terrain_top_surface]), both endpoints are
+## shifted one cell down BEFORE rasterizing (Rule 14l's "replaces the terrain
+## cell flush... rather than stacking a floor cell on top of it") -- only
+## [param press_cell]'s own Y actually drives [method floor_cell_set]'s
+## `base_y` (see that method's own doc comment), so shifting
+## [param release_cell] too is purely for symmetry/clarity, never load-bearing
+## on its own.
 func resolve_cell_set(_is_drag: bool, press_cell: Vector3i, release_cell: Vector3i) -> Array[Vector3i]:
-	return FloorTool.floor_cell_set(press_cell, release_cell)
+	var effective_press: Vector3i = press_cell
+	var effective_release: Vector3i = release_cell
+	if starts_on_terrain_top_surface(press_cell):
+		effective_press.y -= 1
+		effective_release.y -= 1
+	return FloorTool.floor_cell_set(effective_press, effective_release)
+
+
+## Rule 14l's own trigger condition -- see class doc comment. `false`
+## whenever [member voxel_world] is unwired (this story's pre-012 behavior is
+## the correct fallback: no dependency, no excavation, ordinary stacking).
+func starts_on_terrain_top_surface(press_cell: Vector3i) -> bool:
+	if voxel_world == null:
+		return false
+	var support_cell: Vector3i = press_cell + Vector3i(0, -1, 0)
+	if not voxel_world.is_in_bounds(support_cell):
+		return false
+	if voxel_world.get_cell(support_cell).is_empty():
+		return false
+	if commit_pipeline == null:
+		return false
+	var tracked: BlueprintCell = commit_pipeline.get_blueprint_cell_at(support_cell)
+	return tracked == null or tracked.state == BlueprintCell.MicroState.CANCELED
+
+
+## The [method CommitPipeline.set_terrain_replace_resolver]-compatible bound
+## entry point (`Callable(is_drag: bool, press_cell: Vector3i, release_cell:
+## Vector3i) -> Array[Vector3i]`, Story building-012) -- a future
+## scene-assembly story wires this via
+## `commit_pipeline.set_terrain_replace_resolver(floor_tool.resolve_terrain_replace_cells)`,
+## alongside [method resolve_cell_set]'s own registration. Reports the exact
+## SAME cell set [method resolve_cell_set] itself would return for this
+## press/release pair when the terrain-start branch triggers (every returned
+## cell was, by construction, a terrain cell at commit time -- the whole F2
+## rectangle shifts as one unit, never a per-cell mix), or an empty array when
+## it does not (ordinary stacking -- no cell of this commit is terrain-replace
+## eligible).
+func resolve_terrain_replace_cells(
+	is_drag: bool, press_cell: Vector3i, release_cell: Vector3i
+) -> Array[Vector3i]:
+	if not starts_on_terrain_top_surface(press_cell):
+		return []
+	return resolve_cell_set(is_drag, press_cell, release_cell)
 
 
 ## GDD Formula F2 (pure, stateless -- exercisable directly with arbitrary

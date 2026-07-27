@@ -1,7 +1,7 @@
 # Story 012: Floor excavation flush-replace + restore_value
 
 > **Epic**: Building System
-> **Status**: Ready
+> **Status: Complete (2026-07-27 — 1418/1418 suite green 0 orphans, parent-verified)
 > **Layer**: Core
 > **Type**: Logic
 > **Estimate**: 1 day

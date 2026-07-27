@@ -143,7 +143,7 @@ stories:
     name: "Floor-excavation restore_value — Cluster 0 residue, unblocked by building-011 landing"
     file: "production/epics/building-system/story-012-floor-excavation-restore-value.md"
     priority: must-have
-    status: ready-for-dev
+    status: complete
     owner: "godot-specialist"
     estimate_days: 1.0
     blocker: "HARD: building-009 (in-sprint). Deps building-002 Complete and ⚑ F4 — building-011 IS COMPLETE (2026-07-27, 1355/1355) AND IT IS THE SAME 011 THE D8 CHAIN MEANT: 012's own header reads 'Story 002 (project entity), Story 009 (demolition writeback), Story 011 (undo restore)'. THE CHAIN IS THEREFORE 009 -> 012 -> 015 -> 017, DEPTH 4, NOT THE DEPTH-5 009 -> 011 -> 012 -> 015 -> 017 THAT D8 ASSUMED — one story cheaper than the ruling priced. restore_value recorded on floor-over-terrain excavation and written back on demolish/cancel so building over terrain is REVERSIBLE WITHOUT DESTROYING THE TERRAIN UNDERNEATH. Coordinates with TR-voxel-world-050. Depth-2 on lane C."

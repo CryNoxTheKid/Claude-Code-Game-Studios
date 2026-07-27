@@ -91,6 +91,25 @@
 ## item, but not yet a full round-trip for an undone-then-redone multi-cell
 ## footprint. A follow-up story is the right place to extend [UndoRedoStack]
 ## itself with a batch-aware redo hook if that round-trip is required.
+##
+## Story building-012 (this revision, ADR-0016 primary, GDD Rule 14l,
+## [TR-building-system-120]) extends [_CanceledCellSnapshot] with [member
+## _CanceledCellSnapshot.restore_value] -- a floor-excavation cell's captured
+## terrain snapshot ([member BlueprintCell.restore_value]) must survive an
+## undo-then-redo round-trip UNCHANGED (Edge 18: "a snapshot, never
+## re-derived"), never dropped and never re-read from whatever the grid
+## happens to hold at redo time (which, per Edge Case 18's own named scenario,
+## could in principle have changed in the interim). [method _cancel_cell]
+## copies it into the snapshot alongside the fields this class already
+## carried; [method _recreate_cell] copies it back out onto the freshly
+## reconstructed [BlueprintCell]. This class still never writes to
+## [VoxelWorldGrid] itself (unchanged) -- a not-yet-Built cell's terrain was
+## never actually touched in the grid, so there is nothing to write back on
+## cancel; only the SNAPSHOT ITSELF (an in-memory value the project entity
+## carries forward) needs to survive the round-trip so a LATER demolish of the
+## eventually-redone-and-built cell still restores the correct original
+## terrain ([ConstructionTickLoop]'s own already-landed Story building-009
+## consuming half).
 class_name PlanOnlyUndoGate
 extends RefCounted
 
@@ -104,16 +123,23 @@ class _CanceledCellSnapshot:
 	var contents: CellContents
 	var kind: BuildProject.Kind
 
+	## Story building-012 addition (Rule 14l) -- see class doc comment. `null`
+	## for every ordinary cell (the overwhelming majority), matching [member
+	## BlueprintCell.restore_value]'s own default.
+	var restore_value: CellContents
+
 	func _init(
 		p_category: BlueprintCell.Category,
 		p_furniture_definition_id: StringName,
 		p_contents: CellContents,
-		p_kind: BuildProject.Kind
+		p_kind: BuildProject.Kind,
+		p_restore_value: CellContents = null
 	) -> void:
 		category = p_category
 		furniture_definition_id = p_furniture_definition_id
 		contents = p_contents
 		kind = p_kind
+		restore_value = p_restore_value
 
 ## The stack this gate wires its composed callables into (see class doc
 ## comment). Stored for observability only -- every real effect flows
@@ -201,11 +227,17 @@ func _cancel_cell(cell: Vector3i) -> bool:
 		return false
 	if blueprint_cell.state == BlueprintCell.MicroState.UNDER_CONSTRUCTION:
 		_revoke_active_job(cell, blueprint_cell)
+	var restore_value_snapshot: CellContents = null
+	if blueprint_cell.restore_value != null:
+		restore_value_snapshot = CellContents.new(
+			blueprint_cell.restore_value.block_type_id, blueprint_cell.restore_value.material_id
+		)
 	var snapshot := _CanceledCellSnapshot.new(
 		blueprint_cell.category,
 		blueprint_cell.furniture_definition_id,
 		CellContents.new(blueprint_cell.contents.block_type_id, blueprint_cell.contents.material_id),
-		project.kind
+		project.kind,
+		restore_value_snapshot
 	)
 	if not project.cancel_cell(cell):
 		return false
@@ -240,12 +272,29 @@ func _revoke_active_job(cell: Vector3i, blueprint_cell: BlueprintCell) -> void:
 ## wired as [member UndoRedoStack.recreate_cell_callable]. Returns `false`
 ## (dropped) if [param cell] carries no snapshot (never actually cancelled by
 ## this gate -- including a cell Rule 17 left standing as Built), is now out
-## of bounds, now reads non-empty in the raw grid, or is already tracked by
-## SOME project in [member _registry]'s reverse index (catches a
-## FURNITURE-category Built cell, which never touches the grid at all, and
-## catches a different project having since claimed the address). On
-## success, reconstructs a fresh [constant BlueprintCell.MicroState.PLANNED]
-## [BlueprintCell] carrying the snapshot's category/furniture id/contents and
+## of bounds, is already tracked by SOME project in [member _registry]'s
+## reverse index (catches a FURNITURE-category Built cell, which never
+## touches the grid at all, and catches a different project having since
+## claimed the address), or fails its own current-state re-validation.
+##
+## Story building-012 addition (Rule 14l, Edge 18) -- current-state
+## re-validation now branches on whether [param cell] carries a captured
+## [member _CanceledCellSnapshot.restore_value]: an ORDINARY cell (no
+## `restore_value`, the overwhelming majority) must still read EMPTY in the
+## raw grid, exactly as every pre-012 caller already required. A
+## FLOOR-EXCAVATION cell (non-null `restore_value`) is NEVER empty by design
+## (its own captured terrain still physically occupies the address -- nothing
+## writes the actual grid until the cell reaches Built) -- it is instead valid
+## iff the raw grid's CURRENT contents still match the captured snapshot
+## EXACTLY (the terrain has not drifted since replacement); Edge 18's own
+## named scenario ("the stored terrain has itself changed since replacement...
+## not possible in MVP's static terrain, but the bookkeeping must not assume
+## otherwise") is exactly this branch's failure path -- a diverged current
+## terrain drops the redo rather than silently recreating a stale excavation.
+## On success, reconstructs a fresh [constant BlueprintCell.MicroState.PLANNED]
+## [BlueprintCell] carrying the snapshot's category/furniture id/contents
+## (AND `restore_value`, unchanged from whatever was originally captured --
+## never re-read from the current grid state even on the matching path) and
 ## hands it to [method BuildProjectRegistry.assign_cells] under the
 ## snapshot's original project [enum BuildProject.Kind].
 func _recreate_cell(cell: Vector3i) -> bool:
@@ -255,16 +304,29 @@ func _recreate_cell(cell: Vector3i) -> bool:
 	_snapshots.erase(cell)
 	if not _voxel_world.is_in_bounds(cell):
 		return false
-	if not _voxel_world.get_cell(cell).is_empty():
+	var current: CellContents = _voxel_world.get_cell(cell)
+	if snapshot.restore_value != null:
+		if (
+			current.block_type_id != snapshot.restore_value.block_type_id
+			or current.material_id != snapshot.restore_value.material_id
+		):
+			return false
+	elif not current.is_empty():
 		return false
 	if _registry.project_at_cell(cell) != -1:
 		return false
+	var restored_restore_value: CellContents = null
+	if snapshot.restore_value != null:
+		restored_restore_value = CellContents.new(
+			snapshot.restore_value.block_type_id, snapshot.restore_value.material_id
+		)
 	var recreated := BlueprintCell.new(
 		cell,
 		BlueprintCell.MicroState.PLANNED,
 		snapshot.category,
 		CellContents.new(snapshot.contents.block_type_id, snapshot.contents.material_id),
-		snapshot.furniture_definition_id
+		snapshot.furniture_definition_id,
+		restored_restore_value
 	)
 	_registry.assign_cells([recreated], snapshot.kind)
 	return true

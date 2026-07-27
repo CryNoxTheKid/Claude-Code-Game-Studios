@@ -125,6 +125,58 @@
 ## [ConstructionTickLoop] can route the whole footprint's completion to
 ## [FurnitureRegistry] as exactly ONE entity (AC76), regardless of per-cell
 ## claim/completion order or timing.
+##
+## Story building-012 (this revision, ADR-0016 primary, GDD Rule 14l,
+## [TR-building-system-120]) adds a SECOND, narrow, tracked exception to Edge
+## Case 2/[TR-building-system-084]'s general "replace-in-place targeting a
+## terrain cell is invalid" rule -- [FloorTool]'s own terrain-start excavation
+## branch (that class's own doc comment). [method commit] gains an OPTIONAL
+## second parameter, [param terrain_replace_cells] -- never a persistent
+## predicate slot like [member _furniture_support_predicate]/[member
+## _occupancy_predicate]/[member _seal_prevention_predicate] -- because
+## unlike those cross-cutting concerns (which are correct to apply uniformly
+## regardless of which tool is currently active), a terrain-replace exception
+## granted BROADLY (any untracked-non-empty cell, for ANY tool's commit) would
+## silently reopen Edge Case 2 for every other tool the moment it stayed
+## wired past the floor tool's own commit -- so eligibility is instead scoped
+## to THIS SPECIFIC commit call's own [param terrain_replace_cells] argument,
+## resolved by [FloorTool] itself (via [method
+## set_terrain_replace_resolver]/[member _terrain_replace_resolver], the
+## SAME "future tool story wires a real Callable" pattern as [member
+## _cell_set_resolver], just a second, parallel slot -- both are re-registered
+## together by whichever tool is currently active, a future scene-assembly
+## story's own concern, mirroring every other per-tool seam's existing
+## "single global slot, swapped by the active tool" precedent exactly, not a
+## new risk category this story introduces). A cell present in [param
+## terrain_replace_cells] is accepted by [method _is_cell_available] even when
+## it is untracked and non-empty (raw terrain) -- Story 021/022's own
+## established "this project's direct-method-call test convention" means
+## [method commit] itself, called directly with an explicit [param
+## terrain_replace_cells] array, needs no live [FloorTool]/scene wiring at all
+## to prove this behavior in isolation. On success, every accepted cell that
+## actually WAS raw non-empty terrain gets a snapshot of its CURRENT raw
+## contents written to its fresh [BlueprintCell]'s [member
+## BlueprintCell.restore_value] (a freshly-constructed [CellContents] copy,
+## never the same [RefCounted] instance [VoxelWorldGrid] itself may still
+## hold internally, and never a cell that was merely empty -- Edge 18's own
+## "a snapshot, never re-derived" discipline starts exactly HERE, at capture
+## time) -- [ConstructionTickLoop]'s already-landed Story building-009
+## demolition completion write is this field's CONSUMING half (that class's
+## own doc comment); this story is the CAPTURING half.
+##
+## **Known, documented limitation** (flagged, not silently absorbed,
+## mirroring [PlanOnlyUndoGate]'s own "known, deliberate limitation"
+## precedent): [method preview_cell_set]/[method first_rejection_reason]
+## (Story building-023's ghost-preview seam) are NOT updated to accept
+## [param terrain_replace_cells] -- a live preview of a floor-excavation
+## drag would therefore still show the terrain-replace candidate cells as
+## REJECTED (Edge Case 2) even though a real [method commit] call with the
+## matching [param terrain_replace_cells] would succeed. This is a cosmetic
+## preview-only gap (Visual/Feel, ADVISORY per this project's own Testing
+## Standards), not a functional one -- [method commit] itself is fully correct
+## regardless. A follow-up story is the right place to thread [FloorTool]'s
+## own [method FloorTool.resolve_terrain_replace_cells] into the preview path
+## if that visual gap is judged worth closing.
 class_name CommitPipeline
 extends Node
 
@@ -229,6 +281,17 @@ var _blueprint_cells: Dictionary[Vector3i, BlueprintCell] = {}
 ## falls back to [method _default_cell_set].
 var _cell_set_resolver: Callable = Callable()
 
+## Optional per-tool terrain-replace resolver (Story building-012, see class
+## doc comment's "Story building-012" paragraph) -- SAME signature shape as
+## [member _cell_set_resolver], a parallel slot re-registered by whichever
+## tool is currently active. Default `Callable()` (invalid) means "no cell of
+## this commit is terrain-replace eligible" -- every pre-012 tool/caller's
+## behavior is completely unaffected. Only consulted by [method
+## _on_build_committed]'s LIVE wiring path; a direct [method commit] call
+## (this project's own established test convention) supplies [param
+## terrain_replace_cells] explicitly instead.
+var _terrain_replace_resolver: Callable = Callable()
+
 
 ## Explicitly callable wiring entry point (ADR-0001). Asserts the required
 ## dependencies were wired, applies ADR-0002's clamp+warn `validate()` policy
@@ -275,6 +338,13 @@ func is_set_up() -> bool:
 ## of relying on [method _default_cell_set]'s placeholder.
 func set_cell_set_resolver(resolver: Callable) -> void:
 	_cell_set_resolver = resolver
+
+
+## Wires the optional terrain-replace resolver (Story building-012, see
+## [member _terrain_replace_resolver]'s own doc comment) -- [FloorTool]'s real
+## future caller, alongside [method set_cell_set_resolver]'s own registration.
+func set_terrain_replace_resolver(resolver: Callable) -> void:
+	_terrain_replace_resolver = resolver
 
 
 ## Sets the currently selected material/furniture entry's opaque id (Core
@@ -342,7 +412,18 @@ func get_blueprint_cell_at(cell: Vector3i) -> BlueprintCell:
 ## Callable directly by a future tool story, or by [method
 ## _on_build_committed]'s own live wiring below -- and by tests, mirroring
 ## this project's established direct-method-call test convention.
-func commit(candidate_cells: Array[Vector3i]) -> Array[BlueprintCell]:
+##
+## Story building-012 addition: [param terrain_replace_cells] (default empty
+## -- every pre-012 caller's behavior is completely unaffected) names exactly
+## which of [param candidate_cells] are eligible for the narrow terrain-
+## replace-in-place exception (see class doc comment's "Story building-012"
+## paragraph). A cell in this set that is ALSO currently raw, non-empty,
+## untracked terrain is both accepted by the occupancy gate AND captures a
+## snapshot of its current contents into its fresh [BlueprintCell]'s [member
+## BlueprintCell.restore_value].
+func commit(
+	candidate_cells: Array[Vector3i], terrain_replace_cells: Array[Vector3i] = []
+) -> Array[BlueprintCell]:
 	assert(is_set_up(), "CommitPipeline.commit called before setup()")
 	if not placement_pick.get_current_pick().hit:
 		return []
@@ -382,7 +463,7 @@ func commit(candidate_cells: Array[Vector3i]) -> Array[BlueprintCell]:
 	if in_bounds_cells.size() > config.max_cells_per_command:
 		commit_rejected.emit(RejectReason.CELL_COUNT_EXCEEDS_CAP, in_bounds_cells)
 		return []
-	if not _all_cells_available(in_bounds_cells):
+	if not _all_cells_available(in_bounds_cells, terrain_replace_cells):
 		commit_rejected.emit(RejectReason.CELL_OCCUPIED, in_bounds_cells)
 		return []
 	if not _all_cells_supported(in_bounds_cells):
@@ -394,8 +475,20 @@ func commit(candidate_cells: Array[Vector3i]) -> Array[BlueprintCell]:
 	var furniture_definition_id: StringName = _selected_item_id if is_furniture else &""
 	var created: Array[BlueprintCell] = []
 	for cell: Vector3i in in_bounds_cells:
+		# Story building-012 (Rule 14l, TR-120) -- a terrain-replace-eligible
+		# cell that is CURRENTLY raw, non-empty terrain gets its exact current
+		# contents captured as a fresh snapshot, never the same [CellContents]
+		# instance [VoxelWorldGrid] may still hold internally (Edge 18: a
+		# snapshot, never re-derived, starts here at capture time). Every
+		# ordinary cell (the overwhelming majority) keeps `restore_value ==
+		# null`, unchanged from every pre-012 commit.
+		var restore_value: CellContents = null
+		if terrain_replace_cells.has(cell):
+			var raw: CellContents = voxel_world.get_cell(cell)
+			if raw != null and not raw.is_empty():
+				restore_value = CellContents.new(raw.block_type_id, raw.material_id)
 		var blueprint := BlueprintCell.new(
-			cell, BlueprintCell.MicroState.PLANNED, category, null, furniture_definition_id
+			cell, BlueprintCell.MicroState.PLANNED, category, null, furniture_definition_id, restore_value
 		)
 		_blueprint_cells[cell] = blueprint
 		created.append(blueprint)
@@ -569,18 +662,30 @@ func get_available_palette() -> Array[StringName]:
 ## A Draft/UnderConstruction tracked entry is always unavailable (Edge
 ## Case 3) -- unconditional, no replace-in-place exception applies to an
 ## already-drafted cell.
-func _is_cell_available(cell: Vector3i) -> bool:
+##
+## Story building-012 addition: [param terrain_replace_cells] (default empty)
+## is [method commit]'s own SAME-commit-scoped exception set (see that
+## method's own doc comment and class doc comment's "Story building-012"
+## paragraph) -- a cell present in it is ALSO available even when raw and
+## non-empty (untracked terrain), the narrow carve-out from Edge Case 2/
+## [TR-building-system-084]'s general rule. Every pre-012 caller (empty
+## default) sees IDENTICAL behavior to before this story.
+func _is_cell_available(cell: Vector3i, terrain_replace_cells: Array[Vector3i] = []) -> bool:
 	var existing: BlueprintCell = _blueprint_cells.get(cell)
 	if existing != null and existing.state != BlueprintCell.MicroState.CANCELED:
 		return existing.state == BlueprintCell.MicroState.BUILT
-	return voxel_world.get_cell(cell).is_empty()
+	if voxel_world.get_cell(cell).is_empty():
+		return true
+	return terrain_replace_cells.has(cell)
 
 
 ## `true` iff every cell in [param cells] passes [method _is_cell_available]
 ## -- the ALL-OR-NOTHING aggregate [method commit] gates on (AC10/AC11/AC14).
-func _all_cells_available(cells: Array[Vector3i]) -> bool:
+## [param terrain_replace_cells] forwards unchanged to every per-cell check
+## (Story building-012, see that member's own doc comment).
+func _all_cells_available(cells: Array[Vector3i], terrain_replace_cells: Array[Vector3i] = []) -> bool:
 	for cell: Vector3i in cells:
-		if not _is_cell_available(cell):
+		if not _is_cell_available(cell, terrain_replace_cells):
 			return false
 	return true
 
@@ -661,8 +766,18 @@ func first_rejection_reason(in_bounds_cells: Array[Vector3i]) -> int:
 ## release, never an aborted drag -- see that signal's own doc comment) by
 ## resolving a candidate cell set via [method _resolve_cell_set] and calling
 ## [method commit] with it.
+##
+## Story building-012 addition: also resolves [member _terrain_replace_resolver]
+## (when wired -- a future scene-assembly story's job, mirrors [member
+## _cell_set_resolver]'s own "future tool story overrides this" precedent) and
+## forwards its result as [method commit]'s [param terrain_replace_cells].
+## Unwired (the default -- every pre-012 tool) resolves to an empty array,
+## identical to this method's pre-012 behavior.
 func _on_build_committed(is_drag: bool, press_cell: Vector3i, release_cell: Vector3i) -> void:
-	commit(_resolve_cell_set(is_drag, press_cell, release_cell))
+	var terrain_replace_cells: Array[Vector3i] = []
+	if _terrain_replace_resolver.is_valid():
+		terrain_replace_cells = _terrain_replace_resolver.call(is_drag, press_cell, release_cell)
+	commit(_resolve_cell_set(is_drag, press_cell, release_cell), terrain_replace_cells)
 
 
 ## Dispatches to [member _cell_set_resolver] if one was wired ([method
