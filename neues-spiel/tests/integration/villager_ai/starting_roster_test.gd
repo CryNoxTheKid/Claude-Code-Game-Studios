@@ -198,10 +198,29 @@ func test_valley_spawn_starting_roster_places_exactly_n_villagers_each_deciding_
 	# generation is simulated by directly filling terrain around the real
 	# world-center cell before spawning (mirrors this story's own "when
 	# world generation completes" AC wording).
+	#
+	# Story villager-ai-022: _boot_valley()'s own real world genesis (real
+	# 2000x2000 production terrain) already found a standable cell for
+	# villager 0 and placed it there during boot -- it is the always-present
+	# default, so `_default_villager_placed` is already true by the time this
+	# test's own Act step runs. This call is therefore a "later" (growth)
+	# call: it spends the FULL requested count on newly-constructed roster
+	# members, never re-touching villager 0 (AC2's own one-time-only rule).
+	#
+	# Deliberately does NOT call `_fill_flat_plane` here (unlike this file's
+	# other, bare-Valley fixtures that never place a villager on real terrain
+	# first): a real boot has ALREADY placed villager 0 on REAL generated
+	# terrain by this point, and `_fill_flat_plane`'s own fixed-height,
+	# whole-plane write can land its synthetic floor inside an
+	# ALREADY-STANDING real villager's own clearance column (found the hard
+	# way -- a real regression this story's own new placement invariant
+	# caught: writing solid at a fixed y broke villager 0's real, already-
+	# correct standable position). The real boot's own terrain near center
+	# already provides plenty of standable cells within the search radius
+	# (proven by `world_genesis_boot_test.gd`'s own real-boot coverage), so
+	# no synthetic terrain is needed here.
 	var valley: Valley = _boot_valley()
 	var voxel_world: VoxelWorldGrid = valley.get_voxel_world()
-	var center: Vector3i = VillagerRosterSpawner.world_center_cell(voxel_world.config)
-	_fill_flat_plane(voxel_world, center, 10)
 	valley.villager_ai_config = VillagerAIConfig.new()
 	valley.villager_ai_config.starting_villager_count = 5
 
@@ -233,10 +252,25 @@ func test_valley_spawn_starting_roster_mvp_default_count_places_exactly_one() ->
 	# ids start at 1 and continue from the current roster size) rather than
 	# hardcoding the pre-scene-005 assumption that this test's OWN call is the
 	# very first one ever made.
+	#
+	# Story villager-ai-022 (AC4): under the new convention, that boot-time
+	# automatic call is what places villager 0 itself (near real terrain, not
+	# left at the origin) -- get_villagers().size() is 1, not 2, immediately
+	# after _boot_valley() returns (villager 0 counts toward the shipped
+	# count = 1, no separate roster member was ever created for it). This
+	# test's OWN Act call is therefore a later, ordinary growth call.
+	#
+	# Deliberately does NOT call `_fill_flat_plane` -- see the sibling
+	# count=5 test's own updated comment above for why: it would land its
+	# synthetic floor inside villager 0's own already-real, already-standable
+	# clearance column.
 	var valley: Valley = _boot_valley()
 	var voxel_world: VoxelWorldGrid = valley.get_voxel_world()
-	var center: Vector3i = VillagerRosterSpawner.world_center_cell(voxel_world.config)
-	_fill_flat_plane(voxel_world, center, 10)
+	assert_int(valley.get_villagers().size()).is_equal(1)
+	assert_vector(Vector3(valley.get_villager_ai().get_current_cell())).is_not_equal(Vector3.ZERO)
+	assert_bool(
+		VillagerWalkabilityRules.is_standable(voxel_world, valley.get_villager_ai().get_current_cell())
+	).is_true()
 	var baseline_next_id: int = valley.get_villagers().size()
 
 	# Act
@@ -247,22 +281,40 @@ func test_valley_spawn_starting_roster_mvp_default_count_places_exactly_one() ->
 	assert_int(spawned[0].get_villager_id()).is_equal(baseline_next_id)
 
 
-func test_valley_spawn_starting_roster_does_not_disturb_the_pre_existing_default_villager() -> void:
-	# Arrange -- regression guard: the pre-existing single hosted villager
-	# (villager_id 0) predates this story and stays exactly as-is, completely
-	# separate from the new config-driven roster.
+func test_valley_spawn_starting_roster_places_the_pre_existing_default_villager_during_boot() -> void:
+	# Arrange -- Story villager-ai-022 REPLACES the old "does not disturb"
+	# regression guard: villager 0 (the pre-existing single hosted villager)
+	# is now DELIBERATELY placed by this method's own boot-time call (it used
+	# to keep its Vector3i.ZERO construction default forever, ~1400 cells from
+	# the settlement -- this story's whole bug report). It stays the SAME
+	# instance/villager_id, still reported first by get_villagers() -- this
+	# test's own explicit spawn_starting_roster() call (villager 0 already
+	# placed by boot time) must not move it again or duplicate it.
+	#
+	# Deliberately does NOT call `_fill_flat_plane` -- see the count=5 test's
+	# own updated comment above for why: it would land its synthetic floor
+	# inside villager 0's own already-real, already-standable clearance
+	# column. The real boot's own terrain near center already provides
+	# enough standable cells for this test's single additional roster member.
 	var valley: Valley = _boot_valley()
 	var voxel_world: VoxelWorldGrid = valley.get_voxel_world()
-	var center: Vector3i = VillagerRosterSpawner.world_center_cell(voxel_world.config)
-	_fill_flat_plane(voxel_world, center, 10)
+	var default_villager: VillagerAi = valley.get_villager_ai()
+	var cell_after_boot: Vector3i = default_villager.get_current_cell()
 
 	# Act
 	valley.spawn_starting_roster()
 
-	# Assert
-	assert_object(valley.get_villager_ai()).is_not_null()
+	# Assert -- same instance, villager_id 0, still first, no longer at its
+	# Vector3i.ZERO construction default -- and this test's own call did not
+	# move it a second time.
+	assert_object(valley.get_villager_ai()).is_same(default_villager)
 	assert_int(valley.get_villager_ai().get_villager_id()).is_equal(0)
 	assert_array(valley.get_villagers()).contains([valley.get_villager_ai()])
+	assert_vector(Vector3(valley.get_villager_ai().get_current_cell())).is_not_equal(Vector3.ZERO)
+	assert_vector(Vector3(valley.get_villager_ai().get_current_cell())).is_equal(Vector3(cell_after_boot))
+	assert_bool(
+		VillagerWalkabilityRules.is_standable(voxel_world, valley.get_villager_ai().get_current_cell())
+	).is_true()
 
 
 func test_valley_spawn_starting_roster_has_no_growth_bookkeeping_of_its_own() -> void:
@@ -279,10 +331,17 @@ func test_valley_spawn_starting_roster_has_no_growth_bookkeeping_of_its_own() ->
 	# spawn_starting_roster() once automatically before this test's own Act
 	# step. baseline_next_id captures wherever that left villager_id
 	# numbering, exactly as that test does.
+	#
+	# Story villager-ai-022: villager 0 is placed by that SAME boot-time call
+	# (AC4), so both of THIS test's own calls are later, ordinary growth
+	# calls -- neither reserves a cell for villager 0.
+	#
+	# Deliberately does NOT call `_fill_flat_plane` -- see the count=5 test's
+	# own updated comment above for why: it would land its synthetic floor
+	# inside villager 0's own already-real, already-standable clearance
+	# column. The real boot's own terrain near center already provides
+	# enough standable cells for both new roster members this test spawns.
 	var valley: Valley = _boot_valley()
-	var voxel_world: VoxelWorldGrid = valley.get_voxel_world()
-	var center: Vector3i = VillagerRosterSpawner.world_center_cell(voxel_world.config)
-	_fill_flat_plane(voxel_world, center, 10)
 	valley.villager_ai_config = VillagerAIConfig.new()
 	valley.villager_ai_config.starting_villager_count = 1
 	var baseline_next_id: int = valley.get_villagers().size()
@@ -292,5 +351,10 @@ func test_valley_spawn_starting_roster_has_no_growth_bookkeeping_of_its_own() ->
 	var second_call: Array[VillagerAi] = valley.spawn_starting_roster()
 
 	# Assert -- ids keep incrementing from wherever boot-time genesis left off.
+	# Villager 0 was already placed during _boot_valley()'s own automatic
+	# call, so both of these calls are later, ordinary growth calls -- each
+	# spends the full requested count (1) on a single new member.
+	assert_int(first_call.size()).is_equal(1)
 	assert_int(first_call[0].get_villager_id()).is_equal(baseline_next_id)
+	assert_int(second_call.size()).is_equal(1)
 	assert_int(second_call[0].get_villager_id()).is_equal(baseline_next_id + 1)

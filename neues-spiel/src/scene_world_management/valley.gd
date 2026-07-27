@@ -408,6 +408,47 @@
 ## see `tools/settlement_overview_capture.gd`/
 ## `tools/m01_c4_valley_ambient_capture.gd`/`tools/camera_sandbox.gd`'s own
 ## updated doc comments.
+##
+## Story villager-ai-022 ("the stray villager at the world corner", found by
+## booting the real game and printing where everyone stands) closes the gap
+## every paragraph above left unaddressed: [member _villager_ai] (villager_id
+## 0) was NEVER placed by anything -- it kept its `Vector3i.ZERO` field
+## default forever, the far corner of a 2000x2000 world, while [method
+## spawn_starting_roster] placed only the members it itself constructed. This
+## story's shape (its own "Design Note" Shape 1, chosen on scope grounds --
+## keeps the scene-hosted node, which several other stories already reference
+## as "the always-present default, villager_id 0"): [method
+## spawn_starting_roster] now selects `starting_villager_count` cells and
+## hands the FIRST one to [member _villager_ai] itself, via [method
+## VillagerRosterSpawner.place_villager_at_cell] -- the SAME cell-selection +
+## placement path every other roster member goes through (AC2: one placement
+## rule, not two), never a second hand-rolled seam. **Chosen count
+## convention (AC4), stated explicitly, not left implicit**: villager 0
+## COUNTS toward `starting_villager_count` -- a config of 1 (the shipped MVP
+## default) now yields exactly ONE total settler, never "1 default + 1
+## roster-spawned" (the actual shipped bug this story's own bug report
+## reproduced: `REPORT — villagers spawned: 2` for a `starting_villager_count
+## = 1` world). This reads [TR-villager-ai-behavior-065]'s own requirement
+## text literally -- "this system places `starting_villager_count`
+## villagers" -- not "`starting_villager_count` PLUS the pre-existing one."
+## [member _default_villager_placed] guards this to happen at most once: a
+## LATER growth call (a future Township Progression call site reusing this
+## SAME method, per its own already-documented "no growth bookkeeping of its
+## own" shape) must never re-teleport an already-simulating villager 0 --
+## only the very first successful placement ever consumes a cell for it;
+## every call after that spends the full `count` on new roster members only,
+## exactly like [method spawn_starting_roster]'s pre-existing behavior for
+## every OTHER villager. AC3's edge case -- the search finds zero standable
+## cells at all -- is a `push_warning`-logged, deterministic outcome (never a
+## silent leave-at-the-origin): [member _default_villager_placed] simply
+## stays `false`, so a LATER call (once real terrain exists) gets another
+## chance. [method _assert_villager_placement_invariant] (AC1/AC5) is this
+## story's own boot-invariant addition, mirroring [method
+## _assert_lighting_boot_invariant]'s own "fail loudly, not silently"
+## convention -- every hosted villager [method get_villagers] reports must
+## stand on a cell [VillagerWalkabilityRules.is_standable] confirms, except
+## villager 0 in the exact AC3 degenerate case just named (already logged,
+## not re-failed here).
 class_name Valley
 extends Node3D
 
@@ -509,6 +550,15 @@ extends Node3D
 ## is first called (deliberately NOT from [method _ready] -- see that
 ## method's own doc comment).
 var _spawned_villagers: Array[VillagerAi] = []
+
+## Whether [member _villager_ai] (villager_id 0) has ever been successfully
+## placed by [method spawn_starting_roster] (Story villager-ai-022). Guards
+## against a LATER call (a future growth call site reusing this same method)
+## re-teleporting an already-simulating villager 0 -- only the very first
+## successful placement consumes a cell for it; stays `false` across a call
+## that finds zero standable cells at all (AC3's own degenerate case), so a
+## later call still gets a chance once real terrain exists.
+var _default_villager_placed: bool = false
 
 ## Shared, population-wide unstuck-rescue telemetry accumulator (Story
 ## villager-ai-021, [VillagerUnstuckTelemetry]'s own doc comment: "the
@@ -1108,6 +1158,29 @@ func spawn_starting_roster() -> Array[VillagerAi]:
 	var cells: Array[Vector3i] = VillagerRosterSpawner.select_starting_cells(
 		_voxel_world, center_cell, count
 	)
+
+	# Story villager-ai-022 (AC2/AC4): villager 0 -- the always-present,
+	# scene-hosted default -- is placed through this SAME selection call, not
+	# a second hand-rolled path, and COUNTS toward `count` (see class doc
+	# comment's own villager-ai-022 paragraph for the chosen convention).
+	# Only the FIRST successful placement ever reserves a cell for it
+	# (member _default_villager_placed) -- a later growth call must never
+	# re-teleport an already-simulating villager 0.
+	if not _default_villager_placed:
+		if cells.is_empty():
+			# AC3: a deterministic, LOGGED outcome -- never a silent leave-at-
+			# the-origin. _default_villager_placed stays false, so a later
+			# call (once real terrain exists) gets another chance.
+			push_warning((
+				"Valley.spawn_starting_roster: no standable cell found near world" +
+				" center %s for villager 0 within VillagerRosterSpawner.MAX_SEARCH_RADIUS" +
+				" -- it remains at %s (logged, not silently left there)"
+			) % [center_cell, _villager_ai.current_cell])
+		else:
+			VillagerRosterSpawner.place_villager_at_cell(_villager_ai, cells[0])
+			_default_villager_placed = true
+			cells = cells.slice(1)
+
 	var next_id: int = 1 + _spawned_villagers.size()
 	var new_villagers: Array[VillagerAi] = VillagerRosterSpawner.assemble_roster(
 		_voxel_world,
@@ -1146,7 +1219,29 @@ func spawn_starting_roster() -> Array[VillagerAi]:
 	# before any roster spawn can run; this call only ADDS views for the
 	# entries this method just created, never touching that one.
 	_villager_body_presenter.refresh()
+	_assert_villager_placement_invariant()
 	return new_villagers
+
+
+## Boot invariant (Story villager-ai-022, AC1/AC5) -- asserts every hosted
+## villager [method get_villagers] reports stands on a cell the voxel world
+## itself reports standable ([VillagerWalkabilityRules.is_standable]), UNLESS
+## that villager is villager 0 in the exact AC3 degenerate case (the search
+## found zero standable cells at all, so it was never placed -- already
+## `push_warning`-logged above, not re-failed here). Fails LOUDLY (mirrors
+## [method _assert_lighting_boot_invariant]/[method
+## seed_default_villager_needs]'s own "fail loudly, not silently" convention)
+## rather than letting a future regression silently reintroduce a villager
+## stranded off the settlement -- this story's own root cause.
+func _assert_villager_placement_invariant() -> void:
+	for villager: VillagerAi in get_villagers():
+		if villager == _villager_ai and not _default_villager_placed:
+			continue
+		assert(
+			VillagerWalkabilityRules.is_standable(_voxel_world, villager.get_current_cell()),
+			"Valley: villager_id %d stands on a non-standable cell %s after spawn_starting_roster" %
+			[villager.get_villager_id(), villager.get_current_cell()]
+		)
 
 
 ## Returns the hosted ambient torch/lantern light fixture (M01 condition C4).

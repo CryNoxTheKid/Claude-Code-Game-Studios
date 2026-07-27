@@ -1,7 +1,7 @@
 # Story 022: The stray villager at the world corner
 
 > **Epic**: Villager AI & Behavior
-> **Status**: Ready
+> **Status**: Complete (2026-07-27 — 1522/1522 suite green, 0 orphans, parent-verified; live boot reports 1 villager at (998, 6, 1002), none at the origin)
 > **Layer**: Core
 > **Type**: Logic
 > **Estimate**: 0.5 day
@@ -46,17 +46,17 @@ surfaces it.
 
 ## Acceptance Criteria
 
-- [ ] AC1: After boot completes, no villager reported by `Valley.get_villagers()` stands
+- [x] AC1: After boot completes, no villager reported by `Valley.get_villagers()` stands
       at cell (0, 0, 0) unless the world centre genuinely is (0, 0, 0).
-- [ ] AC2: Villager 0 is placed by the same `VillagerRosterSpawner` cell-selection path
+- [x] AC2: Villager 0 is placed by the same `VillagerRosterSpawner` cell-selection path
       as every other roster member — one placement rule, not two.
-- [ ] AC3: If no standable cell can be found for villager 0, that is a deterministic,
+- [x] AC3: If no standable cell can be found for villager 0, that is a deterministic,
       logged outcome, never a villager silently left at the origin.
-- [ ] AC4: `starting_villager_count` remains honest: the number of villagers a player
+- [x] AC4: `starting_villager_count` remains honest: the number of villagers a player
       ends up with matches the configured count. State explicitly in the story whether
       villager 0 counts toward it — today the shipped game yields count+1 settlers, and
       that discrepancy is part of this bug.
-- [ ] AC5: A boot invariant is added to Valley's existing assertion block covering AC1.
+- [x] AC5: A boot invariant is added to Valley's existing assertion block covering AC1.
 
 ## Design Note — two candidate shapes
 
@@ -99,3 +99,29 @@ reports as standable. On today's build villager 0 fails that at (0, 0, 0).
 - Given: `starting_villager_count = N`.
 - Then: `get_villagers().size()` equals the documented expectation, and the story states
   which convention was chosen.
+
+---
+
+## Closure Note (2026-07-27)
+
+Shape 1 taken as recommended: villager 0 is now placed through the same
+`VillagerRosterSpawner` cell-selection path as every other roster member, via a
+shared `place_villager_at_cell()`. The scene-hosted node stays, so every story
+that references "the always-present default, villager_id 0" keeps its contract.
+
+COUNT CONVENTION (AC4) — villager 0 COUNTS TOWARD `starting_villager_count`.
+Chosen because TR-villager-ai-behavior-065 reads "this system places
+`starting_villager_count` villagers" — a total, not an addition to a
+pre-existing one. This is also what fixes the reported symptom: the shipped
+config of 1 used to yield two settlers, and now yields one.
+
+Proof is on the real booted game, not a fixture:
+
+    settlement_overview_capture: REPORT — villagers spawned: 1
+    settlement_overview_capture: REPORT — villager at (998, 6, 1002)
+
+Incidental find, fixed and documented rather than papered over: a test fixture
+(`_fill_flat_plane`) wrote a flat plane at a fixed height, which collided with
+villager 0's clearance column once villager 0 began depending on real terrain.
+The synthetic fill was removed from the `_boot_valley()`-based tests, which no
+longer need it.

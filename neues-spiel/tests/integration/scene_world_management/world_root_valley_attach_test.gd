@@ -195,7 +195,12 @@ func test_hosted_building_system_and_villager_ai_modules_are_children_of_valley(
 	# this file. Story presentation-004 ("The world has no sun") adds THREE
 	# more -- [Sun] (a plain [DirectionalLight3D]), [WorldEnvironment], and
 	# [WorldLighting] (the driver module) -- (24 -> 27), updated consciously,
-	# not incidentally.
+	# not incidentally. Story villager-ai-022 ("the stray villager at the
+	# world corner") REMOVES the scene-005 TWELFTH counted above: villager 0
+	# (the always-present default) now COUNTS toward the shipped
+	# `starting_villager_count = 1` and is placed by the SAME genesis call,
+	# so that call no longer add_child()s a SEPARATE roster member for the
+	# MVP default count -- (27 -> 26), updated consciously, not incidentally.
 	var world: GameWorld = auto_free(GameWorld.new())
 	var database: MockResourceItemDatabase = auto_free(MockResourceItemDatabase.new())
 	database.configure_ready_immediately()
@@ -207,7 +212,7 @@ func test_hosted_building_system_and_villager_ai_modules_are_children_of_valley(
 
 	# Assert
 	var valley: Valley = world.get_valley() as Valley
-	assert_int(valley.get_child_count()).is_equal(27)
+	assert_int(valley.get_child_count()).is_equal(26)
 	assert_object(valley.get_voxel_world_mesher()).is_not_null()
 	assert_object(valley.get_voxel_world_mesh_streamer()).is_not_null()
 	assert_object(valley.get_tool_state_machine()).is_not_null()

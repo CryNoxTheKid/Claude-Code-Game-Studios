@@ -30,8 +30,10 @@
 ##   before its data lands renders zero surfaces (this file's own class doc
 ##   comment / [VoxelWorldMesher]'s established contract).
 ## - **AC-ROSTER-AFTER-WORLD**: the real boot's [Valley.get_villagers] reports
-##   the pre-existing default villager PLUS the shipped
-##   `starting_villager_count` MVP default (1).
+##   exactly the shipped `starting_villager_count` MVP default (1) total
+##   villagers -- Story villager-ai-022: the pre-existing default villager
+##   (villager_id 0) now COUNTS toward that config, is placed by the SAME
+##   genesis call, and no longer sits at the world corner.
 ## - **AC-NAV-GRAPH-BUILT**: the real boot's shared [VillagerNavGraph] reports
 ##   built, and a path query between two cells this test carves standable
 ##   (deterministic, never relying on incidental generated-terrain
@@ -203,9 +205,19 @@ func test_real_boot_genesis_produces_a_populated_active_world() -> void:
 	assert_object(mesh_instance.mesh).is_not_null()
 	assert_int(mesh_instance.mesh.get_surface_count()).is_greater(0)
 
-	# AC-ROSTER-AFTER-WORLD — shipped MVP default starting_villager_count = 1:
-	# the always-present default villager PLUS exactly one genesis-spawned.
-	assert_int(valley.get_villagers().size()).is_equal(2)
+	# AC-ROSTER-AFTER-WORLD — shipped MVP default starting_villager_count = 1.
+	# Story villager-ai-022 ("the stray villager at the world corner"):
+	# villager 0 (the always-present default) is now placed THROUGH this same
+	# genesis call and COUNTS toward starting_villager_count, so a config of 1
+	# yields exactly ONE total settler, never "1 default + 1 genesis-spawned"
+	# (the actual shipped bug this story fixed — a real boot used to report 2
+	# villagers for a count of 1, one of them stranded at the world corner
+	# (0, 0, 0)).
+	assert_int(valley.get_villagers().size()).is_equal(1)
+	assert_vector(Vector3(valley.get_villager_ai().get_current_cell())).is_not_equal(Vector3.ZERO)
+	assert_bool(
+		VillagerWalkabilityRules.is_standable(voxel_world, valley.get_villager_ai().get_current_cell())
+	).is_true()
 
 	# AC-NAV-GRAPH-BUILT — carve two DETERMINISTICALLY standable, adjacent,
 	# connected cells (never relying on incidental generated-terrain

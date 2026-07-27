@@ -46,10 +46,11 @@
 ##   node, exactly as `starting_roster_test.gd`'s own established
 ##   `_boot_valley()`-adjacent precedent already reads `@onready`-populated
 ##   children directly via [method Node.get_node] before the node ever
-##   enters the tree) with `starting_villager_count = 3` seeds ALL 4
-##   villagers (the default plus the 3 roster members) exactly once; a world
-##   with too few standable cells degrades deterministically, seeding only
-##   the villagers actually placed.
+##   enters the tree) with `starting_villager_count = 3` seeds ALL 3
+##   villagers (Story villager-ai-022: the default now counts toward that
+##   config and is placed by the same call, so 3 total, 2 newly-constructed)
+##   exactly once; a world with too few standable cells degrades
+##   deterministically, seeding only the villagers actually placed.
 ## - **AC-SEED-IS-IDEMPOTENT-AT-BOOT**: a villager whose `sleep` has already
 ##   decayed below 100 keeps that exact value across a second
 ##   [method Valley.spawn_starting_roster] call (that method's own
@@ -311,6 +312,12 @@ func test_ac_seed_after_setup_roster_seeding_before_needs_mood_setup_raises() ->
 
 func test_ac_seed_every_roster_member_config_driven_count_all_four_hold_records() -> void:
 	# Arrange -- a lightweight Valley, starting_villager_count = 3.
+	#
+	# Story villager-ai-022 (AC4): villager 0 now COUNTS toward this config --
+	# this is the FIRST-ever spawn_starting_roster() call on this bare Valley
+	# (never boot-genesis-driven), so it consumes cells[0] to place villager 0
+	# itself and constructs 2 NEW roster members from the remaining cells
+	# (3 total villagers, not "3 new + 1 pre-existing = 4").
 	var villager_config := VillagerAIConfig.new()
 	villager_config.starting_villager_count = 3
 	var valley: Valley = _instantiate_bare_valley(villager_config)
@@ -323,12 +330,13 @@ func test_ac_seed_every_roster_member_config_driven_count_all_four_hold_records(
 	valley.seed_default_villager_needs()
 	var spawned: Array[VillagerAi] = valley.spawn_starting_roster()
 
-	# Assert -- exactly 3 new roster members, 4 villagers total.
-	assert_int(spawned.size()).is_equal(3)
+	# Assert -- 2 new roster members (villager 0 absorbed the 3rd slot), 3
+	# villagers total.
+	assert_int(spawned.size()).is_equal(2)
 	var all_villagers: Array[VillagerAi] = valley.get_villagers()
-	assert_int(all_villagers.size()).is_equal(4)
+	assert_int(all_villagers.size()).is_equal(3)
 
-	# Non-vacuous: one real tick, every one of the 4 has strictly decayed.
+	# Non-vacuous: one real tick, every one of the 3 has strictly decayed.
 	TimeTickSystem.tick.emit()
 	var needs_mood: NeedsMood = valley.get_needs_mood()
 	for villager: VillagerAi in all_villagers:
@@ -340,6 +348,10 @@ func test_ac_seed_every_roster_member_partial_placement_seeds_only_those_placed(
 	# requested count; only TWO standable cells exist anywhere near center,
 	# five are requested. Mirrors `starting_roster_test.gd`'s own
 	# established degrade-deterministically fixture.
+	#
+	# Story villager-ai-022 (AC4): the first of the two found cells is
+	# consumed by villager 0's own first-ever placement; only ONE remains for
+	# a newly-constructed roster member.
 	var villager_config := VillagerAIConfig.new()
 	villager_config.starting_villager_count = 5
 	var valley: Valley = _instantiate_bare_valley(villager_config)
@@ -354,7 +366,7 @@ func test_ac_seed_every_roster_member_partial_placement_seeds_only_those_placed(
 	var spawned: Array[VillagerAi] = valley.spawn_starting_roster()
 
 	# Assert -- never a crash; fewer placed, exactly those seeded.
-	assert_int(spawned.size()).is_equal(2)
+	assert_int(spawned.size()).is_equal(1)
 	TimeTickSystem.tick.emit()
 	var needs_mood: NeedsMood = valley.get_needs_mood()
 	for villager: VillagerAi in valley.get_villagers():
@@ -368,8 +380,14 @@ func test_ac_seed_every_roster_member_partial_placement_seeds_only_those_placed(
 func test_ac_seed_is_idempotent_at_boot_second_roster_call_never_resets_a_decayed_value() -> void:
 	# Arrange -- a lightweight Valley, one roster member seeded and decayed
 	# to a known value below 100 via several real ticks.
+	#
+	# Story villager-ai-022 (AC4): starting_villager_count = 2 -- the FIRST
+	# call consumes cells[0] for villager 0's own one-time-only placement and
+	# constructs exactly ONE new roster member from cells[1] (first_batch.size
+	# == 1). Villager 0 is already placed by the SECOND call, so it spends
+	# the full count (2) on two new members instead.
 	var villager_config := VillagerAIConfig.new()
-	villager_config.starting_villager_count = 1
+	villager_config.starting_villager_count = 2
 	var valley: Valley = _instantiate_bare_valley(villager_config)
 	valley.get_needs_mood().setup()
 	var voxel_world: VoxelWorldGrid = valley.get_voxel_world()
@@ -393,8 +411,9 @@ func test_ac_seed_is_idempotent_at_boot_second_roster_call_never_resets_a_decaye
 	# this creates NEW villagers with NEW ids, never re-touching the ones
 	# already spawned.
 	var second_batch: Array[VillagerAi] = valley.spawn_starting_roster()
-	assert_int(second_batch.size()).is_equal(1)
+	assert_int(second_batch.size()).is_equal(2)
 	assert_int(second_batch[0].villager_id).is_not_equal(first_batch[0].villager_id)
+	assert_int(second_batch[1].villager_id).is_not_equal(first_batch[0].villager_id)
 
 	# Assert -- neither the default villager nor the first batch's already-
 	# decayed value was reset.

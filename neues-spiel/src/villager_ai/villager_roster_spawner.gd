@@ -28,13 +28,28 @@
 ## "no standable cell near center within a fallback search (deterministic
 ## placement)").
 ##
+## Story villager-ai-022 (this revision, "the stray villager at the world
+## corner") adds [method place_villager_at_cell] -- the single-cell placement
+## half [method assemble_roster] already performed inline for each freshly
+## CONSTRUCTED roster member, now factored out so [Valley.spawn_starting_roster]
+## can place the ALREADY-CONSTRUCTED, scene-hosted default villager (villager_id
+## 0) through this exact same call rather than a second, hand-rolled field
+## assignment (that story's own AC2: "one placement rule, not two"). Legal to
+## call on a villager that has not yet had its first tick dispatched -- exactly
+## [method assemble_roster]'s own pre-`setup()` construction-time use of it --
+## which is why this is initial placement, not a violation of the Control
+## Manifest's "`current_cell` changes at EXACTLY two sanctioned points" runtime
+## rule (ADR-0009): that rule governs an ALREADY-SIMULATING villager's position
+## changes (tick-boundary travel arrival / unstuck-watchdog rescue), not a
+## not-yet-ticked villager's very first placement.
+##
 ## [method assemble_roster] is the ASSEMBLY half: constructs one new
 ## [VillagerAi] per cell [param cells] supplies, DI-wires it (`config`/
 ## `voxel_world`/`scheduler`/`nav_graph`/`unstuck_telemetry`, `villager_id`
 ## starting at [param first_villager_id] and incrementing in array order --
-## the GDD Edge Case 3/F2 stable-processing-order convention --
-## `current_cell`/`_from_cell`/`_to_cell` all set to its assigned cell, so it
-## begins stationary there, never mid-transit). Deliberately NEVER calls
+## the GDD Edge Case 3/F2 stable-processing-order convention -- and places it
+## via [method place_villager_at_cell], so it begins stationary at its
+## assigned cell, never mid-transit). Deliberately NEVER calls
 ## `setup()` itself (ADR-0005: the sole call site for the boot gate's
 ## INITIAL injected-tier sweep is [method GameWorld._setup_injected_tier] --
 ## a villager assembled by this method is instantiated by whichever code
@@ -144,11 +159,23 @@ static func assemble_roster(
 		villager.nav_graph = nav_graph
 		villager.unstuck_telemetry = unstuck_telemetry
 		villager.villager_id = first_villager_id + i
-		villager.current_cell = cells[i]
-		villager._from_cell = cells[i]
-		villager._to_cell = cells[i]
+		place_villager_at_cell(villager, cells[i])
 		roster.append(villager)
 	return roster
+
+
+## Sets [param villager]'s discrete `current_cell`/`_from_cell`/`_to_cell` to
+## [param cell], leaving it stationary there (never mid-transit) -- see class
+## doc comment's own Story villager-ai-022 paragraph for why this is legal
+## initial placement, not a runtime `current_cell` mutation. Factored out of
+## [method assemble_roster]'s own former inline three-field assignment so
+## [Valley.spawn_starting_roster] can place villager_id 0 -- an
+## ALREADY-CONSTRUCTED, scene-hosted [VillagerAi], never one this class
+## constructs -- through the identical call.
+static func place_villager_at_cell(villager: VillagerAi, cell: Vector3i) -> void:
+	villager.current_cell = cell
+	villager._from_cell = cell
+	villager._to_cell = cell
 
 
 ## Every cell at EXACTLY Chebyshev distance [param distance] from

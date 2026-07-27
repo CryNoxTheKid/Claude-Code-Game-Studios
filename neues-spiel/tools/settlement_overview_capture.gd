@@ -136,14 +136,18 @@ func _count_cameras(node: Node) -> int:
 ## Frames the settlement — the world centre, which is where
 ## [VillagerRosterSpawner] actually places the starting roster.
 ##
-## Deliberately NOT the mean of every villager position. The shipped scene
-## hosts a default villager (villager_id 0) that the roster spawner never
-## places, so it sits at cell (0, 0, 0) — the far world corner, ~1400 cells
-## from the real settlement. Averaging the two put the camera in empty space
-## between them and produced a photograph of nothing. That stray villager is a
-## real finding (reported above by [method
-## _report_what_the_shipped_scene_actually_hosts]), not something this tool
-## should quietly frame around; the picture should show the settlement.
+## Deliberately NOT a bare mean of every villager position. Story
+## villager-ai-022 ("the stray villager at the world corner") closed the gap
+## this comment used to describe: before that story, the shipped scene hosted
+## a default villager (villager_id 0) the roster spawner never placed, so it
+## sat at cell (0, 0, 0) — the far world corner, ~1400 cells from the real
+## settlement — and averaging its position with the real roster put the
+## camera in empty space between them. Villager 0 is now placed through the
+## SAME selection call as every other roster member, so no villager should
+## ever land at the origin again; the `cell == Vector3i.ZERO` skip below is
+## kept as a harmless defensive fallback (only a world whose real centre
+## genuinely IS the origin would ever trigger it), not a workaround for a
+## known-stray villager anymore.
 func _focus_point() -> Vector3:
 	var valley: Node = _world.get_valley() if _world.has_method("get_valley") else null
 	if valley == null:
