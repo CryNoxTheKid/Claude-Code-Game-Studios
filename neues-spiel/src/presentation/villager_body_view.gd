@@ -15,10 +15,29 @@
 ##
 ## [member ai_source] is a duck-typed, nil-safe [Object] (this codebase's
 ## established DI precedent: `needs_provider`/`job_queue`/`population`) --
-## exactly three members are read: `get_visual_position() -> Vector3`,
-## `get_current_cell() -> Vector3i`, `get_state() -> int` (the state read is
-## a RESERVED seam for a future idle-behaviour consumer; this class does not
-## yet act on it). A `null` [member ai_source] is inert -- [method _process]
+## exactly four members are read: `get_visual_position() -> Vector3`,
+## `get_current_cell() -> Vector3i`, `get_state() -> int`, and
+## `get_last_micro_behavior() -> Variant` (Presentation Experience story
+## presentation-001 Sub-B's idle-behaviour hook, [method _apply_idle_pose] --
+## the state read was this class's own previously-RESERVED seam; it is now
+## acted on, exactly as reserved).
+##
+## Idle-behaviour presentation (VB-1's sibling story, presentation-001 Sub-B,
+## Art Bible §5.6 / GDD Rule 7c): while [member ai_source] reports
+## `State.WANDERING` (the STATIONARY half of Story villager-ai-019's F3/Rule
+## 7c pick -- `WALK`/`BED_DRIFT` are `State.TRAVELING` instead, see that
+## story's own doc comments) AND the most recent
+## [enum VillagerWanderSelector.MicroBehavior] draw is `SIT` or `PAUSE_LOOK`,
+## [method _apply_idle_pose] applies a fixed, static local-space offset to
+## the placeholder figure's own child meshes -- never a Tween, never a
+## per-frame accumulator, never a wall-clock read. This is presentation OF
+## existing state only: both reads are pure observability seams already
+## landed on [VillagerAi] (Story villager-ai-019), nothing here writes back
+## into it, and the poses never touch this view's own
+## `position`/`global_position` -- the pure-mirror invariant above stays
+## exactly as story presentation-003 established it.
+##
+## A `null` [member ai_source] is inert -- [method _process]
 ## and [method set_slice_level] both no-op rather than crash.
 ##
 ## Geometry (VB-1 §3): a placeholder 2-cell-tall figure (Art Bible §5.2) --
@@ -84,6 +103,17 @@ const HEAD_WIDTH: float = 0.7
 ## Small vertical clearance above the figure's own top for `IconAnchor`
 ## (VB-1 §6: "local y ≈ 2.0 plus a small clearance").
 const ICON_ANCHOR_CLEARANCE: float = 0.2
+
+## Idle-behaviour pose constants (presentation-001 Sub-B, class doc comment).
+## Fixed static offsets -- never animated/tweened -- applied by [method
+## _apply_idle_pose] only while [enum VillagerWanderSelector.MicroBehavior]
+## is `PAUSE_LOOK`/`SIT` AND [member ai_source] reports `State.WANDERING`.
+## `PAUSE_LOOK_HEAD_TILT` tilts the head back/up (a cheap "stretch and
+## glance" read); `SIT_VERTICAL_DROP` lowers the whole figure's body+head
+## (a cheap "sitting" read) -- both a single flat number, no animation
+## curve, matching this epic's own "Cheap" cost-class discipline (§6.5/§8.9).
+const PAUSE_LOOK_HEAD_TILT: float = -0.35
+const SIT_VERTICAL_DROP: float = 0.4
 
 var _highlight_mode: HighlightMode = HighlightMode.NONE
 
@@ -153,6 +183,36 @@ func _process(_delta: float) -> void:
 	if ai_source == null:
 		return
 	global_position = ai_source.get_visual_position()
+	_apply_idle_pose()
+
+
+## Idle-behaviour presentation (presentation-001 Sub-B, class doc comment).
+## Reads two existing, pure observability seams -- [method
+## VillagerAi.get_state]/[method VillagerAi.get_last_micro_behavior] -- and
+## applies a fixed local-space pose offset to the placeholder figure's
+## child meshes. `WALK`/`BED_DRIFT` (already `State.TRAVELING`, never
+## `State.WANDERING`, per Story villager-ai-019) and any other state/`null`
+## micro-behavior reset both meshes to their neutral, [method _init]-assigned
+## pose -- a stale `SIT`/`PAUSE_LOOK` draw from a since-ended Wandering
+## episode (Story villager-ai-019's [member VillagerAi._last_micro_behavior]
+## is never cleared) must never leak a sitting/glancing pose onto a villager
+## that is now Working or Traveling for a job.
+func _apply_idle_pose() -> void:
+	var state: int = ai_source.get_state()
+	var micro_behavior: Variant = ai_source.get_last_micro_behavior()
+	var is_stationary_wander: bool = state == VillagerAi.State.WANDERING
+	var showing_pause_look: bool = (
+		is_stationary_wander and micro_behavior == VillagerWanderSelector.MicroBehavior.PAUSE_LOOK
+	)
+	var showing_sit: bool = (
+		is_stationary_wander and micro_behavior == VillagerWanderSelector.MicroBehavior.SIT
+	)
+
+	_head_mesh.rotation = Vector3(PAUSE_LOOK_HEAD_TILT if showing_pause_look else 0.0, 0.0, 0.0)
+
+	var vertical_drop: float = SIT_VERTICAL_DROP if showing_sit else 0.0
+	_body_mesh.position = Vector3(0.0, BODY_HEIGHT * 0.5 - vertical_drop, 0.0)
+	_head_mesh.position = Vector3(0.0, BODY_HEIGHT + HEAD_HEIGHT * 0.5 - vertical_drop, 0.0)
 
 
 ## Applies the Slice View cutoff (VB-1 §5). Reads the DISCRETE
@@ -192,6 +252,18 @@ func get_hit_proxy() -> VillagerHitProxy:
 ## observability seam.
 func get_icon_anchor() -> Node3D:
 	return _icon_anchor
+
+
+## Returns the body [MeshInstance3D] -- test / presentation-001 Sub-B idle-
+## pose observability seam.
+func get_body_mesh() -> MeshInstance3D:
+	return _body_mesh
+
+
+## Returns the head [MeshInstance3D] -- test / presentation-001 Sub-B idle-
+## pose observability seam.
+func get_head_mesh() -> MeshInstance3D:
+	return _head_mesh
 
 
 ## Combined local-space [AABB] of the placeholder figure's two mesh parts

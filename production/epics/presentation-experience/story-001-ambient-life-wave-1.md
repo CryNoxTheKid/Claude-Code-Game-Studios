@@ -97,3 +97,24 @@
 - **Sub-scope B (villager idle behaviors)** Depends on: `villager-ai-behavior` story-019 (wandering micro-behaviors) + the FSM/movement chain it sits on (story-001 scaffold ✓ S3, plus the Deciding/Traveling/Idle states — story-006/009). The hook cannot play idle behaviors until an Idle/Wandering state exists to read.
 - Unlocks: Ambient-life wave 2 (§6.5 weather/day-night pass).
 - **Not schedulable in Sprint 4** — its gates (mesher, villager wandering) land across Sprint 4/5; this is Presentation-pass (Sprint 5+) work.
+
+---
+
+## Sub-B Scope Gap (2026-07-27, flagged not hidden)
+
+Sub-B delivers the idle behaviours that existing FSM state can actually
+drive: a SIT draw settles the figure into a lower seated posture, a
+PAUSE_LOOK draw tilts the head back as a stretch/glance. Walking,
+bed-drifting and working villagers read as before.
+
+Two behaviours named in the art bible were deliberately NOT implemented:
+"glancing at an unfinished build" needs build-target awareness, and "brief
+exchanges between bonded villagers" needs a villager-bond concept. Neither
+exists anywhere in villager_ai, and inventing either would be new
+Core-layer simulation — which this story's own guardrail forbids
+(presentation reads existing state, it never invents state).
+
+DECISION OWED (producer/CD): either accept Sub-B as the two FSM-backed
+behaviours, or open a follow-on story once build-awareness and bonding
+exist as simulation. Also outstanding: the CD sign-off and the written
+ambient-life evidence entry for milestone criterion #9.

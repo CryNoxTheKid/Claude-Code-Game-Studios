@@ -41,14 +41,17 @@ extends GdUnitTestSuite
 # ---------------------------------------------------------------------------
 
 ## Minimal duck-typed AI-source double (class doc comment on
-## [VillagerBodyView]: "exactly three members... get_visual_position()/
-## get_current_cell()/get_state()") — mirrors this codebase's established
-## small-mock-object precedent (no GdUnit mocking framework used anywhere in
-## this suite).
+## [VillagerBodyView]: "exactly four members... get_visual_position()/
+## get_current_cell()/get_state()/get_last_micro_behavior()") — mirrors this
+## codebase's established small-mock-object precedent (no GdUnit mocking
+## framework used anywhere in this suite). `last_micro_behavior` defaults to
+## `null`, mirroring [member VillagerAi._last_micro_behavior]'s own "null
+## until a real value exists" convention (Story villager-ai-019).
 class _MockAiSource:
 	var visual_position: Vector3 = Vector3.ZERO
 	var cell: Vector3i = Vector3i.ZERO
 	var state: int = 0
+	var last_micro_behavior: Variant = null
 
 	func get_visual_position() -> Vector3:
 		return visual_position
@@ -58,6 +61,9 @@ class _MockAiSource:
 
 	func get_state() -> int:
 		return state
+
+	func get_last_micro_behavior() -> Variant:
+		return last_micro_behavior
 
 
 ## Minimal duck-typed roster-provider double ([VillagerBodyPresenter]'s own
@@ -428,6 +434,7 @@ func test_presentation_module_makes_zero_mutating_calls_into_villager_ai() -> vo
 		"get_current_cell",
 		"get_state",
 		"get_villagers",
+		"get_last_micro_behavior",
 	]
 	var pattern := RegEx.new()
 	var compile_error: int = pattern.compile("(?:ai_source|villager|villagers)\\.(\\w+)\\s*\\(")
@@ -435,6 +442,149 @@ func test_presentation_module_makes_zero_mutating_calls_into_villager_ai() -> vo
 	for match_result: RegExMatch in pattern.search_all(source):
 		var called: String = match_result.get_string(1)
 		assert_bool(allowed_calls.has(called)).is_true()
+
+
+# ---------------------------------------------------------------------------
+# Presentation Experience story presentation-001 Sub-B — idle-behaviour pose
+# (villager-ai-019's F3/Rule 7c MicroBehavior read as visible idle behavior:
+# "reusing the existing FSM, adding no new simulation")
+# ---------------------------------------------------------------------------
+
+func test_process_applies_sit_pose_while_wandering_with_sit_micro_behavior() -> void:
+	var mock_ai := _MockAiSource.new()
+	mock_ai.state = VillagerAi.State.WANDERING
+	mock_ai.last_micro_behavior = VillagerWanderSelector.MicroBehavior.SIT
+	var view: VillagerBodyView = auto_free(VillagerBodyView.new())
+	view.ai_source = mock_ai
+	add_child(view)
+
+	view._process(0.016)
+
+	assert_float(view.get_body_mesh().position.y).is_equal_approx(
+		VillagerBodyView.BODY_HEIGHT * 0.5 - VillagerBodyView.SIT_VERTICAL_DROP, 0.0001
+	)
+	assert_float(view.get_head_mesh().position.y).is_equal_approx(
+		VillagerBodyView.BODY_HEIGHT + VillagerBodyView.HEAD_HEIGHT * 0.5 - VillagerBodyView.SIT_VERTICAL_DROP,
+		0.0001
+	)
+
+
+func test_process_applies_pause_look_head_tilt_while_wandering_with_pause_look() -> void:
+	var mock_ai := _MockAiSource.new()
+	mock_ai.state = VillagerAi.State.WANDERING
+	mock_ai.last_micro_behavior = VillagerWanderSelector.MicroBehavior.PAUSE_LOOK
+	var view: VillagerBodyView = auto_free(VillagerBodyView.new())
+	view.ai_source = mock_ai
+	add_child(view)
+
+	view._process(0.016)
+
+	assert_float(view.get_head_mesh().rotation.x).is_equal_approx(
+		VillagerBodyView.PAUSE_LOOK_HEAD_TILT, 0.0001
+	)
+	assert_float(view.get_body_mesh().position.y).is_equal_approx(VillagerBodyView.BODY_HEIGHT * 0.5, 0.0001)
+
+
+func test_process_shows_neutral_pose_while_walking_wander_micro_behavior() -> void:
+	# WALK is a stationary-Wandering DRAW but its own EXECUTION is
+	# State.TRAVELING (Story villager-ai-019: "a villager mid-walk toward a
+	# chosen wander/bed-drift target is State.TRAVELING instead") -- already
+	# covered by the neutral-pose gate below; this test pins the case where
+	# state is still WANDERING (the brief window before travel starts) with
+	# a WALK draw, which must also read as the neutral pose, never a
+	# sit/pause-look pose.
+	var mock_ai := _MockAiSource.new()
+	mock_ai.state = VillagerAi.State.WANDERING
+	mock_ai.last_micro_behavior = VillagerWanderSelector.MicroBehavior.WALK
+	var view: VillagerBodyView = auto_free(VillagerBodyView.new())
+	view.ai_source = mock_ai
+	add_child(view)
+
+	view._process(0.016)
+
+	assert_float(view.get_body_mesh().position.y).is_equal_approx(VillagerBodyView.BODY_HEIGHT * 0.5, 0.0001)
+	assert_float(view.get_head_mesh().rotation.x).is_equal_approx(0.0, 0.0001)
+
+
+func test_process_ignores_stale_sit_micro_behavior_while_traveling_for_work() -> void:
+	# A villager mid-TRAVELING for an actual job still carries whatever
+	# MicroBehavior it last drew during a PRIOR Wandering episode ([member
+	# VillagerAi._last_micro_behavior] is never reset) -- the idle pose must
+	# gate on State.WANDERING, not merely on the micro-behavior value, or a
+	# working villager would visibly "sit" mid-job.
+	var mock_ai := _MockAiSource.new()
+	mock_ai.state = VillagerAi.State.TRAVELING
+	mock_ai.last_micro_behavior = VillagerWanderSelector.MicroBehavior.SIT
+	var view: VillagerBodyView = auto_free(VillagerBodyView.new())
+	view.ai_source = mock_ai
+	add_child(view)
+
+	view._process(0.016)
+
+	assert_float(view.get_body_mesh().position.y).is_equal_approx(VillagerBodyView.BODY_HEIGHT * 0.5, 0.0001)
+	assert_float(view.get_head_mesh().rotation.x).is_equal_approx(0.0, 0.0001)
+
+
+func test_process_shows_neutral_pose_when_no_micro_behavior_drawn_yet() -> void:
+	var mock_ai := _MockAiSource.new()
+	mock_ai.state = VillagerAi.State.WANDERING
+	# last_micro_behavior left at its default null — no wander pick has run
+	# yet (mirrors VillagerAi._last_micro_behavior's own doc comment).
+	var view: VillagerBodyView = auto_free(VillagerBodyView.new())
+	view.ai_source = mock_ai
+	add_child(view)
+
+	view._process(0.016)
+
+	assert_float(view.get_body_mesh().position.y).is_equal_approx(VillagerBodyView.BODY_HEIGHT * 0.5, 0.0001)
+	assert_float(view.get_head_mesh().rotation.x).is_equal_approx(0.0, 0.0001)
+
+
+func test_process_restores_neutral_pose_after_sit_pose_ends() -> void:
+	# A pose is re-derived from scratch every frame (never accumulated) —
+	# sitting one frame and no longer sitting the next must fully restore
+	# the neutral pose, not merely stop moving further away from it.
+	var mock_ai := _MockAiSource.new()
+	mock_ai.state = VillagerAi.State.WANDERING
+	mock_ai.last_micro_behavior = VillagerWanderSelector.MicroBehavior.SIT
+	var view: VillagerBodyView = auto_free(VillagerBodyView.new())
+	view.ai_source = mock_ai
+	add_child(view)
+	view._process(0.016)
+
+	mock_ai.last_micro_behavior = VillagerWanderSelector.MicroBehavior.BED_DRIFT
+	mock_ai.state = VillagerAi.State.TRAVELING
+	view._process(0.016)
+
+	assert_float(view.get_body_mesh().position.y).is_equal_approx(VillagerBodyView.BODY_HEIGHT * 0.5, 0.0001)
+
+
+func test_idle_pose_never_touches_the_view_root_position() -> void:
+	# The pure-mirror invariant (story presentation-003) applies to the
+	# VIEW ROOT's global_position only — idle-pose offsets must land on the
+	# child meshes, never perturb the mirrored position itself.
+	var mock_ai := _MockAiSource.new()
+	mock_ai.visual_position = Vector3(5.0, 1.0, -2.0)
+	mock_ai.state = VillagerAi.State.WANDERING
+	mock_ai.last_micro_behavior = VillagerWanderSelector.MicroBehavior.SIT
+	var view: VillagerBodyView = auto_free(VillagerBodyView.new())
+	view.ai_source = mock_ai
+	add_child(view)
+
+	view._process(0.016)
+
+	assert_vector(view.global_position).is_equal(mock_ai.visual_position)
+
+
+func test_idle_pose_source_contains_no_wall_clock_or_randomization() -> void:
+	# QA-plan grep guard (mirrors villager-ai-019's own "no wall-clock
+	# dependency" discipline): the idle-pose hook is presentation of
+	# EXISTING state only — no new decision-making, no live entropy.
+	var source: String = FileAccess.get_file_as_string("res://src/presentation/villager_body_view.gd")
+	assert_bool(source.contains("OS.get_ticks_msec")).is_false()
+	assert_bool(source.contains("Time.get_ticks_msec")).is_false()
+	assert_bool(source.contains("randomize(")).is_false()
+	assert_bool(source.contains("RandomNumberGenerator")).is_false()
 
 
 # ---------------------------------------------------------------------------

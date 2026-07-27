@@ -197,7 +197,7 @@ stories:
     name: "Ambient life wave 1, Sub-scope B — villager idle behaviors in the composed Valley"
     file: "production/epics/presentation-experience/story-001-ambient-life-wave-1.md"
     priority: should-have
-    status: backlog
+    status: sub-b-complete-with-flagged-scope-gap
     owner: "ai-programmer"
     estimate_days: 1.0
     blocker: "SUB-SCOPE B of an existing story (Sub-A Complete 2026-07-24; the file exists, this is not a fabricated story). HARD: villager-ai-019 (in-sprint) — its own header states 'the hook cannot play idle behaviors until an Idle/Wandering state exists to read'. Second prerequisite SATISFIED IN S10: presentation-003 (TD downstream item 16 added it; the villager body landed). The idle/wandering hook plays in game_world.tscn, not in a harness. ⚑ CRITERION #9 IS MET ONLY ON A WRITTEN, DATED CD CLOSE ENTRY in production/qa/evidence/ambient-life-wave-1-evidence.md — NEVER on a green suite. Do not mark the criterion met from tests passing. Advisory evidence (screenshots) per the testing standards. The four CD advisories on criterion #8 (golden-hour re-shoot, foliage hue, torch colour, Dusk/Horizon tests) remain outstanding and are NOT closed by this story."
@@ -813,7 +813,7 @@ sprint_7_history:
       name: "Ambient-life wave 1 — Sub-scope A (environmental: smoke/foliage/clutter/flicker) CD-protected (criterion #9)"
       file: "production/epics/presentation-experience/story-001-ambient-life-wave-1.md"
       priority: should-have
-      status: sub_a_complete
+      status: sub-b-complete-with-flagged-scope-gap
       owner: "godot-specialist"
       estimate_days: 1.5
       blocker: "depends on vox-007 (DONE); Sub-scope B deferred (needs villager-ai-019); AD/CD sign-off is the binding gate"

@@ -32,7 +32,9 @@
 ## Guardrail (control manifest, this epic's founding constraint): this class
 ## makes ZERO mutating calls into [VillagerAi] -- it only ever READS
 ## `get_villager_id()`/`get_visual_position()`/`get_current_cell()`/
-## `get_state()` (via the views it creates). Presentation adds no
+## `get_state()`/`get_last_micro_behavior()` (the last two via the views it
+## creates -- story presentation-001 Sub-B's idle-behaviour hook,
+## [method VillagerBodyView._apply_idle_pose]). Presentation adds no
 ## simulation.
 class_name VillagerBodyPresenter
 extends Node3D
