@@ -1,7 +1,7 @@
 # Story 034: Scaffolding — the builder gets real ground to walk on
 
 > **Epic**: Building System
-> **Status**: Ready
+> **Status**: NOT LANDED — first implementation pass parked (2026-07-27). Work preserved at production/parked/story-034-scaffolding-WIP.patch; the tree is back at the last green commit.
 > **Layer**: Core
 > **Type**: Integration (Building System + Villager AI nav + Build Validation)
 > **Estimate**: 3 relative-complexity units (≈3× a single-module logic story). One
@@ -1086,3 +1086,89 @@ leaving those open would only have cost another day.
   house wrapped in scaffolding still classifies as **not** a Room.
 - Both `villager_unstuck` counters read **zero** for the build phase — which is what
   unlocks the retirement story.
+
+---
+
+## First implementation pass — PARKED, not landed (2026-07-27)
+
+A full pass was written and then deliberately backed out. The gate was red and
+the work regressed a previously green test, so it was not committed. The whole
+diff plus every new file is preserved verbatim at
+`production/parked/story-034-scaffolding-WIP.patch` — nothing is lost, and the
+next pass starts from it rather than from scratch.
+
+### What the pass actually produced
+
+In the parked patch, written and unit-tested: the ADR-0007 nav amendment
+(sections 1a, 1b, 2a, 2b), `ScaffoldRegistry`, `ScaffoldConfig`, the erection
+planner (D8/D9/D6), the dismantle ordering (D10/D4/SC-INV-1),
+`BlueprintCell.Category.SCAFFOLD` / `BuildProject.Kind.SCAFFOLD` / tick-loop
+routing, the D5 detection wiring, both telemetry counters, and a placeholder
+renderer class.
+
+NOT done, and this is half the reason it could not land: the production wiring
+into `Valley.tscn` / `valley.gd` was deferred, so the erection coordinator never
+runs in the real game. The levers passed against the production classes called
+directly, never through the hosted boot chain.
+
+### Two real defects found and fixed during triage — keep these in the next pass
+
+Both fixes are in the parked patch.
+
+1. **The same-column gate broke its own binding promise.** ADR-0007 section 1b
+   states that a caller passing no scaffold source observes EXACTLY
+   pre-amendment behaviour. The gate as written returned `false` for every
+   same-column pair without scaffolding, but the predicate previously fell
+   through to the `|dy| <= MAX_STEP_HEIGHT` check and returned `true`. The TD
+   rationale (two stacked cells can never both be standable, so the case never
+   arises) holds only for callers that check standability first, and not every
+   caller does. Correct gate: both endpoints scaffold means legal; exactly one
+   means illegal (this is what actually closes general climbing); neither falls
+   through to pre-amendment behaviour.
+2. **The same defect existed a second time**, copied verbatim into
+   `villager_ai.gd`'s `_is_step_legal_after_write`. Those after-write twins feed
+   `would_trap_builder`, so the builder believed far more writes would trap it
+   than actually would.
+
+Fixing both turned `walkability_predicates_test` (18/18) and the new
+`scaffolding_reachability_levers_test` (5/5) green.
+
+### The defect that stopped the pass — unresolved
+
+`wall_room_no_plateau_test`, villager-ai-024's own regression test, drops from
+30/30 to 27/30 with an entire CORNER COLUMN stuck: `(1004, 6, 1008)`,
+`(1004, 7, 1008)`, `(1004, 8, 1008)`, all `state=0`, all `claimed_by=-1`. Note
+the shape differs from story-024's original symptom, where only the top layer
+hung.
+
+Ruled out during triage: the job-selector change is purely additive (it records
+probed-unreachable cells, it does not alter selection order), and
+`report_unreachable` only sets a flag that `claim_job` clears and that never
+gates listing.
+
+Prime suspect, NOT confirmed: the new same-column escape loop added to
+`would_trap_builder` reports that an upward escape exists onto the very block
+being placed. That escape is real only through story-024's sanctioned discrete
+climb, not through a legal step, so seal prevention now permits writes it used
+to refuse, and one of those writes seals off the corner approach. If that is
+right, the fix is to require the vertical escape target to be a scaffold cell
+rather than merely standable-after-write.
+
+### Next pass should
+
+1. Start from the parked patch; it already contains both triage fixes.
+2. Resolve the corner-column regression BEFORE adding anything new.
+3. Wire `ScaffoldRegistry` / `ScaffoldErectionCoordinator` / `ScaffoldPresentation`
+   into `Valley` so the levers run through the hosted boot chain.
+4. Add the live dismantle orchestrator on project DONE and on cancel.
+5. Then the payoff-loop demo and the telemetry-zero proof.
+
+### Unrelated observation, recorded not acted on
+
+`reachability_property_corpus_test` measured 60.83s against its own 60s ceiling
+on an otherwise idle machine, with the tree restored to the last green commit.
+The same corpus measured 45.78s earlier today on identical code. That is machine
+load drifting, not a code regression. Its Cut-Lever Policy would permit reducing
+`PAIRS_PER_SEED`, and that lever was deliberately NOT pulled: coverage should not
+be traded away for a transient. Worth watching; if it settles above the ceiling
+on a genuinely quiet machine, escalate to the TD as the policy directs.
