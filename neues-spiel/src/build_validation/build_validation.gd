@@ -105,6 +105,35 @@
 ## a crash -- and Rule 11's pacing degrades to comparing a frozen clock
 ## (harmless: no pre-existing test exercises [signal room_recognized] at
 ## all, so none can observe the difference).
+##
+## Story build-validation-008 (this revision) lands the remaining half of
+## the signal contract: [signal sealed_space_warning] and [signal
+## unsheltered_furniture_info]. Unlike [signal shelter_status_changed]/[signal
+## room_recognized], these two are deliberately LEVEL-TRIGGERED, not
+## edge-detected -- there is no snapshot for either of them anywhere in this
+## module (Rule 10: "deliberately NO cleared signal... their clearing
+## mechanism IS the cessation of re-emission plus the queryable current
+## state"). Both are recomputed from scratch on EVERY call to [method
+## _reclassify_all_furniture] -- the batched structural pass end ([method
+## _run_analysis_pass]), the furniture registry's own placed/removed trigger
+## ([method _on_furniture_changed]), AND [method run_load_pass] (AC31 -- these
+## two fire even though that same pass silences [signal shelter_status_changed]/
+## [signal room_recognized], per Rule 11's "persisting causes re-warned"
+## clause). The per-item tier decision itself ([BuildValidationTierClassifier])
+## reuses the [param sheltered] boolean [method _reclassify_all_furniture]
+## already computed for [signal shelter_status_changed]'s own logic -- never a
+## second, independently-derived sheltered/unsheltered verdict. Per-item
+## `WARNING`-tier results are grouped into ONE [signal sealed_space_warning]
+## emission per DISTINCT sealed region ([method _add_to_sealed_group] -- two
+## items whose own sealed regions share even one cell are, by region-formation's
+## connectivity guarantee, the exact same region), matching the signal's own
+## documented `(region cells, affected item ids, why-string)` payload shape;
+## `INFO`-tier results emit immediately, per item (no grouping -- that signal's
+## payload is `(item id, why-string)` only). Never a hardcoded `&"bed"`
+## comparison anywhere in this module (grep-guarded by story 006's own test) --
+## see [BuildValidationTierClassifier]'s own class doc comment for why reusing
+## [method BuildValidationConfig.is_need_functional] for BOTH tiers is
+## sufficient in MVP.
 class_name BuildValidation
 extends Node
 
@@ -128,6 +157,36 @@ signal shelter_status_changed(item_id: String, sheltered: bool)
 ## furniture-only reclassification ([method _on_furniture_changed] never
 ## forms or classifies a region).
 signal room_recognized(region_cells: Array[Vector3i], celebrate: bool, pass_group_id: StringName)
+
+## Fires every qualifying analysis pass (Rule 8/Rule 10, [TR-build-validation-
+## navigability-033]/[-041]/[-046]) while a Sealed candidate region contains at
+## least one need-functional furniture item ([method
+## BuildValidationConfig.is_need_functional]): [param region_cells] that
+## region's own interior cells AS OF THIS PASS; [param affected_item_ids]
+## every need-functional item id inside it this pass (Rule 8 exclusivity,
+## [TR-build-validation-navigability-035] -- a decorative item in the SAME
+## region never contributes, AC35); [param why_string] this module's own
+## authored explanation (the UI presents it verbatim, never re-authors it).
+## LEVEL-TRIGGERED (AC22): re-emitted from scratch every call to [method
+## _reclassify_all_furniture], including [method run_load_pass] (AC31) --
+## there is deliberately no snapshot/memory backing this signal at all, and
+## deliberately no "cleared" counterpart (Rule 10).
+signal sealed_space_warning(
+	region_cells: Array[Vector3i], affected_item_ids: Array[String], why_string: String
+)
+
+## Fires every qualifying analysis pass (Rule 8/Rule 10, [TR-build-validation-
+## navigability-034]/[-041]/[-046]) while a need-functional furniture item
+## ([method BuildValidationConfig.is_need_functional] -- MVP: exactly the bed,
+## see [BuildValidationTierClassifier]'s own doc comment) sits unsheltered
+## AND not inside a Sealed region (i.e. genuinely in the open): [param
+## item_id] the item; [param why_string] this module's own authored
+## explanation. Mutually exclusive with [signal sealed_space_warning] per
+## item -- Warning supersedes Info ([TR-build-validation-navigability-035]).
+## LEVEL-TRIGGERED, same re-emission contract as [signal sealed_space_warning]
+## (including firing on [method run_load_pass], AC31) -- no snapshot, no
+## "cleared" counterpart.
+signal unsheltered_furniture_info(item_id: String, why_string: String)
 
 ## Tuning config (ADR-0002). Wired via a scene file's Inspector in
 ## production, or assigned directly in a headless test. Asserted wired by
@@ -228,6 +287,15 @@ var _shelter_snapshot: Dictionary[String, bool] = {}
 ## (Rule 11 -- "no transition events... on load"; AC19/AC20 are both scoped to
 ## the batched-trigger path only).
 var _analysis_pass_count: int = 0
+
+## [signal sealed_space_warning]'s own authored why-string (Implementation
+## Notes: "The why-strings originate here... the UI presents them; it does
+## not author them") -- verbatim from the GDD's own example text.
+const _SEALED_SPACE_WARNING_WHY: String = "the bed can't be reached — the room has no opening"
+
+## [signal unsheltered_furniture_info]'s own authored why-string -- verbatim
+## from the GDD's own example text.
+const _UNSHELTERED_FURNITURE_INFO_WHY: String = "a roof would make this a proper home"
 
 
 ## Explicitly callable wiring/validation entry point (ADR-0001). Asserts
@@ -555,6 +623,20 @@ func _on_furniture_changed() -> void:
 ## enumeration is untracked from [member _shelter_snapshot] WITHOUT emitting
 ## -- Rule 10 fires on a flag TRANSITION for an existing item, never on an
 ## item's own removal.
+##
+## Story build-validation-008 (this revision) ADDITIONALLY resolves each
+## item's Warning/Info tier ([BuildValidationTierClassifier], reusing the
+## SAME [param sheltered] this call just computed -- never a second,
+## independently-derived verdict) and emits [signal sealed_space_warning]/
+## [signal unsheltered_furniture_info] -- UNCONDITIONALLY, regardless of
+## [param silent] (AC31: these two fire even on the load pass; only [signal
+## shelter_status_changed] is ever silenced by that parameter). `WARNING`-tier
+## items are grouped by their own sealed region ([method _add_to_sealed_group])
+## so two need-functional items sharing one sealed space emit ONE combined
+## `sealed_space_warning` naming both, never one per item; `INFO`-tier items
+## emit immediately, per item. Both signals are recomputed from scratch every
+## call -- no snapshot of any kind backs either of them (Rule 10's "no cleared
+## signal" model).
 func _reclassify_all_furniture(silent: bool) -> void:
 	if furniture_registry == null:
 		return
@@ -564,6 +646,8 @@ func _reclassify_all_furniture(silent: bool) -> void:
 	var records: Array = furniture_registry.get_placed_furniture()
 
 	var current_ids: Dictionary[String, bool] = {}
+	var sealed_group_cell_index: Dictionary[Vector3i, int] = {}
+	var sealed_groups: Array[Dictionary] = []
 	for entry: Variant in records:
 		var record: Dictionary = entry as Dictionary
 		var item_id: String = String(record.get("item_id", ""))
@@ -576,9 +660,67 @@ func _reclassify_all_furniture(silent: bool) -> void:
 		)
 		_patch_shelter_flag(item_id, sheltered, silent)
 
+		var definition_id: StringName = StringName(record.get("definition_id", &""))
+		var tier_result: BuildValidationTierClassifier.ItemTierResult = (
+			BuildValidationTierClassifier.classify_item_tier(
+				voxel_world,
+				cells,
+				sheltered,
+				config.is_need_functional(definition_id),
+				config.min_room_cells,
+				config.max_room_height,
+			)
+		)
+		match tier_result.tier:
+			BuildValidationTierClassifier.Tier.WARNING:
+				_add_to_sealed_group(
+					sealed_group_cell_index, sealed_groups, tier_result.sealed_region, item_id
+				)
+			BuildValidationTierClassifier.Tier.INFO:
+				unsheltered_furniture_info.emit(item_id, _UNSHELTERED_FURNITURE_INFO_WHY)
+			BuildValidationTierClassifier.Tier.NONE:
+				pass
+
+	for group: Dictionary in sealed_groups:
+		var region: BuildValidationRegion = group["region"]
+		var item_ids: Array[String] = group["item_ids"]
+		sealed_space_warning.emit(region.cell_list(), item_ids, _SEALED_SPACE_WARNING_WHY)
+
 	for tracked_id: String in _shelter_snapshot.keys():
 		if not current_ids.has(tracked_id):
 			_shelter_snapshot.erase(tracked_id)
+
+
+## Groups one `WARNING`-tier item into [param groups] by its own [param
+## region] (Rule 8/Rule 10's `(region cells, affected item ids, why-string)`
+## payload -- one emission per DISTINCT sealed region, never one per item).
+## [param cell_index] maps every cell already claimed by an existing group to
+## that group's index in [param groups]; two items whose own sealed regions
+## share even one cell are, by [BuildValidationRegionFormation]'s own
+## connectivity guarantee, the EXACT same region, so checking any one shared
+## cell is sufficient to merge them -- no canonical-cell/sort step needed.
+## Both [param cell_index] and [param groups] are mutated in place (Dictionary/
+## Array are reference types in GDScript) -- this method returns nothing, and
+## none of [BuildValidation]'s own callers need it to.
+func _add_to_sealed_group(
+	cell_index: Dictionary[Vector3i, int],
+	groups: Array[Dictionary],
+	region: BuildValidationRegion,
+	item_id: String,
+) -> void:
+	var cells: Array[Vector3i] = region.cell_list()
+	var matched_index: int = -1
+	for cell: Vector3i in cells:
+		if cell_index.has(cell):
+			matched_index = cell_index[cell]
+			break
+	if matched_index == -1:
+		matched_index = groups.size()
+		groups.append({"region": region, "item_ids": [] as Array[String]})
+		for cell: Vector3i in cells:
+			cell_index[cell] = matched_index
+	var item_ids: Array[String] = groups[matched_index]["item_ids"]
+	item_ids.append(item_id)
 
 
 ## Patches [member _shelter_snapshot][[param item_id]] to [param sheltered]

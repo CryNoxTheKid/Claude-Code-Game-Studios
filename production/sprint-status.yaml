@@ -171,7 +171,7 @@ stories:
     name: "Warning/Info tiers, exclusivity & load-pass emissions"
     file: "production/epics/build-validation-navigability/story-008-warning-info-tiers-and-load-pass.md"
     priority: should-have
-    status: backlog
+    status: complete
     owner: "godot-gdscript-specialist"
     estimate_days: 1.0
     blocker: "HARD: build-validation-007 (in-sprint — AC31 asserts both silences). Deps bv-005/006 Complete. FIRST TRIM CANDIDATE after bv-009: its value is positional and bv-009 is its only consumer. Warning and Info are TWO SEPARATE TYPED SIGNALS, not severity payloads of one — do not collapse them. Level-triggered re-emission once per qualifying pass. There is deliberately NO 'cleared' signal — clearing IS the cessation of re-emission plus the queryable state. EXACTLY FOUR SIGNALS TOTAL from this system. Warning supersedes Info, mutually exclusive PER FURNITURE ITEM. shelter_status_changed (bv-006) is independent of both tiers. NO warning on a sealed space containing only decorative furniture or only a villager. Grace/dismissal-debounce/re-show timing is UI-owned (ADR-0011) — do NOT implement it here. Same fixture trap applies"

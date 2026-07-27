@@ -1,7 +1,7 @@
 # Story 008: Warning/Info tiers, exclusivity & load-pass emissions
 
 > **Epic**: Build Validation & Navigability
-> **Status**: Ready
+> **Status: Complete (2026-07-27 — 1383/1383 suite green 0 orphans, parent-verified; end-to-end bed emission pending RID content)
 > **Layer**: Feature
 > **Type**: Logic
 > **Estimate**: ~1 agent-day
