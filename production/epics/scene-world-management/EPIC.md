@@ -5,7 +5,7 @@
 > **Architecture Module**: Scene/World Management (World Root lifecycle; the 3-signal transition contract; scene attach/detach topology)
 > **Manifest Version**: 2026-07-23
 > **Status**: Ready
-> **Stories**: 6 stories created — 001–003 (2026-07-23; epic closed 3/3 after S3), plus **story 004 (2026-07-24)** re-opening the epic to close the integration-to-playable / E2E LOOP gap (Milestone 01 criterion #8; scheduled Sprint 6), plus **story 005 (2026-07-26)** re-opening it again to close the world-genesis boot gap — the production Valley boots an EMPTY grid (scheduled Sprint 9), plus **story 006 (2026-07-27)** re-opening it a third time to close the villager-need-seeding boot gap — `NeedsMood.initialize_villager()` is called nowhere, so every shipped villager holds zero need records (scheduled Sprint 10). Story 001 carries a NEEDS-DECISION flag (main-menu boot-flow conflict; does not block M01).
+> **Stories**: 7 stories created — 001–003 (2026-07-23; epic closed 3/3 after S3), plus **story 004 (2026-07-24)** re-opening the epic to close the integration-to-playable / E2E LOOP gap (Milestone 01 criterion #8; scheduled Sprint 6), plus **story 005 (2026-07-26)** re-opening it again to close the world-genesis boot gap — the production Valley boots an EMPTY grid (scheduled Sprint 9), plus **story 006 (2026-07-27)** re-opening it a third time to close the villager-need-seeding boot gap — `NeedsMood.initialize_villager()` is called nowhere, so every shipped villager holds zero need records (scheduled Sprint 10), plus **story 007 (2026-07-27)** re-opening it a fourth time to host the entire build-interaction tier — eight `Node`s in no scene and three `RefCounted`s constructed nowhere, so **the player cannot build anything in the shipped game** (scheduled Sprint 11). Story 001 carries a NEEDS-DECISION flag (main-menu boot-flow conflict; does not block M01).
 
 ## Overview
 
@@ -83,6 +83,7 @@ This epic is complete when:
 | 004 | **GameWorld scene assembly + headless E2E LOOP test — THE INTEGRATION CROWN** (criterion #8) | Integration | Ready | ADR-0001, ADR-0005, ADR-0013 |
 | 005 | **World genesis in the boot sequence — terrain, roster and nav graph before ACTIVE** (the Valley boots an EMPTY grid today) | Integration | Ready | ADR-0005, ADR-0015, ADR-0014, ADR-0001 |
 | 006 | **Villager need seeding in the boot sequence** — a spawned villager carries REAL need records before ACTIVE (`NeedsMood.initialize_villager()` is called nowhere today) | Integration | Ready | ADR-0005, ADR-0001, ADR-0002 |
+| 007 | **Build-tool & project-lifecycle hosting in the Valley scene** — the player can actually build (the whole build-interaction tier is in no scene today) | Integration | Ready | ADR-0005, ADR-0001, ADR-0016, ADR-0010 |
 
 Dependency order: 001 → 002 → 003 (closed 3/3 after S3). **Story 004 (added 2026-07-24, Sprint 6)** re-opens the epic to assemble grid+mesher+camera+building+villager into GameWorld's `injected_tier_modules` and land the headless E2E LOOP test — it depends on Building (021+029) and Villager AI (009) reaching the place-a-block and villager-walk seams, plus the DONE mesher (vox-007), residency (vox-010), World Root (001), and GameWorld DI scaffold (spine-001). It closes the integration-to-playable / E2E LOOP gap the Milestone 01 Feature List named but never storyed.
 
@@ -112,6 +113,25 @@ driving an already-landed needs-mood surface. `needs_mood.gd` is expected not to
 epic's running record of this pattern (generate_terrain → spawn_starting_roster → initialize_villager) and the
 rule it establishes: **a new production API needs a proven caller in the same sprint, or it is dead code with
 green tests.** Depends on nothing unlanded.
+
+**Story 007 (added 2026-07-27, Sprint 11)** re-opens the epic a fourth time, for the **fourth occurrence of the
+pattern stories 005 and 006 fixed three times before it** — and the first that is not one API but an entire
+subsystem. `Valley.tscn` hosts 12 injected-tier modules; `BuildEditorMode`, `WallTool`, `FloorTool`, `RoofTool`,
+`BlockTool`, `FurnitureTool`, `GhostPreview` and `UndoRedoStack` are `Node`s in **no scene**, and
+`BuildProjectRegistry`, `ConstructionJobQueue` and `PlanOnlyUndoGate` are `RefCounted` and **constructed nowhere
+in `src/`**. Every one is fully implemented and green-tested. **Consequence: in the running game the player
+cannot build anything** — `CommitPipeline` runs on its own deliberately-labelled placeholder cell-set resolver,
+the blueprint cells it creates belong to no project because nothing listens to `blueprint_cells_created`, and
+`VillagerAi.job_queue` is never assigned. building-ui's **Known Conflict 3** recorded this on 2026-07-26 and it
+**survived `building-001` (build/editor mode) landing on top of it**. It lives here rather than in
+`building-system` for the same reason 005 and 006 did: the deliverable is a **scene-topology and boot-phase
+change** in `Valley.tscn` / `valley.gd` / `game_world.gd` under ADR-0005 and ADR-0001 — this epic's own governing
+ADRs and own files — driving already-landed Building System surfaces. It authors no tool formula, no grouping
+rule and no lifecycle transition. It is also the story that answers, for the tool tier, the **same architectural
+question** the technical-director's outstanding HUD-hosting ruling (building-ui KC1/KC3) and sprint-11's open
+decision **D9** ask: which scene owns a node that is neither a world object nor a config Resource. Depends on
+nothing unlanded; sequenced last on Sprint 11's demolition lane so it hosts `building-031`'s removal tool in the
+same pass.
 
 MVP scope only — multi-scene (ADR-0013) and savepoint binding (ADR-0012) are VS-tier, deferred to Milestone 02+.
 
