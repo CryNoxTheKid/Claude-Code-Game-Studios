@@ -115,3 +115,42 @@ plausible-looking evidence is 0 for 5.
 
 The ADR-0009 climb mutations still carry the ascent. The TD's retirement
 criterion (both zero) remains far off, and this story never claimed to reach it.
+
+---
+
+## The roof regression is REAL — repeated on a quiet machine (2026-07-28)
+
+The caveat above said the roof number could not be trusted because two foreign
+Godot processes were competing. Repeated with none running:
+
+    construction result: 27 / 29 wall cells reached BUILT
+    roof construction result: 0 / 12 cells reached BUILT
+    scaffold cells standing at roof stage: 19
+    bed construction result: 2 / 2 cells reached BUILT
+    stage 7 (sleep): villager id=0 is SLEEPING at (993, 6, 1002)
+    credited per-tick recovery delta = 0.3500 -> UNSHELTERED
+
+Byte-for-byte the same outcome as the contended run. **So the regression is
+mine, not the machine's.** Roof 10/12 before this change, 0/12 after.
+
+### The trade, stated plainly
+
+GAINED — descent works (villager off the roof, eleven-step path home; off the
+crown, y=6 instead of y=9), three more wall cells (24->27 of 29), the first
+completed bed ever, and the payoff loop's stages 6 and 7 reached for the first
+time: the villager claims a bed it built itself and sleeps in it.
+
+LOST — the roof, entirely.
+
+### Most likely cause, held as a HYPOTHESIS and not a finding
+
+Nineteen to twenty-one scaffold cells are real construction jobs, and there is
+exactly one villager. The attention that used to reach the roof now goes into
+building the scaffolding that gets the villager down. If that is right, the fix
+is not to weaken the descent trigger but to stop erecting scaffolding the
+villager does not need — or to let a descent scaffold be cheaper than a wall.
+
+Tonight's record for hypotheses that read plausibly is 0 for 5, so this is
+written down to be TESTED, not acted on. The cheapest test: count how many of
+the 19 standing cells are descent scaffolds versus job scaffolds, and how many
+ticks each consumed.
