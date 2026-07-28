@@ -136,7 +136,7 @@ func _make_shipped_shape_config() -> VoxelWorldConfig:
 func _reachable_band_ids(config: VoxelWorldConfig) -> Array[int]:
 	var reachable: Dictionary[int, bool] = {}
 	for y in range(config.min_y, config.max_y + 1):
-		reachable[VoxelWorldGrid._pure_band_id_for_height(y, config.band_ids, config.band_boundaries)] = true
+		reachable[VoxelWorldGrid._pure_band_id_for_height(y, config.band_ids, config.effective_band_boundaries())] = true
 	var ids: Array[int] = reachable.keys()
 	ids.sort()
 	return ids

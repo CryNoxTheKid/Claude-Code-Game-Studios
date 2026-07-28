@@ -658,7 +658,7 @@ func generate_terrain() -> void:
 		for z in config.world_depth_cells:
 			var height: int = _terrain_height(x, z, noise)
 			for y in range(config.min_y, height + 1):
-				var block_type_id: int = VoxelWorldGrid._pure_band_id_for_height(y, config.band_ids, config.band_boundaries)
+				var block_type_id: int = VoxelWorldGrid._pure_band_id_for_height(y, config.band_ids, config.effective_band_boundaries())
 				changes[Vector3i(x, y, z)] = CellContents.new(block_type_id, TERRAIN_MATERIAL_ID)
 	bulk_write(changes)
 	_state = GridState.GENERATED
@@ -1771,7 +1771,7 @@ func _try_dispatch_read(chunk_key: Vector2i) -> bool:
 			Callable(self, "_bg_regenerate_from_seed").bind(
 				chunk_key, config.terrain_seed, config.base_height, config.amplitude, config.frequency,
 				config.min_y, config.max_y, config.world_width_cells, config.world_depth_cells,
-				config.band_ids.duplicate(), config.band_boundaries.duplicate()
+				config.band_ids.duplicate(), config.effective_band_boundaries()
 			)
 		)
 	_read_tasks[chunk_key] = task_id

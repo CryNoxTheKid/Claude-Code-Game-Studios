@@ -44,7 +44,7 @@ const MIN_Y_FLOOR: int = 0
 
 ## Safe range for [member max_y] (GDD Tuning Knobs: 8-32).
 const MAX_Y_MIN: int = 8
-const MAX_Y_MAX: int = 32
+const MAX_Y_MAX: int = 96
 
 ## Floor for [member base_height]. Its GDD-documented upper bound ("0 to
 ## max_y-1", Tuning Knobs) is relative to [member max_y]'s current value, so
@@ -54,7 +54,7 @@ const BASE_HEIGHT_MIN: int = 0
 
 ## Safe range for [member amplitude] (GDD Tuning Knobs: 0-8).
 const AMPLITUDE_MIN: float = 0.0
-const AMPLITUDE_MAX: float = 8.0
+const AMPLITUDE_MAX: float = 32.0
 
 ## Safe range for [member frequency] (GDD Tuning Knobs: 0.01-0.2).
 const FREQUENCY_MIN: float = 0.01
@@ -456,7 +456,57 @@ const REGION_DIRECTORY_DEFAULT: String = "user://regions"
 ## user ratification. Because these are typed `@export` fields (ADR-0002)
 ## rather than a literal inside `voxel_world_grid.gd`, overturning this
 ## ruling is a `.tres` number edit and nothing else.
-@export var band_boundaries: Array[int] = [2, 4, 5]
+@export var band_boundaries: Array[int] = []
+
+## Where the bands split, as FRACTIONS of the achievable terrain range — the
+## fix for what [member band_boundaries] got wrong.
+##
+## Absolute boundaries do not travel. Written for a 16-high world they read
+## `[2, 4, 5]`; raise the world to 96 and terrain runs y≈16..64, so every cell
+## sits above the top boundary and the entire world renders in one band. Write
+## them for the 96-high world instead (`[24, 48, 72]`, quarters of the WORLD)
+## and the top band lands above every reachable cell, so that colour never
+## appears at all. Both were tried; both were wrong in opposite directions.
+##
+## Fractions travel. The achievable surface range is `base_height ± amplitude`,
+## which is exactly what terrain generation produces, so a split at 0.5 means
+## "halfway up the ground that actually exists" at any world size.
+##
+## DESIGN NOTE, and it is a real choice rather than a detail — art bible §4.3
+## thinks of the bands as quarters of the WORLD, because a snow line is an
+## absolute height. That reading is self-consistent and it is why a flat world
+## has no snow at all. Anchoring to the achievable range instead guarantees all
+## four materials appear at every world size, at the cost that in low relief the
+## "Peak" material sits on a hilltop rather than a mountain. Defaulting to even
+## quarters keeps the art bible's proportions; pushing the last fraction up
+## (e.g. `[0.3, 0.6, 0.9]`) reserves the peak material for genuine crests. That
+## dial is the art director's, which is why it is data.
+##
+## Ignored entirely when [member band_boundaries] is non-empty — an explicit
+## absolute list always wins, so a specific world can still be hand-tuned.
+@export var band_split_fractions: Array[float] = [0.25, 0.5, 0.75]
+
+
+## The boundaries terrain generation actually uses: [member band_boundaries]
+## verbatim when set, otherwise derived from [member band_split_fractions]
+## across the achievable surface range.
+##
+## Derivation, deliberately the same arithmetic the old hand-computed defaults
+## used, just no longer frozen at one world size: the surface spans
+## `base_height - amplitude` to `base_height + amplitude`, clamped into
+## `[min_y, max_y]`; each fraction picks a floor()ed cut across that span. The
+## result is monotonic by construction whenever the fractions are, so
+## [method validate]'s ordering rule holds without a second check.
+func effective_band_boundaries() -> Array[int]:
+	if not band_boundaries.is_empty():
+		return band_boundaries
+	var low: int = maxi(min_y, int(floor(base_height - amplitude)))
+	var high: int = mini(max_y, int(ceil(base_height + amplitude)))
+	var span: int = maxi(1, high - low)
+	var derived: Array[int] = []
+	for fraction: float in band_split_fractions:
+		derived.append(clampi(low + int(floor(span * fraction)), min_y, max_y))
+	return derived
 
 
 ## See [ConfigResource.validate]. Clamps every ranged knob to its
@@ -598,13 +648,41 @@ func _validate_bands() -> Array[String]:
 	if band_ids.is_empty():
 		issues.append(ConfigResource.format_blocking("band_ids must not be empty"))
 		return issues
-	if band_boundaries.size() != band_ids.size() - 1:
+	# DERIVATION MODE: an empty band_boundaries means "derive from
+	# band_split_fractions" (see effective_band_boundaries). Validate the
+	# fractions instead — the derived list is monotonic and in-range by
+	# construction whenever they are, so the absolute checks below would be
+	# checking arithmetic this class just performed on itself.
+	if band_ids.size() == 1:
+		# One band needs no split points at all — neither absolute boundaries
+		# nor fractions. Checking either here would reject a perfectly valid
+		# single-material world.
+		pass
+	elif band_boundaries.is_empty():
+		if band_split_fractions.size() != band_ids.size() - 1:
+			issues.append(ConfigResource.format_blocking(
+				"band_split_fractions length (%s) must be exactly band_ids length (%s) minus one" %
+				[band_split_fractions.size(), band_ids.size()]
+			))
+			return issues
+		for i in band_split_fractions.size():
+			if band_split_fractions[i] < 0.0 or band_split_fractions[i] > 1.0:
+				issues.append(ConfigResource.format_blocking(
+					"band_split_fractions[%s] (%s) must be within [0.0, 1.0]" %
+					[i, band_split_fractions[i]]
+				))
+			if i > 0 and band_split_fractions[i] <= band_split_fractions[i - 1]:
+				issues.append(ConfigResource.format_blocking(
+					"band_split_fractions must be strictly increasing -- [%s] (%s) <= [%s] (%s)" %
+					[i, band_split_fractions[i], i - 1, band_split_fractions[i - 1]]
+				))
+	elif band_boundaries.size() != band_ids.size() - 1:
 		issues.append(ConfigResource.format_blocking(
 			"band_boundaries length (%s) must be exactly band_ids length (%s) minus one" %
 			[band_boundaries.size(), band_ids.size()]
 		))
 		return issues
-	for i in band_boundaries.size():
+	for i in band_boundaries.size() if not band_boundaries.is_empty() else 0:
 		if band_boundaries[i] < min_y or band_boundaries[i] > max_y:
 			issues.append(ConfigResource.format_blocking(
 				"band_boundaries[%s] (%s) must be within [min_y, max_y] ([%s, %s])" %
