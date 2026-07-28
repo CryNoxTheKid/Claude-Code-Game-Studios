@@ -1283,3 +1283,52 @@ Cheapest next measurement, and it should come before any code: print
 `_on_job_reported_unreachable`, and run once. Reading the planner will not
 settle it — three hypotheses were read confidently tonight and all three were
 refuted by bisect.
+
+---
+
+## The roof stall is a MISSING DOOR, not a scaffolding defect (2026-07-28)
+
+One print, one run, and the answer is not what any of the three earlier
+hypotheses guessed.
+
+    SCAFFDIAG cell=(993, 9, 1002) seen=3 PLANNED=true cells=1
+    SCAFFDIAG cell=(993, 9, 1003) seen=3 PLANNED=true cells=1
+    scaffold cells standing at roof stage: 0
+
+Exactly TWO roof cells ever report unreachable — the two interior ones, which
+matches 10/12 precisely. Both clear the persistence gate. Both PLAN
+SUCCESSFULLY. And yet nothing is standing when the roof stage reports.
+
+The coordinates settle it. The demo's four wall segments enclose x 992..994,
+z 1001..1004, so the interior is the single column x=993, z=1002..1003 — exactly
+where the two missing roof cells are. Their scaffold support would have to stand
+INSIDE that interior.
+
+And the interior is sealed. The 30/30 wall success closed the room completely:
+four segments, no gap, **no door**. No villager can get in, so the scaffold cell
+is never built, so the roof over the middle is never finished.
+
+**This is not a scaffolding defect.** Erection detected the need, cleared its own
+gate, and produced a valid plan. The structure it planned simply sits in a room
+nobody can enter. Scaffolding behaved correctly throughout.
+
+### What it actually says about the game
+
+A room with no door is not a house. Real settlements leave a doorway, and this
+demo never did — it drew four solid walls because that was the simplest thing to
+draft. The building system has no door concept yet, and until it does, the demo
+should leave a deliberate one-cell gap at ground level in one segment. That is a
+DEMO change, not a system change, and it is the smallest thing standing between
+this tool and a finished roofed room.
+
+Worth noticing: this defect was invisible while the walls stalled at 27/30,
+because an unfinished wall IS a doorway. Fixing the walls is what sealed the
+room. Every fix tonight has exposed the next problem one layer up — walls, then
+descent, then entry.
+
+### Next step, specified
+
+Give the demo's wall drafting a doorway: skip the ground-level cell of one
+segment (or draft that segment as two pieces with a one-cell gap), report the
+door cell explicitly so the frame can be read, and re-run. Expect the roof to
+complete and the bed/claim/sleep stages to become reachable for the first time.
