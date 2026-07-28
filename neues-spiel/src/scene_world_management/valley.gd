@@ -963,7 +963,30 @@ class _ValleyRosterProvider:
 	func get_villagers() -> Array[VillagerAi]:
 		return _valley.get_villagers()
 
+	## Story villager-ai-025 -- [ScaffoldErectionCoordinator]'s own
+	## villager-descent trigger duck-types this SAME provider for its
+	## settlement-ground reference (see [member Valley._settlement_ground_cell]'s
+	## own doc comment), rather than adding a second small adapter class.
+	func get_settlement_ground_cell() -> Vector3i:
+		return _valley.get_settlement_ground_cell()
+
+	func has_settlement_ground_cell() -> bool:
+		return _valley.has_settlement_ground_cell()
+
 var _villager_roster_provider: _ValleyRosterProvider = null
+
+## Story villager-ai-025 -- the settlement's own standable-ground reference
+## cell, resolved by [method build_villager_nav_graph] (see that method's own
+## new paragraph) from the SAME `region_center` genesis already anchors the
+## camera/nav graph/starting roster on -- never a second, independently-
+## chosen anchor. `Vector3i.ZERO`/unset until genesis actually runs; [member
+## _has_settlement_ground_cell] is the honest presence flag ([method
+## get_settlement_ground_cell] callers must check [method
+## has_settlement_ground_cell] first -- this codebase's own established
+## "optional value + honest presence flag" precedent, never a sentinel
+## coordinate).
+var _settlement_ground_cell: Vector3i = Vector3i.ZERO
+var _has_settlement_ground_cell: bool = false
 
 ## The shared, population-wide [VillagerNavGraph] instance [method
 ## _wire_villager_population] constructs -- exposed read-only for tests/
@@ -1158,6 +1181,12 @@ func _assert_scaffold_boot_invariant() -> void:
 		_scaffold_dismantle_coordinator != null,
 		"Valley must construct exactly one ScaffoldDismantleCoordinator"
 	)
+	assert(
+		_scaffold_erection_coordinator.nav_graph == _villager_nav_graph,
+		"Valley: ScaffoldErectionCoordinator.nav_graph must be wired to the SAME hosted" +
+		" VillagerNavGraph instance -- never left null (Story villager-ai-025's own" +
+		" villager-descent trigger silently never fires without it)"
+	)
 	assert(_scaffold_presentation != null, "Valley must host exactly one ScaffoldPresentation instance")
 	assert(
 		_scaffold_presentation.scaffold_registry == _scaffold_registry,
@@ -1245,17 +1274,24 @@ func _wire_build_project_lifecycle() -> void:
 	_scaffold_registry = ScaffoldRegistry.new()
 	_construction_tick_loop.scaffold_registry = _scaffold_registry
 	_scaffold_presentation.scaffold_registry = _scaffold_registry
-	# DIAGNOSTIC PROBE — temporary, reverted after the run.
-	_scaffold_erection_coordinator = ScaffoldErectionCoordinator.new(
-		_voxel_world, _scaffold_registry, _build_project_registry, _construction_job_queue,
-		_furniture_registry, scaffold_config,
-	)
 	# The clock comes FROM the tick loop, never resolved here. Scene & World
 	# Management is forbidden to reference TimeTickSystem at all — there is a
 	# grep guard on this directory — and ConstructionTickLoop already resolves
 	# and holds the same instance during its own setup, so reading it back is
-	# both compliant and a guarantee that the two coordinators share one clock
-	# rather than racing two.
+	# both compliant and a guarantee that every scaffold-tier collaborator
+	# shares one clock rather than racing several. Story villager-ai-025 wires
+	# the SAME roster provider [VillagerBodyPresenter] already uses (see class
+	# doc comment) into the erection coordinator's own new villager-descent
+	# trigger here -- its own clock subscription and `nav_graph` cross-wire
+	# both happen LATER (see [method connect_scaffold_erection_descent_trigger]/
+	# [method _wire_villager_population]'s own new paragraphs): neither
+	# [member _construction_tick_loop]'s own [member
+	# ConstructionTickLoop.time_tick_system] NOR [member _villager_nav_graph]
+	# exists yet at this exact point in `_ready()`.
+	_scaffold_erection_coordinator = ScaffoldErectionCoordinator.new(
+		_voxel_world, _scaffold_registry, _build_project_registry, _construction_job_queue,
+		_furniture_registry, scaffold_config, _villager_roster_provider,
+	)
 	_scaffold_dismantle_coordinator = ScaffoldDismantleCoordinator.new(
 		_build_project_registry, _construction_tick_loop, _scaffold_registry,
 		_villager_roster_provider, _construction_tick_loop.time_tick_system,
@@ -1356,6 +1392,15 @@ func _wire_villager_population() -> void:
 	# nav graph through (a scaffold write is never a VoxelWorldGrid write, so
 	# [signal VoxelWorldGrid.cell_changed] never fires for it).
 	_villager_nav_graph.subscribe_to_scaffold_registry(_scaffold_registry, _villager_ai)
+	# Story villager-ai-025 -- the erection coordinator's own per-tick
+	# marooned-villager descent check needs this SAME shared nav graph; not
+	# constructible earlier ([method _wire_build_project_lifecycle], which
+	# already constructed the coordinator, runs strictly BEFORE this method --
+	# see `_ready()`'s own call order), so it is cross-wired here instead,
+	# mirroring [member _furniture_presenter]'s own established "assigned
+	# once its own dependency exists" precedent (see [method
+	# _wire_build_project_lifecycle]'s own doc comment).
+	_scaffold_erection_coordinator.nav_graph = _villager_nav_graph
 
 
 ## Returns the hosted Voxel World / Grid Data instance.
@@ -1424,6 +1469,20 @@ func get_needs_mood() -> NeedsMood:
 ## _wire_villager_population] constructs (fulfilling the "exposed read-only
 ## for... a future world-generation story" promise [member
 ## _villager_nav_graph]'s own doc comment already made -- this IS that story).
+## Returns the settlement's own standable-ground reference cell (Story
+## villager-ai-025) -- callers MUST check [method has_settlement_ground_cell]
+## first; this returns `Vector3i.ZERO` (a real, potentially-misleading cell
+## address) before genesis has run.
+func get_settlement_ground_cell() -> Vector3i:
+	return _settlement_ground_cell
+
+
+## Whether [method build_villager_nav_graph] has ever resolved a real
+## settlement-ground reference cell (Story villager-ai-025).
+func has_settlement_ground_cell() -> bool:
+	return _has_settlement_ground_cell
+
+
 func get_villager_nav_graph() -> VillagerNavGraph:
 	return _villager_nav_graph
 
@@ -1456,6 +1515,36 @@ func build_villager_nav_graph(region_center: Vector3i) -> void:
 	if villager_ai_config != null:
 		region_size = villager_ai_config.nav_region_size
 	_villager_nav_graph.build(_voxel_world, _villager_ai, region_center, region_size)
+	# Story villager-ai-025 -- a real standable ground cell near the SAME
+	# center genesis already anchors the camera/nav graph/roster on (never a
+	# second, independently-chosen anchor), resolved the SAME way
+	# spawn_starting_roster's own ring search already finds real standable
+	# placement cells (VillagerRosterSpawner.select_starting_cells) --
+	# region_center itself is only a Y-midpoint guess (that method's own doc
+	# comment), never itself guaranteed standable.
+	var ground_candidates: Array[Vector3i] = VillagerRosterSpawner.select_starting_cells(
+		_voxel_world, region_center, 1
+	)
+	if not ground_candidates.is_empty():
+		_settlement_ground_cell = ground_candidates[0]
+		_has_settlement_ground_cell = true
+
+
+## Story villager-ai-025 -- connects [ScaffoldErectionCoordinator]'s own
+## villager-descent trigger to the real clock, deferred to this call site for
+## the SAME reason [method build_villager_nav_graph] already is: called from
+## [method GameWorld._run_world_genesis], strictly AFTER `_setup_injected_tier()`
+## has already run [method ConstructionTickLoop.setup] -- see [method
+## ScaffoldErectionCoordinator.connect_tick]'s own doc comment for the full
+## "reading [member ConstructionTickLoop.time_tick_system] any earlier reads
+## it while still null" finding this call site exists to avoid.
+func connect_scaffold_erection_descent_trigger() -> void:
+	_scaffold_erection_coordinator.connect_tick(_construction_tick_loop.time_tick_system)
+	# The dismantle coordinator needs the same deferred connection, and for the
+	# same reason: its constructor-time attempt ran before ConstructionTickLoop
+	# resolved its own clock, so the tick was silently never connected and
+	# SC-INV-2's deferred retry could never fire in the shipped game.
+	_scaffold_dismantle_coordinator.connect_tick(_construction_tick_loop.time_tick_system)
 
 
 ## Seeds [member _villager_ai] (villager_id 0, the always-present default)

@@ -452,6 +452,15 @@ func _run_world_genesis() -> void:
 		@warning_ignore("unsafe_method_access")
 		_valley.build_villager_nav_graph(start_focus)
 
+	# Story villager-ai-025 -- connects ScaffoldErectionCoordinator's own
+	# villager-descent trigger to the real clock, deferred to here for the
+	# SAME reason build_villager_nav_graph is: ConstructionTickLoop.setup()
+	# (called by _setup_injected_tier(), above this method in
+	# _on_database_settled) has only just resolved time_tick_system by now.
+	if _valley.has_method(&"connect_scaffold_erection_descent_trigger"):
+		@warning_ignore("unsafe_method_access")
+		_valley.connect_scaffold_erection_descent_trigger()
+
 	# Story scene-006 (AC-SEED-NOT-FROM-READY, AC-SEED-AFTER-SETUP): the
 	# always-present default villager's need seeding -- deliberately NOT
 	# reachable from Valley._ready()/_wire_villager_population(), reached

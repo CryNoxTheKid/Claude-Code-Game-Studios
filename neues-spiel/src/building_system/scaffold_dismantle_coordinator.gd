@@ -96,11 +96,31 @@ func _init(
 	_roster_provider = roster_provider
 	_construction_tick_loop.construction_completed.connect(_on_construction_completed)
 	_construction_tick_loop.demolition_completed.connect(_on_demolition_completed)
-	if time_tick_system != null:
+	connect_tick(time_tick_system)
+
+
+## Connects the per-tick re-poll, separately from construction.
+##
+## THIS EXISTS BECAUSE THE CONSTRUCTOR-TIME VERSION SILENTLY DID NOTHING.
+## Valley builds this coordinator during _wire_build_project_lifecycle, and at
+## that moment ConstructionTickLoop has not run its own setup yet — so its
+## `time_tick_system` is still null, the connection was skipped, and the tick
+## re-poll never happened in the shipped game. Caught by a diagnostic print
+## reading `dismantle_connected=false` on a real boot; no test covered it,
+## because the SC-INV-2 test asserts the DEFERRAL DECISION and the two
+## construction/cancel signals, never the tick that retries a deferred owner.
+## The consequence was precise and invisible: a dismantle deferred because a
+## builder was still up there would never have been retried at all.
+##
+## Safe to call more than once and safe to call with null — it simply does
+## nothing until a real clock is passed.
+func connect_tick(time_tick_system: Object) -> void:
+	if time_tick_system == null:
+		return
+	@warning_ignore("unsafe_property_access")
+	if not time_tick_system.tick.is_connected(_on_tick):
 		@warning_ignore("unsafe_property_access")
-		if not time_tick_system.tick.is_connected(_on_tick):
-			@warning_ignore("unsafe_property_access")
-			time_tick_system.tick.connect(_on_tick)
+		time_tick_system.tick.connect(_on_tick)
 
 
 ## Trigger 1 (AC3) -- see class doc comment point 1. Fires on EVERY

@@ -308,6 +308,29 @@ func _run_demo() -> void:
 	print("payoff_loop_demo: REPORT — TOTAL wall cells drafted: %d (expected up to %d = 10 perimeter cells x wall_height %d)" % [
 		wall_cells.size(), 10 * wall_height, wall_height,
 	])
+
+	# ---- Story villager-ai-025 lever 1 geometry: a ground-level doorway ----
+	# Erases ONE ground-layer, non-corner wall cell via the REAL RemovalTool
+	# (Branch 1 -- Draft/not-yet-released, instant cancel, no job ever
+	# created) — what a player does before starting construction. Without
+	# this the room seals completely and lever 1 (the crown stall) never
+	# reproduces (a fully sealed room gives 30/30; the story's own measured
+	# stall needs the opening).
+	var door_cell: Vector3i = anchor + Vector3i(0, 0, 1)
+	var removal_tool: RemovalTool = valley.get_removal_tool()
+	var door_removed: bool = removal_tool.remove_cell(door_cell)
+	if door_removed:
+		var filtered_wall_cells: Array[BlueprintCell] = []
+		for c: BlueprintCell in wall_cells:
+			if c.cell != door_cell:
+				filtered_wall_cells.append(c)
+		wall_cells = filtered_wall_cells
+		print("payoff_loop_demo: REPORT — DOORWAY (villager-ai-025 lever 1): erased ground cell %s via the real RemovalTool before release. Remaining wall cells: %d." % [
+			door_cell, wall_cells.size(),
+		])
+	else:
+		print("payoff_loop_demo: REPORT — DOORWAY (villager-ai-025 lever 1): RemovalTool.remove_cell(%s) returned false — no doorway created this run." % door_cell)
+
 	await _shoot_through_game_camera("02-drafted")
 
 	# ---- Release the project(s) -----------------------------------------
@@ -324,7 +347,7 @@ func _run_demo() -> void:
 	# cell while the claiming villager is actually on site. This tool
 	# observes and reports whatever that real, now-honest behavior actually
 	# produces — it does not paper over it either way.
-	await _wait_for_built(wall_cells, WALL_WAIT_CAP_SEC, "room walls", valley, villager)
+	await _wait_for_built(wall_cells, WALL_WAIT_CAP_SEC, "room walls", valley, villager, villager_cell)
 	var built_wall_count: int = _count_built(wall_cells)
 	print("payoff_loop_demo: REPORT — construction result: %d / %d wall cells reached BUILT" % [built_wall_count, wall_cells.size()])
 	print("payoff_loop_demo: REPORT — villager after construction wait: state=%s pursued_activity=%s current_cell=%s" % [
@@ -342,7 +365,15 @@ func _run_demo() -> void:
 	# Room candidate. This stage builds the roof through the SAME real
 	# RoofTool -> CommitPipeline -> ConstructionTickLoop chain the walls just
 	# went through -- never a direct VoxelWorldGrid write.
-	await _attempt_roof_stage(valley, anchor, wall_height, villager, build_editor_mode, commit_pipeline, placement_pick, build_project_registry)
+	await _attempt_roof_stage(valley, anchor, wall_height, villager, build_editor_mode, commit_pipeline, placement_pick, build_project_registry, villager_cell)
+
+	# Story villager-ai-025 Anti-Vacuity Lever 2 (ROOF) -- AC1's own wording,
+	# verbatim: "after ANY construction job completes, the claiming villager
+	# has a path back to standable settlement ground." Checked here,
+	# regardless of whether the roof stage above reached DONE or its own wait
+	# cap — the story's own measured finding is that the villager finishes at
+	# y=10 with an EMPTY path either way.
+	_report_roof_descent_lever(valley, villager, villager_cell)
 
 	# BuildValidation prominent finding — printed here because this is
 	# exactly the moment a human would ask "is the room sheltered now?"
@@ -417,14 +448,30 @@ func _release_projects_for(blueprint_cells: Array[BlueprintCell], registry: Buil
 ## frame this loop waits, so a GROUND (D10) sleep episode occurring mid-
 ## construction is recorded even though this method's own focus is the
 ## build, not the villager's needs.
+## Story villager-ai-025 -- [param ground_cell] is a real standable cell (the
+## villager's OWN pre-build spawn cell, captured once at the very start of
+## this run, before anything was built) used ONLY as the Anti-Vacuity Lever
+## 1 diagnostic's own "is the villager stranded above the structure" probe
+## (see [method _stall_diag]) -- optional (defaults to a sentinel meaning "no
+## lever 1 diagnostic this call"), so the bed-furniture stage below can keep
+## calling this method unchanged.
+const _NO_GROUND_CELL := Vector3i(-2147483648, -2147483648, -2147483648)
+
+
 func _wait_for_built(
-	blueprint_cells: Array[BlueprintCell], cap_sec: float, label: String, valley: Node, villager: VillagerAi
+	blueprint_cells: Array[BlueprintCell], cap_sec: float, label: String, valley: Node, villager: VillagerAi,
+	ground_cell: Vector3i = _NO_GROUND_CELL,
 ) -> void:
 	if blueprint_cells.is_empty():
 		return
 	var start_usec: int = Time.get_ticks_usec()
 	var deadline_usec: int = start_usec + int(cap_sec * 1000000.0)
 	var last_report_usec: int = start_usec
+	# Story villager-ai-025 -- the LAST PERIODIC sample's built count, so the
+	# STALLDIAG probe below fires only when the count did NOT advance between
+	# two 5s samples ("at every poll where the built count does not advance"),
+	# never on every single frame this loop spins.
+	var last_periodic_built_count: int = -1
 	while true:
 		_sample_sleep_transition(valley, villager)
 		var built_count: int = _count_built(blueprint_cells)
@@ -444,7 +491,31 @@ func _wait_for_built(
 			print("payoff_loop_demo: REPORT — %s: still waiting — %d/%d BUILT, %0.1fs elapsed" % [
 				label, built_count, blueprint_cells.size(), (now_usec - start_usec) / 1000000.0,
 			])
+			if ground_cell != _NO_GROUND_CELL and built_count == last_periodic_built_count:
+				_stall_diag(label, blueprint_cells, villager)
+			last_periodic_built_count = built_count
 		await get_tree().process_frame
+
+
+## Story villager-ai-025 Anti-Vacuity Lever 1 (CROWN) -- printed (never a
+## crashing engine `assert()`, so this run continues on to record Lever 2's
+## own evidence too, in the SAME run, per the story's own "record BOTH
+## observed failures verbatim... neither can mask the other" instruction)
+## every time [method _wait_for_built]'s own periodic sample finds the built
+## count unchanged since the LAST sample -- "measure in the stall window,"
+## never the run's aftermath. Reports the villager's current cell/state and
+## up to 5 still-pending (non-BUILT) cells, the same evidence shape this
+## story's own commit body records.
+func _stall_diag(label: String, blueprint_cells: Array[BlueprintCell], villager: VillagerAi) -> void:
+	var pending: Array[Vector3i] = []
+	for cell: BlueprintCell in blueprint_cells:
+		if cell.state != BlueprintCell.MicroState.BUILT:
+			pending.append(cell.cell)
+			if pending.size() >= 5:
+				break
+	print("payoff_loop_demo: STALLDIAG %s villager=%s state=%d pending=%d %s" % [
+		label, str(villager.get_current_cell()), villager.get_state(), pending.size(), str(pending),
+	])
 
 
 func _count_built(blueprint_cells: Array[BlueprintCell]) -> int:
@@ -558,7 +629,8 @@ func _attempt_roof_stage(
 	build_editor_mode: BuildEditorMode,
 	commit_pipeline: CommitPipeline,
 	placement_pick: PlacementPick,
-	build_project_registry: BuildProjectRegistry
+	build_project_registry: BuildProjectRegistry,
+	villager_cell: Vector3i = _NO_GROUND_CELL,
 ) -> void:
 	var roof_tool: RoofTool = valley.get_roof_tool()
 	var roof_base: Vector3i = anchor + Vector3i(0, wall_height - 1, 0)
@@ -583,7 +655,7 @@ func _attempt_roof_stage(
 	var released_ids: Array[int] = _release_projects_for(roof_cells, build_project_registry)
 	print("payoff_loop_demo: REPORT — roof project(s) released: %s" % str(released_ids))
 
-	await _wait_for_built(roof_cells, ROOF_WAIT_CAP_SEC, "roof", valley, villager)
+	await _wait_for_built(roof_cells, ROOF_WAIT_CAP_SEC, "roof", valley, villager, villager_cell)
 	var built_roof_count: int = _count_built(roof_cells)
 	print("payoff_loop_demo: REPORT — roof construction result: %d / %d cells reached BUILT" % [built_roof_count, roof_cells.size()])
 	_report_scaffold_state("roof stage")
@@ -933,6 +1005,26 @@ func _find_camera(node: Node) -> Camera3D:
 		if found != null:
 			return found
 	return null
+
+
+## Story villager-ai-025 Anti-Vacuity Lever 2 (ROOF) -- see [method _run_demo]'s
+## own call-site comment. AC1's own wording, verbatim: "after ANY construction
+## job completes, the claiming villager has a path back to standable
+## settlement ground." [param settlement_ground_cell] is the villager's own
+## pre-build spawn cell (captured once, before anything was built) -- a real,
+## verified-standable cell, deliberately independent of any production API
+## this story's own fix might add, so this diagnostic compares identically
+## pre-fix and post-fix.
+func _report_roof_descent_lever(valley: Node, villager: VillagerAi, settlement_ground_cell: Vector3i) -> void:
+	var nav_graph: VillagerNavGraph = valley.get_villager_nav_graph() if valley.has_method("get_villager_nav_graph") else null
+	if nav_graph == null:
+		print("payoff_loop_demo: REPORT — ROOFDESCENT lever (villager-ai-025): no nav graph hosted, cannot check.")
+		return
+	var villager_cell_now: Vector3i = villager.get_current_cell()
+	var path: Array[Vector3i] = nav_graph.find_path(villager_cell_now, settlement_ground_cell)
+	print("payoff_loop_demo: REPORT — ROOFDESCENT lever (villager-ai-025 AC1/AC2): villager=%s state=%d find_path(villager, settlement_ground=%s).size()=%d empty=%s" % [
+		str(villager_cell_now), villager.get_state(), str(settlement_ground_cell), path.size(), str(path.is_empty()),
+	])
 
 
 func _save(image: Image, name_stem: String) -> void:
