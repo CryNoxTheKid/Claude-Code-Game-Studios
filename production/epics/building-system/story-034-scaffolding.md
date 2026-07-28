@@ -1386,3 +1386,45 @@ reverted instead of tuned until the numbers looked better.
 `building-system: doors` — a door component with the three properties above.
 Sized as a real story, not a patch. It blocks: the payoff loop's roof, therefore
 the bed, therefore `scene-009`, therefore milestone criterion #5 in the product.
+
+---
+
+## CORRECTION: my explanation for the doorway regression was unsupported (2026-07-28)
+
+The section above says the doorway run failed because "the villager walks INSIDE
+and builds from within" and seal prevention then refuses the closing cells. I
+wrote that as "the reading that fits". It does not fit — I checked the position
+data afterwards and it contradicts me:
+
+    villager after construction wait: state=3 pursued_activity=1
+    current_cell=(992, 9, 1004)
+
+y=9 with walls at 6..8 is ON TOP of the wall, not inside the room. The villager
+was never trapped in a closing shell. My explanation was a guess wearing the
+clothes of an analysis, and it is now in the permanent record, so it gets a
+correction rather than a quiet edit.
+
+**What remains measured and true:**
+ - Without a doorway: 30/30 walls, room sealed, the two interior roof cells need
+   scaffolding INSIDE, nothing can get in, roof stops at 10/12.
+ - With an improvised doorway: 24/29 walls. Worse. Reverted.
+ - Scaffolding's own contribution: 27/30 without erection, 30/30 with it.
+
+**What is NOT established: why the doorway made the walls worse.** Candidates,
+none tested: erasing a drafted cell may have re-partitioned the project or
+changed job ordering; the missing cell may have removed support the scaffold
+planner relied on; seal prevention may evaluate differently around an opening.
+Each is a hypothesis, and tonight's score for hypotheses formed by reading is
+0 for 4.
+
+**The door-concept conclusion still stands, but on the OTHER evidence** — the
+sealed-room measurement, which is direct: a finished room cannot be entered, and
+its interior roof therefore cannot be scaffolded. That does not depend on
+knowing why the improvised gap misbehaved. If anything, a gap that makes things
+worse in a way nobody can yet explain is a further argument that "leave a hole"
+is not a door.
+
+**Before the door story is written**, the doorway regression should be bisected
+like everything else tonight was: erase the cell but do NOT release, release but
+erase a different cell, and so on, until the boundary is named. Writing a door
+component on top of an unexplained regression would build on sand.
