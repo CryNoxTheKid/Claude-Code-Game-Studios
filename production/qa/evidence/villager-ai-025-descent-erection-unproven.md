@@ -1,4 +1,10 @@
-# villager-ai-025: the plumbing landed, the outcome did not
+# villager-ai-025: the plumbing landed, and the payload now measures POSITIVE
+
+> **UPDATED 2026-07-28** — the first valid post-fix measurement exists and it is
+> good. See the section at the bottom. The text below is kept as written,
+> because the sequence of what was known when is the useful part.
+
+# (original note) the plumbing landed, the outcome did not
 
 Third attempt at "A builder always has a way down". What holds and what does not,
 kept apart deliberately.
@@ -56,3 +62,56 @@ committed work, found only because a diagnostic printed
 
 Shipping the trigger as "wired, therefore working" would add another
 hosted-but-inert instance while fixing one. It is stated as plumbing.
+
+
+---
+
+## FIRST VALID POST-FIX MEASUREMENT (2026-07-28)
+
+The first run in which the descent trigger was actually connected.
+
+**CAVEAT FIRST, because it bounds what may be concluded:** two other Godot
+processes were already running when this started (the parallel biome session).
+Every wall-clock-CAPPED stage in this run was therefore competing for CPU.
+Position-based results are unaffected; stage completion counts are not
+trustworthy until this is repeated on a quiet machine.
+
+### Lever 2 — ROOF DESCENT: PASSES
+
+    before: villager=(994, 10, 1003)  find_path(...).size()=0   empty=true
+    after:  villager=(1008, 4, 1000)  find_path(...).size()=11  empty=false
+
+The villager is no longer on the roof. It is on the ground with an eleven-step
+path home. This is the guarantee the story exists for, and it holds.
+
+### Lever 1 — CROWN: improved, not yet passing
+
+    before: villager=(993, 9, 1004) state=5 pending=5  final 24/29
+    after:  villager=(998, 6, 1010) state=3 pending=2  final 27/29
+
+The builder is no longer marooned on the crown — y=6 is ground. Pending fell
+from five cells to two, and those two are `(992,7,1002)` and `(992,8,1002)`:
+exactly the pair above the erased door cell, floating with no support beneath
+them. That is a different problem from stranding.
+
+### The mechanism is visibly doing work
+
+    scaffold cells standing at roof stage: 21   (was 0)
+    bed construction result: 2 / 2 cells        (first time ever)
+
+### The regression that needs a quiet re-run
+
+    roof construction result: 0 / 12   (was 10 / 12)
+
+Either the scaffolding work is consuming the tick budget the roof used to get,
+or the run was simply starved by the two foreign Godot processes. **Both are
+plausible and neither is measured.** Do not conclude from this number until it
+is reproduced on an idle machine — tonight's record for concluding from
+plausible-looking evidence is 0 for 5.
+
+### Telemetry unchanged
+
+    self_seal_climb=40 marooned_relocation=11
+
+The ADR-0009 climb mutations still carry the ascent. The TD's retirement
+criterion (both zero) remains far off, and this story never claimed to reach it.
