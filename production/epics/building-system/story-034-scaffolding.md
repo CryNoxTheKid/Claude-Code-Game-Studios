@@ -1332,3 +1332,57 @@ Give the demo's wall drafting a doorway: skip the ground-level cell of one
 segment (or draft that segment as two pieces with a one-cell gap), report the
 door cell explicitly so the frame can be read, and re-run. Expect the roof to
 complete and the bed/claim/sleep stages to become reachable for the first time.
+
+---
+
+## A doorway makes it WORSE — the system needs a door concept (2026-07-28)
+
+The specified next step was to give the demo a doorway. Done, through the real
+`RemovalTool` (erasing a drafted ground cell is exactly what a player does after
+drawing a room), and measured:
+
+    doorway at (992, 6, 1002): erased
+    room walls: WAIT CAP (220s) hit with 24/29 cells BUILT
+    roof construction result: 9 / 12
+    bed construction result: 0 / 2
+
+Against 30/30 with no doorway. **The doorway made the walls worse**, and the
+change was reverted rather than kept.
+
+### Why, and why it matters more than the demo
+
+The most plausible reading, and it fits the numbers: with an opening the villager
+walks INSIDE and builds from within. As the remaining cells would close it in,
+seal prevention correctly refuses them — a builder must not trap itself. It has
+no rule that says "leave, then finish from outside", so the last cells never get
+built at all. Without a doorway it worked simply because the villager was never
+inside in the first place.
+
+**So the finding is not "the demo lacks a door". It is that the building system
+has no DOOR CONCEPT.** An improvised gap is not a door; it is a hole that
+disorders the build. A real door would be a component that
+
+ - room recognition treats as a legal opening rather than a breach, so an
+   enclosed room stays a Room with a door in it;
+ - the build plan knows to place LAST and from OUTSIDE, so a builder is never
+   inside a closing shell;
+ - seal prevention can reason about — right now it can only see that a write
+   would trap someone, never that a doorway means it would not.
+
+Until that exists, a finished room is either sealed (no entry, interior roof
+unbuildable) or open (builder trapped inside a shell it refuses to close). Both
+states are reachable today and neither is a house.
+
+### What still stands from this line of work
+
+Scaffolding itself remains correct and its contribution is still the measured
+27/30 -> 30/30 on the sealed-room geometry. Nothing here retracts that. The roof
+remains unfinished for a reason now fully understood, and the fix is a system
+story rather than a tool tweak — which is exactly why the demo change was
+reverted instead of tuned until the numbers looked better.
+
+### Recommended next story
+
+`building-system: doors` — a door component with the three properties above.
+Sized as a real story, not a patch. It blocks: the payoff loop's roof, therefore
+the bed, therefore `scene-009`, therefore milestone criterion #5 in the product.
