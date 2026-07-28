@@ -1428,3 +1428,45 @@ is not a door.
 like everything else tonight was: erase the cell but do NOT release, release but
 erase a different cell, and so on, until the boundary is named. Writing a door
 component on top of an unexplained regression would build on sand.
+
+---
+
+## The doorway regression, bisected: it is the OPENING, not the erase (2026-07-28)
+
+The correction above set a precondition — bisect this before writing a door
+story, or the story builds on sand. Done, in one run.
+
+Same project mutation, different geometry: erase the TOP cell of a wall column
+instead of the GROUND cell. One drafted cell removed either way; only one of them
+creates an opening a villager can walk through.
+
+    BISECT erase TOP cell (992, 8, 1002): erased
+    room walls: all 29 cells reached BUILT after 15.6s
+
+Against 24/29 when the erased cell was at ground level.
+
+**So the erase itself costs nothing.** Removing a cell from a released project
+does not re-partition it, does not disorder the jobs, and does not starve the
+scaffold planner — 29/29 in 15.6s is the same speed as the untouched 30/30 run.
+**The cost is the ground-level opening**, i.e. the fact that a villager can now
+get inside.
+
+That puts my original explanation back on the table — but this time on measured
+ground rather than as a guess. What refuted it earlier was the villager's
+position at the END of the wait (y=9, on top of a wall); that says nothing about
+where it was DURING the build, and I over-read it. The honest state is: an
+opening at ground level changes builder behaviour in a way that costs five wall
+cells, and the mechanism inside that window is still unmeasured.
+
+**Next measurement, one print:** log which cells remain unbuilt in the doorway
+run, and the villager's cell each time the wall count stalls. If the unbuilt
+cells cluster around the doorway, or the villager sits inside during the stall,
+the "builds from within, then correctly refuses to seal itself in" reading is
+confirmed and the door story can specify the fix precisely. If they do not, there
+is a third mechanism nobody has proposed yet.
+
+**What this already settles for the door story:** a hole is not a door, and now
+there is a number attached to it. An opening that a builder can enter is not a
+neutral gap in a wall — it changes how the wall gets built, measurably and for
+the worse. A door component therefore cannot be "a cell we skip"; it has to be
+something the build plan and the seal-prevention rule both understand.
