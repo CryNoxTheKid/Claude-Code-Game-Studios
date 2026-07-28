@@ -1470,3 +1470,65 @@ there is a number attached to it. An opening that a builder can enter is not a
 neutral gap in a wall — it changes how the wall gets built, measurably and for
 the worse. A door component therefore cannot be "a cell we skip"; it has to be
 something the build plan and the seal-prevention rule both understand.
+
+---
+
+## The stall window, measured: the builder is STRANDED ON TOP, never trapped inside (2026-07-28)
+
+One print, one run, and it settles what two readings of mine got wrong in
+opposite directions.
+
+    STALLDIAG room walls villager=(993, 9, 1004) state=5 pending=5
+      [(994,6,1004) (994,7,1004) (994,8,1004) (992,7,1002) (992,8,1002)]
+    STALLDIAG room walls villager=(992, 9, 1003) state=5 pending=5  [same]
+    STALLDIAG room walls villager=(992, 9, 1004) state=3 pending=5  [same]
+
+The interior is x=993, z=1002..1003 at y=6..8. The villager sits at **y=9**
+throughout — on the wall crown, not inside — first WANDERING (state 5), then
+SLEEPING (state 3). It is not building at all. The pending set never changes.
+
+**So the "walks in and correctly refuses to seal itself in" reading is dead**,
+and so is the "the erase disorders the project" reading. What is actually
+happening is the SAME defect as the roof: the builder gets on top of a structure
+and cannot get down.
+
+The pending cells corroborate it precisely:
+ - `(992,7,1002)` and `(992,8,1002)` are the two cells directly ABOVE the erased
+   door cell. With their support gone they are a floating column — the hardest
+   possible reach, and exactly what scaffolding exists for.
+ - `(994,6,1004)` upward is a whole corner column, untouched, on the far side.
+   Nothing is wrong with it except that the only builder is marooned on a wall
+   several cells away and never comes back down.
+
+### What this reframes
+
+The door is not the core problem, and "the building system needs a door concept"
+was the right observation attached to the wrong cause. The recurring defect, now
+seen three times tonight in three different guises, is:
+
+  **A villager that climbs onto something it built cannot reliably get off it.**
+
+ - Walls, layer 3: solved by scaffolding (measured 27/30 -> 30/30).
+ - Roof interior: unsolved — no scaffolding is ever built there, because the
+   support would stand inside a sealed room.
+ - Wall crown with a doorway present: unsolved — the builder ends up on the crown
+   and stays there, wandering then sleeping, while five cells go unbuilt.
+
+`SC-INV-2` defers DISMANTLING while someone is up there, which is necessary but
+not sufficient: it protects a descent that exists. It does nothing when no
+scaffolding was ever built where the villager actually stranded. The
+ADR-0009 climb mutations still firing 40 and 9 times a run are the same story
+from the other side — they are how villagers get UP, with no counterpart for
+getting DOWN that does not depend on scaffolding happening to be there.
+
+### The story that should be written next
+
+Not "doors" first. **"A builder always has a way down"** — a descent guarantee,
+in the same family as `villager-ai-024`'s ascent fix and with the same shape of
+lever: assert on a real booted game that after any construction job completes,
+`find_path(villager_cell, settlement ground)` is non-empty. That fails today in
+at least three distinct geometries, all of them reproduced above.
+
+Doors remain a real and separate need — a sealed room still cannot be entered,
+and that blocks the interior roof independently. But a door story written now
+would inherit an unsolved descent problem and look like it failed.
