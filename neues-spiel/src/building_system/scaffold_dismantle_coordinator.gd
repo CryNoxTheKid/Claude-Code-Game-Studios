@@ -70,6 +70,10 @@ var _roster_provider: Object
 ## a second, redundant drain.
 var _dismantling_owner_ids: Dictionary[int, bool] = {}
 
+## Owners whose served project is DONE but whose scaffolding is still somebody's
+## way down (SC-INV-2). Re-polled every tick until the structure is free.
+var _deferred_owner_ids: Dictionary[int, bool] = {}
+
 ## Scaffold cells this coordinator has already claimed a demolition step
 ## for -- guards against re-claiming the SAME cell on every subsequent tick
 ## while its job is still in flight (mirrors [ScaffoldErectionCoordinator]'s
@@ -171,8 +175,62 @@ func _owner_id_of(scaffold_projects: Array[BuildProject]) -> int:
 func _start_top_down_dismantle(owner_project_id: int) -> void:
 	if _dismantling_owner_ids.has(owner_project_id):
 		return
+	if _someone_is_still_up_there(owner_project_id):
+		# NOT an error, and NOT a reason to give up: the served project is done
+		# but a villager is still standing at or above the structure, so the
+		# scaffolding is still its way down. Park it as DEFERRED and let the
+		# tick re-poll — without this the owner would simply never be revisited,
+		# since the construction-completed trigger has already fired for good.
+		_deferred_owner_ids[owner_project_id] = true
+		return
+	_deferred_owner_ids.erase(owner_project_id)
 	_dismantling_owner_ids[owner_project_id] = true
 	_advance(owner_project_id)
+
+
+## SC-INV-2, the escape-route rule — the correction the first cut missed.
+##
+## SC-INV-1 protects the cell a villager STANDS IN. That is not enough: a
+## builder that climbed a scaffold to lay the top course is standing on the
+## structure's TOP, and removing anything below it takes away its descent even
+## though its own cell is untouched.
+##
+## Measured, not theorised. The first payoff-demo run with scaffolding wired
+## built 30/30 wall cells — the first time that had ever happened — and then
+## stalled: the roof reached only 10/12 and the villager slept five times at
+## y=10, above the walls (6..8) and above the roof plane (9). The wall project
+## reaches DONE while the ROOF project is still a separate, unfinished project,
+## so dismantle fired with the builder still up top.
+##
+## The rule this restores is the user's own: scaffolding exists while it is
+## NEEDED. "The project I served is done" is not "nobody needs this any more" —
+## exactly the same over-eagerness the erection side had before its persistence
+## gate.
+func _someone_is_still_up_there(owner_project_id: int) -> bool:
+	var scaffold_projects: Array[BuildProject] = _scaffold_projects_for_owner(owner_project_id)
+	if scaffold_projects.is_empty():
+		return false
+
+	var footprint: Dictionary[Vector2i, int] = {}
+	for project: BuildProject in scaffold_projects:
+		for cell: Vector3i in project.cells:
+			var ground := Vector2i(cell.x, cell.z)
+			var lowest: int = footprint.get(ground, cell.y)
+			footprint[ground] = mini(lowest, cell.y)
+	if footprint.is_empty():
+		return false
+
+	for column: Array in _occupied_body_columns():
+		for occupied: Vector3i in column:
+			var ground := Vector2i(occupied.x, occupied.z)
+			if not footprint.has(ground):
+				continue
+			# At or above the structure's own base in this column: the villager
+			# either stands on the scaffolding or on something it reached by
+			# way of it. Either way it still needs the descent.
+			if occupied.y >= footprint[ground]:
+				return true
+	return false
 
 
 ## [signal TimeTickSystem.tick] handler -- re-polls every currently-draining
@@ -180,6 +238,11 @@ func _start_top_down_dismantle(owner_project_id: int) -> void:
 ## ordinary movement decision, on any tick) is noticed promptly. See class
 ## doc comment's own "Re-poll cadence" paragraph.
 func _on_tick() -> void:
+	# Retry the deferred ones FIRST — a villager that has just climbed down
+	# should not have to wait an extra tick for its scaffolding to start
+	# coming apart.
+	for owner_id: int in _deferred_owner_ids.keys():
+		_start_top_down_dismantle(owner_id)
 	for owner_id: int in _dismantling_owner_ids.keys():
 		_advance(owner_id)
 	_cleanup_finished()

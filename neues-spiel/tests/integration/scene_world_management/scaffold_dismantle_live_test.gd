@@ -81,3 +81,38 @@ func test_a_cell_a_worker_stands_in_is_never_the_next_to_go() -> void:
 		column, worker_on_top
 	)
 	assert_int(next.y).is_equal(5)  # skipped the occupied top, took the one below
+
+
+func test_dismantle_defers_while_a_builder_is_still_up_on_the_structure() -> void:
+	# SC-INV-2, the escape-route rule. SC-INV-1 protects the cell a villager
+	# stands IN; this protects the way DOWN. Measured on the first real run with
+	# scaffolding wired: 30/30 walls built (a first), then the roof stalled at
+	# 10/12 and the villager slept five times at y=10 — above the walls and
+	# above the roof plane. The wall project reaches DONE while the ROOF is
+	# still a separate unfinished project, so dismantle fired with the builder
+	# still up top and took away its descent.
+	var valley: Valley = _boot_valley()
+	var coordinator: ScaffoldDismantleCoordinator = valley.get_scaffold_dismantle_coordinator()
+	var villager: VillagerAi = valley.get_villagers()[0]
+
+	# A scaffold structure directly under the villager's own column.
+	var ground: Vector3i = villager.get_current_cell()
+	var registry: ScaffoldRegistry = valley.get_scaffold_registry()
+	registry.add(ground)
+
+	var project := BuildProject.new(
+		valley.get_build_project_registry().allocate_project_id(),
+		BuildProject.Kind.SCAFFOLD,
+		1,
+	)
+	project.add_cell(
+		BlueprintCell.new(ground, BlueprintCell.MicroState.PLANNED, BlueprintCell.Category.SCAFFOLD)
+	)
+	valley.get_build_project_registry().register_project(project)
+
+	# The served project reports DONE while the villager stands on the
+	# structure: dismantling must NOT latch.
+	coordinator._start_top_down_dismantle(1)
+	assert_bool(coordinator.is_dismantling(1)).override_failure_message(
+		"dismantle must defer while a builder is still standing on or above the scaffolding"
+	).is_false()
