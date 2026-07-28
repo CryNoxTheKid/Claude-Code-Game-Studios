@@ -1227,3 +1227,59 @@ The corrected demo label is what makes this readable at a glance: "a villager
 asleep above the build site is stranded, not merely tired", with the cell height
 printed. The old wording is precisely what made the same symptom read as a
 pacing question a day earlier.
+
+---
+
+## MEASURED: what scaffolding actually contributes, and what it does not (2026-07-28)
+
+Two diagnostics were added to `tools/payoff_loop_demo.gd` and one control run
+was performed, because the previous claim ("scaffolding brought the walls from
+27/30 to 30/30") rested on a before/after coincidence rather than on evidence.
+
+### The diagnostic run
+
+    room walls: all 30 cells reached BUILT after 16.3s
+    roof construction result: 10 / 12 cells reached BUILT
+    scaffold cells standing at roof stage: 0 []
+    ADR-0009 climb mutations this run: self_seal_climb=40 marooned_relocation=9
+
+### The control run — erection response disabled, everything else identical
+
+    room walls: WAIT CAP (220s) hit with 27/30 cells BUILT
+    construction result: 27 / 30 wall cells reached BUILT
+    roof construction result: 9 / 12
+    bed construction result: 0 / 2
+
+### What that settles
+
+**Scaffolding's contribution is real and is exactly the last three wall cells.**
+Disable erection and the demo falls back to precisely the historical 27/30;
+enable it and the room closes. That is now measured, not inferred from a
+before/after pair — which is what I should have had before saying it.
+
+**The roof gets no scaffolding at all.** Zero cells standing at the roof stage,
+so the roof stall is not a dismantle problem and never was: the erection trigger
+simply never fires for roof cells. This is the open defect, and it is now
+located precisely rather than suspected.
+
+**The ADR-0009 retirement criterion is nowhere near met.** The TD ruled that the
+climb mutations retire on evidence — the counters reading zero — not on
+scaffolding landing. They read 40 and 9. Both mechanisms are carrying the build
+today, and scaffolding is the smaller contributor. Retiring the climb hack now
+would take the walls back below 27/30.
+
+### Why the roof gets nothing — the next thing to check
+
+A roof cell's blueprint is reported unreachable like any other, so either the
+persistence gate never accumulates three reports for it, or
+`ScaffoldErectionPlanner.plan_for_target` finds no supported column within the
+cantilever limit for a cell suspended over a finished room's interior. The
+second is the more likely of the two: a roof cell's support would have to rise
+from inside the room the walls just enclosed, and the planner prefers the column
+directly below the target.
+
+Cheapest next measurement, and it should come before any code: print
+`plan.has_plan()` and the report count per roof cell in
+`_on_job_reported_unreachable`, and run once. Reading the planner will not
+settle it — three hypotheses were read confidently tonight and all three were
+refuted by bisect.

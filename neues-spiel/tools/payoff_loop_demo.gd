@@ -355,6 +355,7 @@ func _run_demo() -> void:
 	await _attempt_claim_and_sleep_stages(valley, villager, build_project_registry)
 
 	_report_sleep_event_log()
+	_report_climb_telemetry()
 	print("payoff_loop_demo: REPORT — run complete. Quitting.")
 	get_tree().quit()
 
@@ -585,6 +586,7 @@ func _attempt_roof_stage(
 	await _wait_for_built(roof_cells, ROOF_WAIT_CAP_SEC, "roof", valley, villager)
 	var built_roof_count: int = _count_built(roof_cells)
 	print("payoff_loop_demo: REPORT — roof construction result: %d / %d cells reached BUILT" % [built_roof_count, roof_cells.size()])
+	_report_scaffold_state("roof stage")
 
 	if built_roof_count == roof_cells.size():
 		await _shoot_through_game_camera("04b-roofed")
@@ -942,3 +944,46 @@ func _save(image: Image, name_stem: String) -> void:
 		push_warning("payoff_loop_demo: save failed (%d) for %s" % [err, path])
 		return
 	print("payoff_loop_demo: saved %s" % path)
+
+
+## DIAGNOSTIC (2026-07-28): did scaffolding ever serve the ROOF, or did the
+## villager get up there through ADR-0009's climb mutation instead?
+##
+## The roof has stalled at 10/12 across two runs, with the villager asleep at
+## y=10 — on top of the roof plane, unable to descend. Three hypotheses read
+## plausibly and all three were refuted by bisect, so this run measures instead
+## of guessing. Non-zero counters mean the climb hack carried the villager up
+## and scaffolding never served the roof at all — which would move the defect
+## from the dismantle side to the erection trigger.
+func _report_climb_telemetry() -> void:
+	var valley: Node = _world.get_valley() if _world.has_method("get_valley") else null
+	if valley == null or not valley.has_method("get_villager_unstuck_telemetry"):
+		print("payoff_loop_demo: REPORT — climb telemetry unavailable (no accessor)")
+		return
+	var telemetry: Object = valley.get_villager_unstuck_telemetry()
+	if telemetry == null:
+		print("payoff_loop_demo: REPORT — climb telemetry unavailable (null)")
+		return
+	@warning_ignore("unsafe_method_access")
+	print("payoff_loop_demo: REPORT — ADR-0009 climb mutations this run: self_seal_climb=%d marooned_relocation=%d (both MUST be 0 once scaffolding serves every reachable-by-construction cell)" % [
+		telemetry.get_self_seal_climb_total(), telemetry.get_marooned_relocation_total(),
+	])
+
+
+## DIAGNOSTIC companion: what the scaffold registry actually holds at a given
+## stage. Empty during the roof stage would say the erection trigger never fires
+## for roof cells — either the persistence gate is never satisfied for them, or
+## no supported column exists within the cantilever limit above a finished room.
+func _report_scaffold_state(stage_label: String) -> void:
+	var valley: Node = _world.get_valley() if _world.has_method("get_valley") else null
+	if valley == null or not valley.has_method("get_scaffold_registry"):
+		return
+	var registry: Object = valley.get_scaffold_registry()
+	if registry == null:
+		print("payoff_loop_demo: REPORT — scaffold registry unavailable at %s" % stage_label)
+		return
+	@warning_ignore("unsafe_method_access")
+	var cells: Array = registry.get_cells()
+	print("payoff_loop_demo: REPORT — scaffold cells standing at %s: %d %s" % [
+		stage_label, cells.size(), str(cells.slice(0, mini(8, cells.size()))),
+	])
