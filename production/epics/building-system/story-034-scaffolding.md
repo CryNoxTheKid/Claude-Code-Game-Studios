@@ -1172,3 +1172,58 @@ load drifting, not a code regression. Its Cut-Lever Policy would permit reducing
 `PAIRS_PER_SEED`, and that lever was deliberately NOT pulled: coverage should not
 be traded away for a transient. Worth watching; if it settles above the ceiling
 on a genuinely quiet machine, escalate to the TD as the policy directs.
+
+---
+
+## SC-INV-2 did NOT fix the roof — hypothesis refuted by measurement (2026-07-28)
+
+Second payoff-demo run, with SC-INV-2 and the derived bands in place.
+
+    room walls: all 30 cells reached BUILT after 16.2s real time
+    roof construction result: 10 / 12 cells reached BUILT
+    D10 check: 5 SLEEPING episode(s)
+      (992,10,1004) (994,10,1002) (992,10,1003) (992,10,1001) (994,10,1003)
+
+Walls 30/30 again — reproducible, so scaffolding's win is real. Everything else
+is identical to the run before the fix: same roof count, same five sleeps, same
+five cells. The evidence PNGs came out BYTE-IDENTICAL to the previous run, which
+incidentally confirms the determinism requirement holds end to end.
+
+**So the hypothesis was wrong.** Dismantle taking away the builder's descent is
+not what stalls the roof. SC-INV-2 stays, because it provably defers dismantle
+while a builder is above the structure and its test passes on its own terms —
+but it was not this defect, and claiming otherwise would be taking credit for a
+coincidence.
+
+THREE REFUTED HYPOTHESES IN ONE NIGHT: the vertical escape loop, the
+served-cells latch, and now the dismantle trigger. Every one was plausible from
+reading the code. Every one fell to a bisect. Reading has not identified a
+single real cause tonight; measurement has identified all of them. That is worth
+more as a working rule than any of the individual fixes.
+
+### The defect, described more precisely than before
+
+y=10 is ON TOP of the roof plane — walls run 6..8, the roof is drafted at 9. The
+villager is therefore standing on built roof cells and cannot get down. The two
+missing roof cells are almost certainly the interior ones, which can only be
+reached by standing on already-built roof: exactly the "cannot chain two
+extensions" geometry `villager-ai-024` named for walls, one storey higher.
+
+### The next diagnostic, to run BEFORE writing any code
+
+Two prints and one run:
+
+1. `VillagerUnstuckTelemetry.get_self_seal_climb_total()` and
+   `get_marooned_relocation_total()` at the end of the demo. Non-zero means the
+   villager reached y=10 through the ADR-0009 climb mutation rather than through
+   scaffolding — which would mean scaffolding never served the roof at all and
+   the erection trigger simply never fires for roof cells.
+2. The `ScaffoldRegistry` contents during the roof stage. Empty there would say
+   either the persistence gate (3 reports) is never satisfied for roof cells, or
+   `plan_for_target` finds no supported column within the cantilever limit above
+   a finished room.
+
+The corrected demo label is what makes this readable at a glance: "a villager
+asleep above the build site is stranded, not merely tired", with the cell height
+printed. The old wording is precisely what made the same symptom read as a
+pacing question a day earlier.
