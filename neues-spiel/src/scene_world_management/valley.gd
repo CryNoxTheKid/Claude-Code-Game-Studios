@@ -1150,11 +1150,14 @@ func _assert_furniture_presenter_boot_invariant() -> void:
 ## [member scaffold_config] must not be left `null`.
 func _assert_scaffold_boot_invariant() -> void:
 	assert(_scaffold_registry != null, "Valley must construct exactly one ScaffoldRegistry")
-	# No assertion on the erection/dismantle coordinators yet: this piece
-	# deliberately does not construct them (see _wire_build_project_lifecycle's
-	# own comment for the measured reason). Asserting on something this piece
-	# does not build would be a lie about what is wired. Their invariants land
-	# with them.
+	assert(
+		_scaffold_erection_coordinator != null,
+		"Valley must construct exactly one ScaffoldErectionCoordinator"
+	)
+	assert(
+		_scaffold_dismantle_coordinator != null,
+		"Valley must construct exactly one ScaffoldDismantleCoordinator"
+	)
 	assert(_scaffold_presentation != null, "Valley must host exactly one ScaffoldPresentation instance")
 	assert(
 		_scaffold_presentation.scaffold_registry == _scaffold_registry,
@@ -1247,26 +1250,17 @@ func _wire_build_project_lifecycle() -> void:
 		_voxel_world, _scaffold_registry, _build_project_registry, _construction_job_queue,
 		_furniture_registry, scaffold_config,
 	)
-	# ERECTION AND DISMANTLE ARE DELIBERATELY NOT CONSTRUCTED HERE YET.
-	#
-	# This piece lands the scaffold OCCUPANCY tier only: the registry, its
-	# injection into every hosted villager, the nav-graph subscription and the
-	# presentation node. That much is green and provable on its own.
-	#
-	# ScaffoldErectionCoordinator is held back for a measured reason, not for
-	# tidiness. Connecting it to `job_reported_unreachable` makes
-	# villager-ai-024's regression test fall from 30/30 to 27/30 with a whole
-	# corner column left PLANNED and unclaimed — isolated by bisect: with the
-	# erection response disabled the test passes, with it enabled it fails.
-	# Scaffolding is supposed to MAKE cells reachable, so this is a real defect
-	# and not a budget effect, and it must be understood before it ships.
-	# ScaffoldDismantleCoordinator waits with it: dismantling has nothing to
-	# dismantle until erection runs.
-	#
-	# Both classes exist, are unit-tested, and are preserved in
-	# production/parked/story-034-valley-wiring-WIP.patch together with the
-	# erection path that was already observed working end to end against a real
-	# boot. Landing them is the next piece.
+	# The clock comes FROM the tick loop, never resolved here. Scene & World
+	# Management is forbidden to reference TimeTickSystem at all — there is a
+	# grep guard on this directory — and ConstructionTickLoop already resolves
+	# and holds the same instance during its own setup, so reading it back is
+	# both compliant and a guarantee that the two coordinators share one clock
+	# rather than racing two.
+	_scaffold_dismantle_coordinator = ScaffoldDismantleCoordinator.new(
+		_build_project_registry, _construction_tick_loop, _scaffold_registry,
+		_villager_roster_provider, _construction_tick_loop.time_tick_system,
+	)
+	_removal_tool.project_canceled.connect(_scaffold_dismantle_coordinator.on_project_canceled)
 
 
 ## The `blueprint_cells_created` chain (Story scene-007, Sub-scopes B + C) --
